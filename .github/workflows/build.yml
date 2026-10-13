@@ -1,0 +1,81 @@
+name: Windows 与 Linux
+
+# Run from scripts/release.sh (gh workflow run) or by hand from the Actions page.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+          - platform: linux
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux 依赖
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf xvfb
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target.noindex
+
+      - run: npm ci
+
+      - name: 冒烟测试（Windows）
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          npx tauri build --debug --no-bundle
+          ./tests/smoke/run.ps1
+
+      - name: 冒烟测试（Linux）
+        if: matrix.platform == 'linux'
+        run: |
+          npx tauri build --debug --no-bundle
+          xvfb-run -a tests/smoke/run.sh
+
+      - name: 打包
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          source scripts/release.conf
+          export MDPAD_UPDATE_ENDPOINT="$UPDATE_ENDPOINT"
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          CONFIG='{"bundle":{"createUpdaterArtifacts":true}}'
+          BUNDLE=src-tauri/target.noindex/release/bundle
+          mkdir -p out
+          if [ "${{ matrix.platform }}" = windows ]; then
+            npx tauri build --bundles nsis --config "$CONFIG"
+            cp $BUNDLE/nsis/*-setup.exe "out/MDPad-$VERSION-windows-x64-setup.exe"
+            cp $BUNDLE/nsis/*-setup.exe.sig "out/MDPad-$VERSION-windows-x64-setup.exe.sig"
+          else
+            npx tauri build --bundles appimage,deb --config "$CONFIG"
+            cp $BUNDLE/appimage/*.AppImage "out/MDPad-$VERSION-linux-x86_64.AppImage"
+            cp $BUNDLE/appimage/*.AppImage.sig "out/MDPad-$VERSION-linux-x86_64.AppImage.sig"
+            cp $BUNDLE/deb/*.deb "out/MDPad-$VERSION-linux-amd64.deb"
+          fi
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mdpad-${{ matrix.platform }}
+          path: out/*
+          if-no-files-found: error

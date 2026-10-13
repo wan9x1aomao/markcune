@@ -1,0 +1,3 @@
+[build]
+# ".noindex" keeps Spotlight (and Launch Services) away from the debug/release app bundles.
+target-dir = "target.noindex"

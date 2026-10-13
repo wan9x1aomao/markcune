@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>MDPad</title>
+  </head>
+  <body>
+    <header id="topbar" data-tauri-drag-region>
+      <button id="toggle-sidebar" class="icon-button" title="文件列表"></button>
+      <div class="doc-title" data-tauri-drag-region>
+        <span id="doc-name" data-tauri-drag-region></span>
+        <span class="separator" data-tauri-drag-region>·</span>
+        <button id="save-status" class="status"></button>
+      </div>
+      <div class="actions">
+        <button id="exit-focus" class="text-button">退出专注</button>
+        <button id="open-find" class="icon-button" title="搜索"></button>
+        <button id="open-more" class="icon-button" title="更多"></button>
+      </div>
+    </header>
+    <div id="update-banner" class="banner" hidden>
+      <span class="message"></span>
+      <span class="buttons"></span>
+    </div>
+    <div id="banner" class="banner" hidden>
+      <span class="message"></span>
+      <span class="buttons"></span>
+    </div>
+    <main id="workspace">
+      <aside id="sidebar"></aside>
+      <section id="content">
+        <div id="findbar" hidden>
+          <input class="query" placeholder="查找" spellcheck="false" />
+          <span class="count"></span>
+          <button class="icon-button previous" title="上一个"></button>
+          <button class="icon-button next" title="下一个"></button>
+          <button class="icon-button toggle-replace" title="替换"></button>
+          <button class="icon-button close" title="关闭"></button>
+          <div class="replace-row">
+            <input class="replacement" placeholder="替换为" spellcheck="false" />
+            <button class="text-button replace-one">替换</button>
+            <button class="text-button replace-all">全部替换</button>
+          </div>
+        </div>
+        <div id="panes">
+          <div id="source-pane" class="pane" hidden></div>
+          <div id="rich-pane" class="pane"><div id="editor"></div></div>
+        </div>
+      </section>
+      <aside id="outline" hidden></aside>
+    </main>
+    <div id="toast" hidden></div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

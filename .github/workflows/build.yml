@@ -4,8 +4,25 @@ name: Windows 与 Linux
 on:
   workflow_dispatch:
 
+# Build outputs go to a draft release (fast to download, not public) instead of artifacts.
+permissions:
+  contents: write
+
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 草稿版本
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          gh release view "v$VERSION" >/dev/null 2>&1 || \
+            gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "MDPad $VERSION" --notes "构建产物，由 scripts/release.sh 收集后发布到官网。"
+
   build:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -74,8 +91,10 @@ jobs:
           fi
           ls -la out
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mdpad-${{ matrix.platform }}
-          path: out/*
-          if-no-files-found: error
+      - name: 上传到草稿版本
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          gh release upload "v$VERSION" out/* --clobber

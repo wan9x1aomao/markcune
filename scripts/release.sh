@@ -70,8 +70,7 @@ rm -rf "$STAGE"
 echo "等待 Windows / Linux 打包完成…"
 "$GH" run watch "$RUN" --exit-status --interval 30 >/dev/null || {
   echo "GitHub Actions 打包失败，详情：$("$GH" run view "$RUN" --json url --jq .url)"; exit 1; }
-"$GH" run download "$RUN" -D "$OUT/ci"
-mv "$OUT"/ci/*/* "$OUT/" && rm -rf "$OUT/ci"
+"$GH" release download "v$VERSION" -D "$OUT" --clobber
 
 WIN="MDPad-${VERSION}-windows-x64-setup.exe"
 LINUX="MDPad-${VERSION}-linux-x86_64.AppImage"

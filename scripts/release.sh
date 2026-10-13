@@ -13,6 +13,11 @@ cd "$(dirname "$0")/.."
 VERSION="${1:?用法：scripts/release.sh <版本号> [更新说明]}"
 NOTES="${2:-}"
 GH="${GH:-$HOME/.local/bin/gh}"
+# github.com is often only reachable through the system proxy (e.g. Clash); use it if set.
+if [[ -z "${HTTPS_PROXY:-}" ]] && scutil --proxy 2>/dev/null | grep -q "HTTPSEnable : 1"; then
+  PROXY="http://$(scutil --proxy | awk '/HTTPSProxy/ {print $3}'):$(scutil --proxy | awk '/HTTPSPort/ {print $3}')"
+  export HTTPS_PROXY="$PROXY" https_proxy="$PROXY"
+fi
 SITE_DIR=""
 source scripts/release.conf
 [[ -n "$UPDATE_ENDPOINT" && -n "$DOWNLOAD_BASE_URL" ]] || { echo "请先在 scripts/release.conf 里填写 UPDATE_ENDPOINT 和 DOWNLOAD_BASE_URL"; exit 1; }

@@ -2145,7 +2145,7 @@ dependencies = [
 
 [[package]]
 name = "mdpad"
-version = "3.2.1"
+version = "3.2.2"
 dependencies = [
  "base64 0.22.1",
  "block2",

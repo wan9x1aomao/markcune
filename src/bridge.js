@@ -32,6 +32,7 @@ export const api = {
   pickImage: () => invoke('pick_image'),
   openInNewWindow: (path) => invoke('open_in_new_window', { path }),
   newWindow: () => invoke('new_window'),
+  nativeAction: (id) => invoke('native_action', { id }),
   openUrl: (url) => invoke('open_url', { url }),
   reveal: (path) => invoke('reveal', { path }),
   print: () => invoke('print_page'),

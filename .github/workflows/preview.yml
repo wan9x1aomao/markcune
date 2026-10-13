@@ -1,0 +1,40 @@
+name: Windows 界面预览
+
+# Launches a debug build on Windows and captures a screenshot (for checking the UI).
+on:
+  workflow_dispatch:
+
+jobs:
+  screenshot:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target.noindex
+      - run: npm ci
+      - run: npx tauri build --debug --no-bundle
+      - name: 截图
+        shell: pwsh
+        run: |
+          $work = Join-Path $env:RUNNER_TEMP 'preview'
+          Copy-Item -Recurse tests/smoke $work
+          $env:MDPAD_DATA_DIR = Join-Path $work '.data'
+          $env:MDPAD_TEST_JS = "await new Promise((r) => setTimeout(r, 20000)); return 'done';"
+          Start-Process -FilePath src-tauri/target.noindex/debug/mdpad.exe -ArgumentList "`"$work\sample.md`""
+          Start-Sleep -Seconds 12
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+          $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          $bitmap.Save("$PWD\windows.png", [System.Drawing.Imaging.ImageFormat]::Png)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-screenshot
+          path: windows.png

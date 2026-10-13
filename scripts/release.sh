@@ -66,11 +66,7 @@ BUNDLE=src-tauri/target.noindex/release/bundle/macos
 MAC="MDPad-${VERSION}-macOS-arm64"
 cp "$BUNDLE/MDPad.app.tar.gz" "$OUT/$MAC.tar.gz"
 cp "$BUNDLE/MDPad.app.tar.gz.sig" "$OUT/$MAC.tar.gz.sig"
-STAGE=$(mktemp -d)
-cp -R "$BUNDLE/MDPad.app" "$STAGE/"
-ln -s /Applications "$STAGE/应用程序"
-hdiutil create -quiet -volname "MDPad" -srcfolder "$STAGE" -ov -format UDZO "$OUT/$MAC.dmg"
-rm -rf "$STAGE"
+scripts/make-dmg.sh "$BUNDLE/MDPad.app" "$OUT/$MAC.dmg"
 
 echo "等待 Windows / Linux 打包完成…"
 "$GH" run watch "$RUN" --exit-status --interval 30 >/dev/null || {

@@ -36,6 +36,11 @@ fn create_window(app: &AppHandle, startup: Startup) {
         .inner_size(1100.0, 760.0)
         .min_inner_size(520.0, 360.0)
         .disable_drag_drop_handler();
+    // Windows: the page draws its own title bar with window buttons (no native title or menu bar).
+    #[cfg(windows)]
+    {
+        builder = builder.decorations(false).shadow(true);
+    }
     #[cfg(target_os = "macos")]
     {
         // The page's top bar doubles as the title bar.
@@ -172,6 +177,16 @@ fn handle_menu(app: &AppHandle, id: &str) {
     }
 }
 
+/// Window-level actions the page triggers itself on Windows and Linux, which have no native menu.
+#[tauri::command]
+fn native_action(app: AppHandle, id: String) {
+    if matches!(id.as_str(), "new-window" | "quit" | "zoom-in" | "zoom-out" | "zoom-reset" | "fullscreen") {
+        handle_menu(&app, &id);
+    }
+}
+
+/// The native menu bar, used on macOS only.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let mac = cfg!(target_os = "macos");
     let item = |id: &str, text: &str, accelerator: Option<&str>| MenuItem::with_id(app, id, text, true, accelerator);
@@ -733,6 +748,10 @@ fn main() {
         }
     }));
 
+    // Windows and Linux use the page's own menu ("···", ⌘K) and shortcuts instead of a menu bar.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(build_menu).on_menu_event(|app, event| handle_menu(app, event.id().as_ref()));
+
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -758,11 +777,10 @@ fn main() {
             });
             Ok(())
         })
-        .menu(build_menu)
-        .on_menu_event(|app, event| handle_menu(app, event.id().as_ref()))
         .on_window_event(on_window_event)
         .invoke_handler(tauri::generate_handler![
             window_init,
+            native_action,
             set_close_guard,
             close_window,
             cancel_quit,

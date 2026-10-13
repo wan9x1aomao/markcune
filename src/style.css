@@ -178,6 +178,37 @@ input {
   display: none;
 }
 
+/* Windows: the top bar is the title bar, with caption buttons on the right. */
+html.windows #topbar {
+  padding-right: 0;
+}
+#window-controls {
+  display: flex;
+  align-self: stretch;
+  margin-left: 6px;
+}
+#window-controls button {
+  width: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+}
+#window-controls button:hover {
+  background: var(--bg-hover);
+}
+#window-controls button.close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+#window-controls svg {
+  width: 10px;
+  height: 10px;
+}
+body.focus #window-controls {
+  display: flex;
+}
+
 /* Banner (external changes, failures) */
 
 .banner {

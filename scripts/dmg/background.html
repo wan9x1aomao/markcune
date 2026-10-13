@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #faf8f4; --ink: #1c2230; --navy: #2b3448; --muted: #8a91a0; --faint: #b9bfcc;
+    --line: #e6e3dc; --accent: #4f6bed;
+    --font: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 640px; height: 400px; overflow: hidden; }
+  body {
+    position: relative; font-family: var(--font); color: var(--ink);
+    background:
+      radial-gradient(circle at 1px 1px, #e4e0d7 1px, transparent 1.2px) 0 0 / 20px 20px,
+      var(--bg);
+  }
+  /* Fade the dot grid out toward the edges so it reads as paper, not graph paper. */
+  body::before {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(ellipse 70% 65% at 50% 52%, transparent 40%, var(--bg) 100%);
+  }
+  .layer { position: absolute; inset: 0; }
+
+  .head { position: absolute; top: 38px; left: 0; right: 0; text-align: center; }
+  .head h1 { font-size: 22px; font-weight: 600; letter-spacing: .5px; }
+  .head h1 .hash { font-family: var(--mono); font-weight: 500; color: var(--accent); opacity: .55; margin-right: 8px; }
+  .head p { margin-top: 8px; font-size: 12.5px; color: var(--muted); letter-spacing: .3px; }
+
+  /* Soft cards the two Finder icons sit on (icon centres: 160,200 and 480,200). */
+  .slot {
+    position: absolute; top: 118px; width: 156px; height: 172px; border-radius: 22px;
+    background: rgba(255,255,255,.72);
+    box-shadow: 0 1px 2px rgba(28,34,48,.05), 0 10px 30px rgba(28,34,48,.07);
+    border: 1px solid rgba(230,227,220,.9);
+  }
+  .slot.app  { left: 82px; }
+  .slot.apps { left: 402px; border-style: dashed; border-color: #cfd6f6; background: rgba(239,241,253,.55); }
+
+  .link {
+    position: absolute; top: 212px; left: 0; right: 0; text-align: center;
+    font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+  }
+  .link b { color: var(--navy); font-weight: 600; }
+  .link i { font-style: normal; color: var(--accent); }
+
+  .foot {
+    position: absolute; bottom: 26px; left: 0; right: 0; text-align: center;
+    font-size: 11px; color: var(--muted); letter-spacing: .2px;
+  }
+  .foot kbd {
+    font-family: var(--font); font-size: 10.5px; color: var(--navy);
+    padding: 1px 6px; border-radius: 5px; background: #fff; border: 1px solid var(--line);
+    box-shadow: 0 1px 0 var(--line);
+  }
+</style>
+</head>
+<body>
+  <div class="layer">
+    <div class="head">
+      <h1><span class="hash">#</span>拖进「应用程序」，就装好了</h1>
+      <p>本地 Markdown 所见即所得编辑器</p>
+    </div>
+
+    <div class="slot app"></div>
+    <div class="slot apps"></div>
+
+    <svg class="layer" width="640" height="400" viewBox="0 0 640 400">
+      <defs>
+        <marker id="tip" viewBox="0 0 12 12" refX="7" refY="6" markerWidth="12" markerHeight="12"
+                markerUnits="userSpaceOnUse" orient="auto">
+          <path d="M2 2 L8 6 L2 10" fill="none" stroke="#4f6bed" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </marker>
+      </defs>
+      <path d="M256 186 C 296 148, 344 148, 384 184" fill="none" stroke="#4f6bed" stroke-width="2"
+            stroke-linecap="round" stroke-dasharray="1 7" marker-end="url(#tip)"/>
+    </svg>
+
+    <div class="link">[<b>MDPad</b>](<i>/Applications</i>)</div>
+
+    <div class="foot">
+      首次打开被拦截？前往 <kbd>系统设置</kbd> → <kbd>隐私与安全性</kbd>，点击 <kbd>仍要打开</kbd>
+    </div>
+  </div>
+</body>
+</html>

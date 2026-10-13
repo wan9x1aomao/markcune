@@ -26,6 +26,7 @@ export const COMMANDS = [
   { id: 'toggle-focus', title: '专注模式', keys: 'F8' },
   { id: 'toggle-sidebar', title: '文件列表', keys: 'Mod+Shift+L' },
   { id: 'toggle-outline', title: '大纲', keys: 'Mod+Shift+T' },
+  { id: 'command-palette', title: '命令面板…', keys: 'Mod+K' },
   { id: 'check-update', title: '检查更新…' },
   { id: 'close', title: '关闭窗口', keys: 'Mod+W' },
 ];

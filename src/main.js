@@ -8,6 +8,7 @@ import { icons } from './icons.js';
 import { createOutline } from './outline.js';
 import { openPalette } from './palette.js';
 import { basename, dirname, isInside, relative, samePath, splitExtension } from './paths.js';
+import { installShortcuts } from './shortcuts.js';
 import { createSidebar } from './sidebar.js';
 import { createUpdater } from './update.js';
 import { formatKeys, prompt, showMenu, toast } from './ui.js';
@@ -585,6 +586,11 @@ const actions = {
   'toggle-sidebar': () => setPanel('sidebar', !app.settings.sidebar),
   'toggle-outline': () => setPanel('outline', !app.settings.outline),
   'check-update': () => updater.check(false),
+  // Handled by the shell (native menu items on macOS).
+  'zoom-in': () => api.nativeAction('zoom-in'),
+  'zoom-out': () => api.nativeAction('zoom-out'),
+  'zoom-reset': () => api.nativeAction('zoom-reset'),
+  fullscreen: () => api.nativeAction('fullscreen'),
   close: () => appWindow.close(),
 };
 for (const id of ['bold', 'italic', 'strikethrough', 'inline-code', 'undo', 'redo']) {
@@ -618,8 +624,23 @@ function showMore(anchor) {
     const command = COMMANDS.find((c) => c.id === id);
     return { label: command.title, hint: formatKeys(command.keys), checked, run: () => run(id) };
   };
+  // Without a native menu bar (Windows, Linux), file actions live here too.
+  const fileItems = isMac
+    ? []
+    : [
+        item('new-window'),
+        item('open-file'),
+        item('open-folder'),
+        item('quick-open'),
+        'separator',
+        item('save'),
+        item('save-as'),
+        item('rename'),
+        'separator',
+      ];
   showMenu(
     [
+      ...fileItems,
       item('toggle-source', app.mode === 'source' && !app.split),
       item('toggle-split', app.split),
       item('toggle-focus', app.focus),
@@ -739,10 +760,30 @@ appWindow.onResized(async () => {
   document.documentElement.classList.toggle('fullscreen', await appWindow.isFullscreen());
 });
 
+function setupWindowControls() {
+  const controls = $('window-controls');
+  controls.hidden = false;
+  const maximize = controls.querySelector('.maximize');
+  controls.querySelector('.minimize').innerHTML = icons.minimize;
+  controls.querySelector('.close').innerHTML = icons.closeWindow;
+  const sync = async () => {
+    const maximized = await appWindow.isMaximized();
+    maximize.innerHTML = maximized ? icons.restore : icons.maximize;
+    maximize.title = maximized ? '还原' : '最大化';
+  };
+  controls.querySelector('.minimize').addEventListener('click', () => appWindow.minimize());
+  maximize.addEventListener('click', () => appWindow.toggleMaximize());
+  controls.querySelector('.close').addEventListener('click', () => appWindow.close());
+  appWindow.onResized(sync);
+  sync();
+}
+
 // Startup
 
 const init = await api.init();
 document.documentElement.classList.add(init.platform);
+if (!isMac) installShortcuts({ run, isRichEditor: () => app.editor?.kind === 'rich' });
+if (init.platform === 'windows') setupWindowControls();
 app.settings = { ...app.settings, ...init.settings };
 app.recentFiles = init.recentFiles;
 els.sidebar.hidden = !app.settings.sidebar;

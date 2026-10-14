@@ -21,7 +21,7 @@ const isList = (node) => node.type.name === 'bullet_list' || node.type.name === 
 
 /**
  * For the editor's ctx, returns serialize(doc), producing the same markdown as Milkdown's
- * serializer, and warm(doc, ms), which fills the cache for about `ms` milliseconds and returns
+ * serializer, serializeAsync(doc), the same without blocking the page, and warm(doc, ms), which fills the cache for about `ms` milliseconds and returns
  * whether anything remains (so the first save after opening a large document is cheap too).
  */
 export function incrementalSerializer(ctx) {
@@ -77,6 +77,22 @@ export function incrementalSerializer(ctx) {
     return markdown && !markdown.endsWith('\n') && !markdown.endsWith('\r') ? markdown + '\n' : markdown;
   };
 
+  /** Like serialize, but yields to the page every ~12 ms while filling the cache. */
+  const serializeAsync = async (doc) => {
+    const units = unitsOf(doc);
+    if (!units) return serializer(doc);
+    const missing = units.filter((nodes) => cached(nodes) === undefined);
+    let deadline = performance.now() + 12;
+    for (let i = 0; i < missing.length; i += 20) {
+      if (!fill(missing.slice(i, i + 20))) return serializer(doc);
+      if (performance.now() > deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        deadline = performance.now() + 12;
+      }
+    }
+    return serialize(doc);
+  };
+
   let warming = { doc: null, units: [], next: 0 };
   const warm = (doc, ms) => {
     const deadline = performance.now() + ms;
@@ -94,5 +110,5 @@ export function incrementalSerializer(ctx) {
     return warming.next < units.length;
   };
 
-  return { serialize, warm };
+  return { serialize, serializeAsync, warm };
 }

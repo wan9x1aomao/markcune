@@ -172,7 +172,7 @@ export async function createRichEditor(options) {
   if (readonly) crepe.setReadonly(true);
 
   const view = crepe.editor.action((ctx) => ctx.get(editorViewCtx));
-  const { serialize, warm } = crepe.editor.action(incrementalSerializer);
+  const { serialize, serializeAsync, warm } = crepe.editor.action(incrementalSerializer);
   // Fill the markdown cache in small slices while idle, so the first save is cheap too.
   let warmTimer = setTimeout(function warmUp() {
     warmTimer = warm(view.state.doc, 12) ? setTimeout(warmUp, 20) : null;
@@ -205,6 +205,8 @@ export async function createRichEditor(options) {
     view,
     crepe,
     getMarkdown: () => serialize(view.state.doc),
+    /** The markdown of a snapshot (default: the current document), without blocking the page. */
+    getMarkdownAsync: (snapshot = view.state.doc) => serializeAsync(snapshot),
     /** An immutable value identifying the current document, for matches(). */
     snapshot: () => view.state.doc,
     /** True if the document is the same as when `snapshot` was taken (unchanged parts compare by identity). */

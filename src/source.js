@@ -113,6 +113,7 @@ export function createSourceEditor({ root, content, scroller, onChange }) {
     kind: 'source',
     view,
     getMarkdown: () => view.state.doc.toString(),
+    getMarkdownAsync: async (snapshot = view.state.doc) => snapshot.toString(),
     snapshot: () => view.state.doc,
     matches: (snapshot) => !!snapshot && (snapshot === view.state.doc || view.state.doc.eq(snapshot)),
     setMarkdown: (text) => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }),

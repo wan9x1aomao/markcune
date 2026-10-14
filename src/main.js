@@ -306,10 +306,19 @@ async function writeNow(force) {
     return;
   }
   performance.mark('mdpad:save-start');
+  // Serialize the snapshot (documents are immutable) without blocking typing; edits made
+  // meanwhile set app.pending again and get their own save.
   const snapshot = app.editor.snapshot();
-  const content = app.editor.getMarkdown();
-  performance.mark('mdpad:save-serialized');
   app.pending = false;
+  let content;
+  try {
+    content = await app.editor.getMarkdownAsync(snapshot);
+  } catch (error) {
+    app.pending = true;
+    setStatus('error', String(error));
+    return;
+  }
+  performance.mark('mdpad:save-serialized');
   try {
     if (app.doc.path) {
       if (content === app.doc.saved && !force) {

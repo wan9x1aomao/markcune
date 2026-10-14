@@ -4,6 +4,7 @@ import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame.css';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { redoCommand, undoCommand } from '@milkdown/kit/plugin/history';
+import { listener } from '@milkdown/kit/plugin/listener';
 import {
   toggleEmphasisCommand,
   toggleInlineCodeCommand,
@@ -144,6 +145,9 @@ export async function createRichEditor(options) {
     .use(findPlugin)
     .use(imageActions({ onReplace: options.pickImage, onCaption: options.promptCaption }))
     .use(changeWatcher(() => options.onChange?.()));
+  // Crepe always installs Milkdown's listener plugin, which serializes the whole document when the
+  // editor starts even though nothing listens. Nothing here uses it (changeWatcher replaces it).
+  await crepe.editor.remove(listener);
   await crepe.create();
   if (readonly) crepe.setReadonly(true);
 
@@ -175,6 +179,10 @@ export async function createRichEditor(options) {
     view,
     crepe,
     getMarkdown: () => crepe.getMarkdown(),
+    /** An immutable value identifying the current document, for matches(). */
+    snapshot: () => view.state.doc,
+    /** True if the document is the same as when `snapshot` was taken (unchanged parts compare by identity). */
+    matches: (snapshot) => !!snapshot && (snapshot === view.state.doc || view.state.doc.eq(snapshot)),
     setMarkdown: (markdown) => crepe.editor.action(replaceAll(markdown)),
     focus: () => view.focus(),
     command(id) {

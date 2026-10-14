@@ -35,8 +35,12 @@ const els = {
 const app = {
   settings: { sidebar: true, outline: false },
   root: null,
-  /** raw: the file as on disk; saved: the editor's markdown when it last matched the disk/draft. */
-  doc: { path: null, draftId: null, raw: '', saved: '' },
+  /**
+   * raw: the file as on disk. snapshot: the editor's document (see editor.snapshot()) when it last
+   * matched the disk/draft, or null if unknown. saved: the markdown last written, or null if unknown.
+   * Comparing snapshots avoids serializing the whole document just to learn that nothing changed.
+   */
+  doc: { path: null, draftId: null, raw: '', snapshot: null, saved: null },
   hasDraftContent: false,
   mode: 'rich',
   split: false,
@@ -243,6 +247,7 @@ function editorOptions() {
 }
 
 async function mountEditor(content, position) {
+  performance.mark('mdpad:mount-start');
   const previous = app.editor;
   app.editor = null;
   await previous?.destroy();
@@ -272,13 +277,16 @@ async function mountEditor(content, position) {
   } else {
     editor = await createRichEditor({ ...editorOptions(), root: els.editorRoot, content, scroller: els.richPane, onChange });
   }
-  app.doc.saved = editor.getMarkdown();
+  performance.mark('mdpad:mount-created');
+  app.doc.snapshot = editor.snapshot();
+  performance.mark('mdpad:mount-serialized');
   app.editor = editor;
   editor.setPosition(position);
   refreshOutline();
   findbar.refresh();
   syncModeSwitch();
   updateEmpty();
+  performance.mark('mdpad:mount-done');
 }
 
 function onChange() {
@@ -304,11 +312,30 @@ function save({ force = false } = {}) {
 async function writeNow(force) {
   if (!app.editor || (!app.pending && !force)) return;
   if (app.status === 'conflict' && !force) return;
-  const content = app.editor.getMarkdown();
+  if (app.doc.path && !force && app.editor.matches(app.doc.snapshot)) {
+    // Edited back to what is on disk (e.g. typed, then undid it).
+    app.pending = false;
+    setStatus('saved');
+    return;
+  }
+  performance.mark('mdpad:save-start');
+  // Serialize the snapshot (documents are immutable) without blocking typing; edits made
+  // meanwhile set app.pending again and get their own save.
+  const snapshot = app.editor.snapshot();
   app.pending = false;
+  let content;
+  try {
+    content = await app.editor.getMarkdownAsync(snapshot);
+  } catch (error) {
+    app.pending = true;
+    setStatus('error', String(error));
+    return;
+  }
+  performance.mark('mdpad:save-serialized');
   try {
     if (app.doc.path) {
       if (content === app.doc.saved && !force) {
+        app.doc.snapshot = snapshot;
         setStatus('saved');
         return;
       }
@@ -318,7 +345,9 @@ async function writeNow(force) {
         showConflict(result.reason);
         return;
       }
+      performance.mark('mdpad:save-written');
       app.doc.saved = content;
+      app.doc.snapshot = snapshot;
       app.doc.raw = content;
       hideBanner();
       setStatus(app.pending ? 'saving' : 'saved');
@@ -326,11 +355,13 @@ async function writeNow(force) {
       if (app.doc.draftId) await api.draftDelete();
       app.doc.draftId = null;
       app.doc.saved = content;
+      app.doc.snapshot = snapshot;
       app.hasDraftContent = false;
       setStatus('idle');
     } else {
       app.doc.draftId = await api.draftWrite(content);
       app.doc.saved = content;
+      app.doc.snapshot = snapshot;
       app.hasDraftContent = true;
       setStatus(app.pending ? 'saving' : 'draft');
     }
@@ -349,6 +380,7 @@ async function saveNow() {
 async function saveAs() {
   await app.saving;
   if (!app.editor) return false;
+  const snapshot = app.editor.snapshot();
   const content = app.editor.getMarkdown();
   let result;
   try {
@@ -358,7 +390,7 @@ async function saveAs() {
     return false;
   }
   if (!result) return false;
-  app.doc = { path: result.path, draftId: null, raw: result.content, saved: content };
+  app.doc = { path: result.path, draftId: null, raw: result.content, snapshot, saved: result.content };
   app.hasDraftContent = false;
   app.pending = false;
   hideBanner();
@@ -379,6 +411,7 @@ async function reloadFromDisk() {
   try {
     const opened = await api.readDocument(app.doc.path);
     app.doc.raw = opened.content;
+    app.doc.saved = null;
     app.pending = false;
     await mountEditor(opened.content, position);
     setStatus('saved');
@@ -424,13 +457,15 @@ async function openFileNow(path) {
   rememberPosition();
   let opened;
   try {
+    performance.mark('mdpad:read-start');
     opened = await api.readDocument(path);
+    performance.mark('mdpad:read-done');
   } catch (error) {
     toast(`无法打开“${basename(path)}”：${error}`);
     return;
   }
   if (app.doc.draftId) await api.draftDelete();
-  app.doc = { path: opened.path, draftId: null, raw: opened.content, saved: '' };
+  app.doc = { path: opened.path, draftId: null, raw: opened.content, snapshot: null, saved: null };
   app.hasDraftContent = false;
   app.pending = false;
   hideBanner();
@@ -494,16 +529,18 @@ async function renameCurrent() {
 
 async function setMode(mode, split) {
   if (!app.editor) return;
-  const current = app.editor.getMarkdown();
+  const matches = app.editor.matches(app.doc.snapshot);
   // Unedited documents are shown exactly as stored on disk.
-  const unchanged = app.editor.kind === 'rich' && current === app.doc.saved && app.doc.raw;
-  const content = mode === 'source' && unchanged ? app.doc.raw : current;
+  const unchanged = app.editor.kind === 'rich' && matches && app.doc.raw;
+  const content = mode === 'source' && unchanged ? app.doc.raw : app.editor.getMarkdown();
   const pane = app.mode === 'source' ? els.sourcePane : els.richPane;
   const ratio = pane.scrollTop / Math.max(1, pane.scrollHeight - pane.clientHeight);
   const pending = app.pending;
   app.mode = mode;
   app.split = split;
   await mountEditor(content);
+  // Edits not yet on disk must still be written, so the new editor doesn't match the disk.
+  if (!matches) app.doc.snapshot = null;
   if (pending) onChange();
   const next = mode === 'source' ? els.sourcePane : els.richPane;
   requestAnimationFrame(() => (next.scrollTop = ratio * (next.scrollHeight - next.clientHeight)));

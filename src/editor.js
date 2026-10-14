@@ -6,7 +6,10 @@ import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame.css';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { redoCommand, undoCommand } from '@milkdown/kit/plugin/history';
+import { listener } from '@milkdown/kit/plugin/listener';
 import {
+  syncHeadingIdPlugin,
+  syncListOrderPlugin,
   toggleEmphasisCommand,
   toggleInlineCodeCommand,
   toggleStrongCommand,
@@ -14,9 +17,20 @@ import {
 import { toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
 import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state';
 import { $prose, callCommand, replaceAll } from '@milkdown/kit/utils';
+import { createLazy, lazyController } from './lazy.js';
 import { preserveMarkdown } from './markdown.js';
 import { codeTheme } from './code-theme.js';
-import { findKey, findPlugin, imageActions, linkPaste, markdownMarkers } from './plugins.js';
+import { chunkedParsing } from './parse.js';
+import { incrementalSerializer } from './serialize.js';
+import {
+  findKey,
+  findPlugin,
+  imageActions,
+  linkPaste,
+  markdownMarkers,
+  syncHeadingIds,
+  syncListOrder,
+} from './plugins.js';
 
 const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 if (dark) await import('@milkdown/crepe/theme/frame-dark.css');
@@ -142,17 +156,32 @@ export async function createRichEditor(options) {
       [Crepe.Feature.Latex]: { katexOptions: { throwOnError: false } },
     },
   });
+  const lazy = createLazy(scroller);
   crepe.editor
     .config(preserveMarkdown)
+    .use(chunkedParsing)
+    .use(lazy.views)
+    .use(lazy.plugin)
     .use(markdownMarkers)
     .use(linkPaste)
     .use(findPlugin)
     .use(imageActions({ onReplace: options.pickImage, onCaption: options.promptCaption }))
+    .use(syncHeadingIds)
+    .use(syncListOrder)
     .use(changeWatcher(() => options.onChange?.()));
+  // Crepe always installs Milkdown's listener plugin, which serializes the whole document when the
+  // editor starts even though nothing listens. Nothing here uses it (changeWatcher replaces it).
+  // The two sync plugins are replaced by faster copies (see plugins.js).
+  await crepe.editor.remove([listener, syncHeadingIdPlugin, syncListOrderPlugin]);
   await crepe.create();
   if (readonly) crepe.setReadonly(true);
 
   const view = crepe.editor.action((ctx) => ctx.get(editorViewCtx));
+  const { serialize, serializeAsync, warm } = crepe.editor.action(incrementalSerializer);
+  // Fill the markdown cache in small slices while idle, so the first save is cheap too.
+  let warmTimer = setTimeout(function warmUp() {
+    warmTimer = warm(view.state.doc, 12) ? setTimeout(warmUp, 20) : null;
+  }, 300);
 
   // ⌘/Ctrl + click opens links in the browser.
   const onClick = (event) => {
@@ -168,6 +197,7 @@ export async function createRichEditor(options) {
   relabelLanguageButtons(root);
 
   const scrollMatch = (match) => {
+    lazyController(view)?.reveal(match.from);
     const { node } = view.domAtPos(match.from);
     const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
     element?.scrollIntoView({ block: 'center' });
@@ -178,7 +208,14 @@ export async function createRichEditor(options) {
   return {
     kind: 'rich',
     view,
-    getMarkdown: () => crepe.getMarkdown(),
+    crepe,
+    getMarkdown: () => serialize(view.state.doc),
+    /** The markdown of a snapshot (default: the current document), without blocking the page. */
+    getMarkdownAsync: (snapshot = view.state.doc) => serializeAsync(snapshot),
+    /** An immutable value identifying the current document, for matches(). */
+    snapshot: () => view.state.doc,
+    /** True if the document is the same as when `snapshot` was taken (unchanged parts compare by identity). */
+    matches: (snapshot) => !!snapshot && (snapshot === view.state.doc || view.state.doc.eq(snapshot)),
     setMarkdown: (markdown) => crepe.editor.action(replaceAll(markdown)),
     focus: () => view.focus(),
     command(id) {
@@ -198,6 +235,7 @@ export async function createRichEditor(options) {
       return headings;
     },
     scrollToHeading(heading) {
+      lazyController(view)?.reveal(heading.pos);
       view.nodeDOM(heading.pos)?.scrollIntoView({ block: 'start' });
       const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, heading.pos + 1));
       view.dispatch(tr);
@@ -205,21 +243,45 @@ export async function createRichEditor(options) {
     },
     /** Index of the heading at the top of the visible area. */
     activeHeading(headings) {
+      // Headings are in document order, so their tops increase: binary search for the last one
+      // above the line instead of measuring every heading.
       const top = scroller.getBoundingClientRect().top + 80;
+      const above = (i) => {
+        const dom = view.nodeDOM(headings[i].pos);
+        return !!dom && dom.getBoundingClientRect().top <= top;
+      };
+      let lo = 0;
+      let hi = headings.length - 1;
       let active = -1;
-      headings.forEach((heading, i) => {
-        const dom = view.nodeDOM(heading.pos);
-        if (dom && dom.getBoundingClientRect().top <= top) active = i;
-      });
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (above(mid)) {
+          active = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
       return active;
     },
-    getPosition: () => ({ mode: 'rich', anchor: view.state.selection.anchor, scrollTop: scroller.scrollTop }),
+    getPosition() {
+      const position = { mode: 'rich', anchor: view.state.selection.anchor, scrollTop: scroller.scrollTop };
+      // With lazy rendering, pixel offsets depend on which blocks were measured; remember the block.
+      const top = lazyController(view)?.topBlock();
+      if (top) position.top = top;
+      return position;
+    },
     setPosition(position) {
       if (position?.mode === 'rich' && typeof position.anchor === 'number') {
         const anchor = Math.min(Math.max(position.anchor, 0), view.state.doc.content.size);
         view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(anchor))));
       }
-      if (typeof position?.scrollTop === 'number') scroller.scrollTop = position.scrollTop;
+      const lazy = lazyController(view);
+      if (lazy && typeof position?.top?.pos === 'number') lazy.scrollToBlock(position.top);
+      else if (typeof position?.scrollTop === 'number') scroller.scrollTop = position.scrollTop;
+      lazy?.refresh();
+    },
+    /** Renders the whole document (for printing and export) or returns to lazy rendering. */
+    renderAll(all) {
+      lazyController(view)?.setAll(all);
     },
     find: {
       set(query) {
@@ -262,6 +324,7 @@ export async function createRichEditor(options) {
       },
     },
     async destroy() {
+      clearTimeout(warmTimer);
       root.removeEventListener('click', onClick);
       labels.disconnect();
       await crepe.destroy();

@@ -1,6 +1,14 @@
 // ProseMirror plugins for the rich editor.
+import { Fragment } from '@milkdown/kit/prose/model';
 import { NodeSelection, Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
+import {
+  bulletListSchema,
+  headingIdGenerator,
+  headingSchema,
+  listItemSchema,
+  orderedListSchema,
+} from '@milkdown/kit/preset/commonmark';
 import { $prose } from '@milkdown/kit/utils';
 
 // Reveal markdown syntax around the cursor, Typora style.
@@ -239,3 +247,178 @@ export function imageActions({ onReplace, onCaption }) {
       }),
   );
 }
+
+// Faster copies of two plugins from Milkdown's commonmark preset, which walk every node of the
+// document (including all inline content) after each change: 45 ms per keystroke at 5 MB. They
+// produce the same attributes, but skip the inside of textblocks (which can contain neither
+// headings nor lists) and only look at the part of the document that changed: heading ids depend
+// only on the sequence of headings, and list labels only on their own list.
+
+/** Transaction meta: the document changed, but every position still means the same place. */
+export const POSITIONS_UNCHANGED = 'mdpadPositionsUnchanged';
+
+/** The range of top-level blocks of `doc` (and of `prev`) that differ between the two, or null. */
+function changedRange(prev, doc) {
+  const start = doc.content.findDiffStart(prev.content);
+  if (start == null) return null;
+  const end = doc.content.findDiffEnd(prev.content);
+  // Widen to whole top-level blocks: a list item's label depends on the items before it.
+  const widen = (node, from, to) => {
+    const $from = node.resolve(Math.min(Math.max(from, 0), node.content.size));
+    const $to = node.resolve(Math.min(Math.max(to, 0), node.content.size));
+    return [$from.depth ? $from.before(1) : $from.pos, $to.depth ? $to.after(1) : $to.pos];
+  };
+  const [from, to] = widen(doc, start - 1, Math.max(end.a, start) + 1);
+  const [prevFrom, prevTo] = widen(prev, start - 1, Math.max(end.b, start) + 1);
+  return { from, to, prevFrom, prevTo };
+}
+
+function hasNodeOfType(doc, from, to, type) {
+  let found = false;
+  doc.nodesBetween(from, to, (node) => {
+    if (found || node.type === type) found = true;
+    return !found && !node.isTextblock;
+  });
+  return found;
+}
+
+/** Same as commonmark's syncHeadingIdPlugin: keeps each heading's `id` attribute current. */
+export const syncHeadingIds = $prose((ctx) => {
+  const key = new PluginKey('MDPAD_HEADING_ID');
+  const updateId = (view) => {
+    if (view.composing) return;
+    const getId = ctx.get(headingIdGenerator.key);
+    const headingType = headingSchema.type(ctx);
+    const { doc, selection } = view.state;
+    const changes = [];
+    const idMap = {};
+    doc.descendants((node, pos) => {
+      if (node.type === headingType) {
+        if (node.textContent.trim().length === 0) return false;
+        const attrs = node.attrs;
+        let id = getId(node);
+        if (idMap[id]) {
+          idMap[id] += 1;
+          id += `-#${idMap[id]}`;
+        } else {
+          idMap[id] = 1;
+        }
+        if (attrs.id !== id) changes.push({ pos, id });
+        return false;
+      }
+      return !node.isTextblock;
+    });
+    if (!changes.length) return;
+    const tr = view.state.tr.setMeta('addToHistory', false).setMeta(key, true);
+    if (changes.length <= 50) {
+      for (const { pos, id } of changes) tr.setNodeMarkup(pos, undefined, { ...doc.nodeAt(pos).attrs, id });
+    } else {
+      // One setNodeMarkup step per heading copies the document's top-level child array each time
+      // (6 s for the ~4,000 headings of a 5 MB file when it opens). Replace the affected top-level
+      // range in one step instead; only attributes change, so positions stay the same.
+      const ids = new Map(changes.map(({ pos, id }) => [pos, id]));
+      const first = changes[0].pos;
+      const last = changes[changes.length - 1].pos;
+      const rebuild = (node, pos) => {
+        if (ids.has(pos) && node.type === headingType) {
+          return node.type.create({ ...node.attrs, id: ids.get(pos) }, node.content, node.marks);
+        }
+        if (node.isTextblock || node.isLeaf) return node;
+        const children = [];
+        node.forEach((child, offset) => children.push(rebuild(child, pos + 1 + offset)));
+        return node.copy(Fragment.from(children));
+      };
+      const $first = doc.resolve(first);
+      const $last = doc.resolve(last);
+      const start = $first.depth ? $first.before(1) : first;
+      const end = $last.depth ? $last.after(1) : last + doc.nodeAt(last).nodeSize;
+      const nodes = [];
+      doc.nodesBetween(start, end, (node, pos) => {
+        nodes.push(rebuild(node, pos));
+        return false;
+      });
+      tr.replaceWith(start, end, nodes);
+      const same = { map: (pos) => pos, mapResult: (pos) => ({ pos, deleted: false }) };
+      tr.setSelection(selection.map(tr.doc, same)).setMeta(POSITIONS_UNCHANGED, true);
+    }
+    view.dispatch(tr);
+  };
+  return new Plugin({
+    key,
+    view: (view) => {
+      updateId(view);
+      return {
+        update: (view, prevState) => {
+          if (view.state.doc.eq(prevState.doc)) return;
+          // Ids only change when a heading was added, removed or edited.
+          const range = changedRange(prevState.doc, view.state.doc);
+          const headingType = headingSchema.type(ctx);
+          if (
+            range &&
+            !hasNodeOfType(view.state.doc, range.from, range.to, headingType) &&
+            !hasNodeOfType(prevState.doc, range.prevFrom, range.prevTo, headingType)
+          ) {
+            return;
+          }
+          updateId(view);
+        },
+      };
+    },
+  });
+});
+
+/** Same as commonmark's syncListOrderPlugin: keeps ordered list item labels current. */
+export const syncListOrder = $prose((ctx) => {
+  const syncOrderLabel = (transactions, _oldState, newState) => {
+    if (!newState.selection || transactions.some((tr) => tr.getMeta('addToHistory') === false || !tr.isGeneric)) {
+      return null;
+    }
+    const orderedListType = orderedListSchema.type(ctx);
+    const bulletListType = bulletListSchema.type(ctx);
+    const listItemType = listItemSchema.type(ctx);
+    const handleNodeItem = (attrs, index, order = 1) => {
+      const expectedLabel = `${index + order}.`;
+      if (attrs.label === expectedLabel) return false;
+      attrs.label = expectedLabel;
+      return true;
+    };
+    const range = changedRange(_oldState.doc, newState.doc);
+    if (!range) return null;
+    let tr = newState.tr;
+    let needDispatch = false;
+    newState.doc.nodesBetween(range.from, range.to, (node, pos, parent, index) => {
+      if (node.isTextblock) return false;
+      if (node.type === bulletListType) {
+        const base = node.maybeChild(0);
+        if (base?.type === listItemType && base.attrs.listType === 'ordered') {
+          needDispatch = true;
+          tr.setNodeMarkup(pos, orderedListType, { spread: true });
+          // (Positions relative to the list, as in the original.)
+          node.descendants((child, childPos, _parent, childIndex) => {
+            if (child.type === listItemType) {
+              const attrs = { ...child.attrs };
+              if (handleNodeItem(attrs, childIndex)) tr = tr.setNodeMarkup(childPos, undefined, attrs);
+            }
+            return false;
+          });
+        }
+      } else if (node.type === listItemType && parent?.type === orderedListType) {
+        const attrs = { ...node.attrs };
+        let changed = false;
+        if (attrs.listType !== 'ordered') {
+          attrs.listType = 'ordered';
+          changed = true;
+        }
+        const base = parent?.maybeChild(0);
+        if (base) changed = handleNodeItem(attrs, index, parent?.attrs.order ?? 1);
+        if (changed) {
+          tr = tr.setNodeMarkup(pos, undefined, attrs);
+          needDispatch = true;
+        }
+      }
+      return true;
+    });
+    return needDispatch ? tr.setMeta('addToHistory', false) : null;
+  };
+  return new Plugin({ key: new PluginKey('MDPAD_KEEP_LIST_ORDER'), appendTransaction: syncOrderLabel });
+});

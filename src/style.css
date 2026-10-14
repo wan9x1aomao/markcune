@@ -1497,3 +1497,9 @@ h3 .md-marker {
     transition-duration: 1ms !important;
   }
 }
+
+/* Placeholder for a block that is far from the viewport in a large document (see lazy.js) */
+#editor .milkdown .ProseMirror > .mdpad-lazy {
+  margin: 0;
+  padding: 0;
+}

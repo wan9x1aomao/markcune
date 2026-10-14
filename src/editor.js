@@ -15,6 +15,7 @@ import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state';
 import { $prose, callCommand, replaceAll } from '@milkdown/kit/utils';
 import { createLazy, lazyController } from './lazy.js';
 import { preserveMarkdown } from './markdown.js';
+import { incrementalSerializer } from './serialize.js';
 import { findKey, findPlugin, imageActions, linkPaste, markdownMarkers } from './plugins.js';
 
 if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
@@ -156,6 +157,11 @@ export async function createRichEditor(options) {
   if (readonly) crepe.setReadonly(true);
 
   const view = crepe.editor.action((ctx) => ctx.get(editorViewCtx));
+  const { serialize, warm } = crepe.editor.action(incrementalSerializer);
+  // Fill the markdown cache in small slices while idle, so the first save is cheap too.
+  let warmTimer = setTimeout(function warmUp() {
+    warmTimer = warm(view.state.doc, 150) ? setTimeout(warmUp, 30) : null;
+  }, 1500);
 
   // ⌘/Ctrl + click opens links in the browser.
   const onClick = (event) => {
@@ -183,7 +189,7 @@ export async function createRichEditor(options) {
     kind: 'rich',
     view,
     crepe,
-    getMarkdown: () => crepe.getMarkdown(),
+    getMarkdown: () => serialize(view.state.doc),
     /** An immutable value identifying the current document, for matches(). */
     snapshot: () => view.state.doc,
     /** True if the document is the same as when `snapshot` was taken (unchanged parts compare by identity). */
@@ -296,6 +302,7 @@ export async function createRichEditor(options) {
       },
     },
     async destroy() {
+      clearTimeout(warmTimer);
       root.removeEventListener('click', onClick);
       labels.disconnect();
       await crepe.destroy();

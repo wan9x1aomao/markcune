@@ -17,6 +17,7 @@ import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state';
 import { $prose, callCommand, replaceAll } from '@milkdown/kit/utils';
 import { createLazy, lazyController } from './lazy.js';
 import { preserveMarkdown } from './markdown.js';
+import { chunkedParsing } from './parse.js';
 import { incrementalSerializer } from './serialize.js';
 import {
   findKey,
@@ -153,6 +154,7 @@ export async function createRichEditor(options) {
   const lazy = createLazy(scroller);
   crepe.editor
     .config(preserveMarkdown)
+    .use(chunkedParsing)
     .use(lazy.views)
     .use(lazy.plugin)
     .use(markdownMarkers)

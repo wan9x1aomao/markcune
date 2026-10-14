@@ -17,12 +17,12 @@ const SENTINEL = '\uE000'; // private use; text containing it takes the fallback
 const SEPARATOR = `\n\n${SENTINEL}\n\n`;
 const ENDING = `\n\n${SENTINEL}\n`;
 const BATCH = 200;
-const isList =(node) => node.type.name === 'bullet_list' || node.type.name === 'ordered_list';
+const isList = (node) => node.type.name === 'bullet_list' || node.type.name === 'ordered_list';
 
 /**
  * For the editor's ctx, returns serialize(doc), producing the same markdown as Milkdown's
- * serializer, and warm(doc, limit), which caches up to `limit` more units and returns whether
- * any remain (so the first save after opening a large document needn't serialize all of it).
+ * serializer, and warm(doc, ms), which fills the cache for about `ms` milliseconds and returns
+ * whether anything remains (so the first save after opening a large document is cheap too).
  */
 export function incrementalSerializer(ctx) {
   const serializer = ctx.get(serializerCtx);
@@ -77,17 +77,21 @@ export function incrementalSerializer(ctx) {
     return markdown && !markdown.endsWith('\n') && !markdown.endsWith('\r') ? markdown + '\n' : markdown;
   };
 
-  const warm = (doc, limit) => {
-    const units = unitsOf(doc);
-    if (!units) return false;
-    const missing = [];
-    for (const nodes of units) {
-      if (cached(nodes) !== undefined) continue;
-      if (missing.length === limit) return fill(missing);
-      missing.push(nodes);
+  let warming = { doc: null, units: [], next: 0 };
+  const warm = (doc, ms) => {
+    const deadline = performance.now() + ms;
+    if (warming.doc !== doc) warming = { doc, units: unitsOf(doc) ?? [], next: 0 };
+    const { units } = warming;
+    while (warming.next < units.length) {
+      const batch = [];
+      while (warming.next < units.length && batch.length < 20) {
+        const nodes = units[warming.next++];
+        if (cached(nodes) === undefined) batch.push(nodes);
+      }
+      if (batch.length && !fill(batch)) return false;
+      if (performance.now() > deadline) break;
     }
-    if (missing.length) fill(missing);
-    return false;
+    return warming.next < units.length;
   };
 
   return { serialize, warm };

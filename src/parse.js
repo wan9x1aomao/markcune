@@ -39,10 +39,35 @@ const indentOf = (line) => {
   return width;
 };
 
+const DELIMITER_ROW = /^\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*\r?$/;
+
+/**
+ * If the line at `from` is a table delimiter row and every following line up to a blank line (or
+ * the end) starts with "|", returns where that blank line starts; otherwise -1.
+ */
+function tableEnd(markdown, from) {
+  let next = markdown.indexOf('\n', from);
+  if (next === -1 || !DELIMITER_ROW.test(markdown.slice(from, next))) return -1;
+  let pos = next + 1;
+  while (pos < markdown.length) {
+    next = markdown.indexOf('\n', pos);
+    if (next === -1) next = markdown.length;
+    const line = markdown.slice(pos, next);
+    if (!line.trim()) return pos;
+    if (!line.startsWith('|')) return -1;
+    pos = next + 1;
+  }
+  return markdown.length;
+}
+
 /** Splits `markdown` into pieces that parse independently (see above); one piece if unsure. */
 export function splitMarkdown(markdown, chunk = CHUNK) {
-  if (markdown.length < chunk * 2 || DEFINITION.test(markdown)) return [markdown];
   const pieces = [];
+  pieces.tables = new Set(); // indices of pieces that are a single table
+  if (markdown.length < chunk * 2 || DEFINITION.test(markdown)) {
+    pieces.push(markdown);
+    return pieces;
+  }
   let start = 0;
   let fence = null; // { char, length } of an open fence at the top level
   let html = null; // end pattern of an open raw HTML block
@@ -72,6 +97,17 @@ export function splitMarkdown(markdown, chunk = CHUNK) {
           pieces.push(markdown.slice(start, pos));
           start = pos;
         }
+        // A large table (every line starting with "|", ended by a blank line) becomes a piece of
+        // its own, which chunkedParser parses in slices of rows.
+        const end = blank && line.startsWith('|') ? tableEnd(markdown, next) : -1;
+        if (end - pos > chunk) {
+          if (pos > start) pieces.push(markdown.slice(start, pos));
+          pieces.tables.add(pieces.length);
+          pieces.push(markdown.slice(pos, end));
+          start = end;
+          pos = end;
+          continue;
+        }
       } else if (marker) {
         container = true;
       }
@@ -94,7 +130,7 @@ export function splitMarkdown(markdown, chunk = CHUNK) {
     blank = false;
     pos = next;
   }
-  pieces.push(markdown.slice(start));
+  if (start < markdown.length) pieces.push(markdown.slice(start));
   return pieces;
 }
 
@@ -131,27 +167,56 @@ export function chunkedParser(parse) {
     const pieces = typeof text === 'string' ? splitMarkdown(text, chunk) : [];
     if (pieces.length < 2) return parse(text);
     const children = [];
-    let first = null;
     // The blank lines before a split point belong to no block in the whole document, but at the
     // end of a piece they would join a code block left open by its list item; leave them out.
     const trim = (piece, last) => (last ? piece : piece.replace(/\r?\n\s*$/, ''));
     for (let i = 0; i < pieces.length; i++) {
+      const table = pieces.tables.has(i) && parseTable(pieces[i], chunk);
+      if (table) {
+        children.push(table);
+        continue;
+      }
       let piece = pieces[i];
+      if (!piece.trim()) continue; // blank lines between two split points: no blocks
       let doc = parse(trim(piece, i === pieces.length - 1));
       while (i + 1 < pieces.length && !endsCleanly(doc, piece)) {
         i += 1;
         piece += pieces[i];
         doc = parse(trim(piece, i === pieces.length - 1));
       }
-      first ??= doc;
       doc.forEach((node) => children.push(node));
     }
-    return first.type.create(first.attrs, Fragment.fromArray(children));
+    return children[0].type.schema.topNodeType.create(null, Fragment.fromArray(children));
+  };
+
+  /**
+   * Parses a table (header, delimiter row, rows) in slices of rows, each with the header and
+   * delimiter row, and joins the rows; GFM parses each row on its own given the header. Returns
+   * null unless every slice comes out as exactly one table with all of its rows.
+   */
+  const parseTable = (text, chunk) => {
+    const lines = text.replace(/\s+$/, '').split('\n');
+    const head = `${lines[0]}\n${lines[1]}\n`;
+    const rows = [];
+    let first = null;
+    for (let i = 2; i < lines.length; ) {
+      let j = i;
+      for (let size = 0; j < lines.length && size < chunk; j++) size += lines[j].length + 1;
+      const doc = parse(head + lines.slice(i, j).join('\n'));
+      const table = doc.childCount === 1 ? doc.firstChild : null;
+      if (!table || table.type.name !== 'table' || table.childCount !== 1 + j - i) return null;
+      if (!first) rows.push((first = table).firstChild);
+      for (let k = 1; k < table.childCount; k++) rows.push(table.child(k));
+      i = j;
+    }
+    if (!first) return null;
+    return first.type.create(first.attrs, Fragment.fromArray(rows), first.marks);
   };
   const chunked = (text) => run(text, CHUNK);
   // For tests: the plain parser, and parsing with another piece size.
   chunked.unchunked = parse;
   chunked.withChunkSize = run;
+  chunked.split = splitMarkdown;
   return chunked;
 }
 

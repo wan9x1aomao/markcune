@@ -175,8 +175,8 @@ export async function createRichEditor(options) {
   const { serialize, warm } = crepe.editor.action(incrementalSerializer);
   // Fill the markdown cache in small slices while idle, so the first save is cheap too.
   let warmTimer = setTimeout(function warmUp() {
-    warmTimer = warm(view.state.doc, 150) ? setTimeout(warmUp, 30) : null;
-  }, 1500);
+    warmTimer = warm(view.state.doc, 12) ? setTimeout(warmUp, 20) : null;
+  }, 300);
 
   // ⌘/Ctrl + click opens links in the browser.
   const onClick = (event) => {

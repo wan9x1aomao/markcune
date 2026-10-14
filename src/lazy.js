@@ -16,6 +16,7 @@ import { DOMSerializer } from '@milkdown/kit/prose/model';
 import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
+import { POSITIONS_UNCHANGED } from './plugins.js';
 
 /** Documents with fewer top-level blocks render normally. */
 export const LAZY_MIN_BLOCKS = 200;
@@ -193,6 +194,7 @@ export function createLazy(scroller) {
     ctx.update(editorViewTimerCtx, (timers) => timers.concat(LazyViewsReady));
     return async () => {
       await ctx.wait(EditorStateReady);
+      performance.mark('mdpad:state-ready');
       const { doc, schema } = ctx.get(editorStateCtx);
       if (isLarge(doc)) {
         ctx.update(nodeViewCtx, (entries) => Object.entries(wrapNodeViews(Object.fromEntries(entries), schema, width)));
@@ -226,7 +228,7 @@ export function createLazy(scroller) {
             const meta = tr.getMeta(lazyKey);
             if (!meta && !tr.docChanged && !tr.selectionSet) return prev;
             let { all, from, to, pins } = prev;
-            if (tr.docChanged) {
+            if (tr.docChanged && !tr.getMeta(POSITIONS_UNCHANGED)) {
               from = tr.mapping.map(from, -1);
               to = tr.mapping.map(to, 1);
               pins = pins.map((pin) => tr.mapping.map(pin));
@@ -258,6 +260,7 @@ export function createLazy(scroller) {
           decorations: (state) => lazyKey.getState(state).decorations ?? null,
         },
         view(view) {
+          performance.mark('mdpad:view-created');
           if (!lazyKey.getState(view.state).active) return {};
           let frame = 0;
           let lastWidth = width(view);

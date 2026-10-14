@@ -1,14 +1,16 @@
 // Mermaid diagrams for ```mermaid code blocks. Loaded only when a document contains one.
 import mermaid from 'mermaid';
 
-let ready = false;
+let current = null;
 let counter = 0;
 
-export async function renderMermaid(code) {
-  if (!ready) {
-    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'strict', suppressErrorRendering: true });
-    ready = true;
+/** `theme`: 'auto' follows the system; exports pass 'light' so diagrams match the white page. */
+export async function renderMermaid(code, theme = 'auto') {
+  const dark = theme === 'auto' ? window.matchMedia('(prefers-color-scheme: dark)').matches : theme === 'dark';
+  const wanted = dark ? 'dark' : 'default';
+  if (current !== wanted) {
+    mermaid.initialize({ startOnLoad: false, theme: wanted, securityLevel: 'strict', suppressErrorRendering: true });
+    current = wanted;
   }
   const id = `mdpad-diagram-${++counter}`;
   try {

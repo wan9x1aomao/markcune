@@ -15,6 +15,11 @@ export function createSidebar(el, options) {
   let recent = { files: [], folders: [] };
   const expanded = new Set();
   const listings = new Map();
+  // Rows are rebuilt on every render; the selection pill stays put so it can glide between rows.
+  const list = document.createElement('div');
+  const sel = Object.assign(document.createElement('div'), { className: 'tree-sel' });
+  sel.style.opacity = '0';
+  el.append(sel, list);
 
   const key = (path) => path.replace(/\\/g, '/').toLowerCase();
 
@@ -28,16 +33,49 @@ export function createSidebar(el, options) {
 
   function render() {
     const scrollTop = el.scrollTop;
-    el.replaceChildren();
+    // FLIP: remember where rows were, rebuild, then let them glide from there (transform only).
+    const before = new Map([...list.querySelectorAll('.tree-row[data-path]')].map((row) => [row.dataset.path, row.offsetTop]));
+    list.replaceChildren();
     if (root) renderTree();
     else renderEmpty();
     el.scrollTop = scrollTop;
+    if (before.size) {
+      const rows = [...list.querySelectorAll('.tree-row[data-path]')];
+      for (const row of rows) {
+        const old = before.get(row.dataset.path);
+        if (old === undefined) row.classList.add('entering');
+        else if (old !== row.offsetTop) {
+          row.style.transition = 'none';
+          row.style.translate = `0 ${old - row.offsetTop}px`;
+        }
+      }
+      void list.offsetHeight;
+      for (const row of rows) {
+        row.style.transition = '';
+        row.style.translate = '';
+        row.classList.remove('entering');
+      }
+    }
+    placeSelection(before.size > 0);
   }
 
-  function header(title, buttons = []) {
+  function placeSelection(animate) {
+    const row = list.querySelector('.tree-row.active');
+    if (!row) {
+      sel.style.opacity = '0';
+      return;
+    }
+    if (!animate || sel.style.opacity === '0') sel.style.transition = 'none';
+    sel.style.transform = `translateY(${row.offsetTop}px)`;
+    sel.style.opacity = '1';
+    void sel.offsetHeight;
+    sel.style.transition = '';
+  }
+
+  function header(title, buttons = [], icon = null) {
     const head = document.createElement('div');
     head.className = 'panel-header';
-    head.innerHTML = '<span class="title"></span>';
+    head.innerHTML = `${icon ? icons[icon] : ''}<span class="title"></span>`;
     head.querySelector('.title').textContent = title;
     for (const [icon, label, run] of buttons) {
       const button = document.createElement('button');
@@ -47,17 +85,21 @@ export function createSidebar(el, options) {
       button.addEventListener('click', run);
       head.appendChild(button);
     }
-    el.appendChild(head);
+    list.appendChild(head);
   }
 
   function renderTree() {
-    header(basename(root), [
-      ['plus', '新建文档', () => options.onNewDocument(root)],
-      ['folder', '打开其他文件夹…', () => options.onOpenFolder()],
-    ]);
+    header(
+      basename(root),
+      [
+        ['plus', '新建文档', () => options.onNewDocument(root)],
+        ['folder', '打开其他文件夹…', () => options.onOpenFolder()],
+      ],
+      'folder',
+    );
     const entries = listings.get(key(root));
     if (entries && !entries.length) {
-      el.appendChild(Object.assign(document.createElement('div'), { className: 'panel-empty', textContent: '这个文件夹里还没有 Markdown 文档。' }));
+      list.appendChild(Object.assign(document.createElement('div'), { className: 'panel-empty', textContent: '这个文件夹里还没有 Markdown 文档。' }));
     }
     renderDir(root, 0);
   }
@@ -75,7 +117,10 @@ export function createSidebar(el, options) {
         chevron.innerHTML = icons.chevron;
         row.appendChild(chevron);
       } else {
-        row.appendChild(Object.assign(document.createElement('span'), { className: 'chevron' }));
+        const kind = document.createElement('span');
+        kind.className = 'kind';
+        kind.innerHTML = icons.file;
+        row.appendChild(kind);
       }
       if (renaming && samePath(renaming, entry.path)) {
         row.appendChild(renameInput(entry));
@@ -96,7 +141,7 @@ export function createSidebar(el, options) {
         event.preventDefault();
         showMenu(contextItems(entry), { x: event.clientX, y: event.clientY });
       });
-      el.appendChild(row);
+      list.appendChild(row);
       if (open) renderDir(entry.path, depth + 1);
     }
   }
@@ -151,7 +196,7 @@ export function createSidebar(el, options) {
 
   function renderEmpty() {
     header('文件');
-    el.appendChild(
+    list.appendChild(
       Object.assign(document.createElement('div'), {
         className: 'panel-empty',
         textContent: '打开一个文件夹，就能在这里浏览其中的 Markdown 文档。',
@@ -162,19 +207,19 @@ export function createSidebar(el, options) {
     const button = Object.assign(document.createElement('button'), { className: 'text-button', textContent: '打开文件夹…' });
     button.addEventListener('click', () => options.onOpenFolder());
     actions.appendChild(button);
-    el.appendChild(actions);
+    list.appendChild(actions);
 
     const section = (title, items, run) => {
       if (!items.length) return;
-      el.appendChild(Object.assign(document.createElement('div'), { className: 'panel-section', textContent: title }));
+      list.appendChild(Object.assign(document.createElement('div'), { className: 'panel-section', textContent: title }));
       for (const path of items) {
         const row = document.createElement('button');
         row.className = 'recent-row';
         row.title = path;
-        row.textContent = basename(path);
+        row.appendChild(Object.assign(document.createElement('span'), { className: 'label', textContent: basename(path) }));
         row.appendChild(Object.assign(document.createElement('span'), { className: 'dir', textContent: basename(dirname(path)) }));
         row.addEventListener('click', () => run(path));
-        el.appendChild(row);
+        list.appendChild(row);
       }
     };
     section('最近的文件夹', recent.folders, (path) => options.onOpenFolder(path));
@@ -223,7 +268,7 @@ export function createSidebar(el, options) {
         }
       }
       render();
-      el.querySelector('.tree-row.active')?.scrollIntoView({ block: 'nearest' });
+      list.querySelector('.tree-row.active')?.scrollIntoView({ block: 'nearest' });
     },
     async refreshDirs(dirs) {
       const stale = dirs.filter((dir) => listings.has(key(dir)));

@@ -1,4 +1,6 @@
 // The WYSIWYG editor (Milkdown Crepe), configured in Chinese.
+import { LanguageDescription } from '@codemirror/language';
+import { languages } from '@codemirror/language-data';
 import { Crepe } from '@milkdown/crepe';
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame.css';
@@ -13,14 +15,16 @@ import { toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
 import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state';
 import { $prose, callCommand, replaceAll } from '@milkdown/kit/utils';
 import { preserveMarkdown } from './markdown.js';
+import { codeTheme } from './code-theme.js';
 import { findKey, findPlugin, imageActions, linkPaste, markdownMarkers } from './plugins.js';
 
-if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-  await import('@milkdown/crepe/theme/frame-dark.css');
-}
+const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+if (dark) await import('@milkdown/crepe/theme/frame-dark.css');
 
 const LANGUAGE_NAMES = { latex: '公式', mermaid: '流程图', text: '纯文本', plaintext: '纯文本', '': '纯文本' };
-const languageLabel = (language) => LANGUAGE_NAMES[language.toLowerCase()] ?? language;
+/** Chinese names for special blocks, proper names ("Python", "C++") for the rest. */
+const languageLabel = (language) =>
+  LANGUAGE_NAMES[language.toLowerCase()] ?? LanguageDescription.matchLanguageName(languages, language, true)?.name ?? language;
 
 /** The code block's language button shows the raw name (or "Text"); show Chinese names instead. */
 function relabelLanguageButtons(root) {
@@ -104,6 +108,7 @@ export async function createRichEditor(options) {
         linkLabel: '链接',
       },
       [Crepe.Feature.CodeMirror]: {
+        theme: codeTheme(dark),
         searchPlaceholder: '搜索语言',
         noResultText: '没有匹配的语言',
         copyText: '复制',

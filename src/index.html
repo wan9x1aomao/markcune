@@ -5,35 +5,48 @@
     <title>MDPad</title>
   </head>
   <body>
-    <header id="topbar" data-tauri-drag-region>
-      <button id="toggle-sidebar" class="icon-button" title="文件列表"></button>
-      <div class="doc-title" data-tauri-drag-region>
-        <span id="doc-name" data-tauri-drag-region></span>
-        <span class="separator" data-tauri-drag-region>·</span>
-        <button id="save-status" class="status"></button>
-      </div>
-      <div class="actions">
-        <button id="exit-focus" class="text-button">退出专注</button>
-        <button id="open-find" class="icon-button" title="搜索"></button>
-        <button id="open-more" class="icon-button" title="更多"></button>
-      </div>
-      <div id="window-controls" hidden>
-        <button class="minimize" title="最小化"></button>
-        <button class="maximize" title="最大化"></button>
-        <button class="close" title="关闭"></button>
-      </div>
-    </header>
-    <div id="update-banner" class="banner" hidden>
-      <span class="message"></span>
-      <span class="buttons"></span>
-    </div>
-    <div id="banner" class="banner" hidden>
-      <span class="message"></span>
-      <span class="buttons"></span>
-    </div>
     <main id="workspace">
-      <aside id="sidebar"></aside>
+      <aside id="sidebar">
+        <div class="sidebar-top" data-tauri-drag-region>
+          <button id="sidebar-search" class="icon-button" title="快速打开"></button>
+          <button id="sidebar-collapse" class="icon-button" title="收起文件列表"></button>
+        </div>
+        <div id="sidebar-body"></div>
+      </aside>
       <section id="content">
+        <header id="topbar" data-tauri-drag-region>
+          <div class="topbar-left" data-tauri-drag-region>
+            <button id="toggle-sidebar" class="icon-button" title="显示文件列表"></button>
+            <div class="doc-title" data-tauri-drag-region>
+              <span id="doc-name" data-tauri-drag-region></span>
+              <button id="save-status" class="status" hidden><i class="dot"></i><span class="text"></span></button>
+            </div>
+          </div>
+          <div id="mode-switch" class="segmented" role="tablist">
+            <i class="thumb"></i>
+            <button data-mode="rich" role="tab">所见即所得</button>
+            <button data-mode="source" role="tab">源码</button>
+            <button data-mode="split" role="tab">分屏</button>
+          </div>
+          <div class="actions" data-tauri-drag-region>
+            <button id="exit-focus" class="pill-button">退出专注</button>
+            <button id="toggle-outline" class="round-button" title="大纲"></button>
+            <button id="open-more" class="round-button" title="更多"></button>
+            <div id="window-controls" hidden>
+              <button class="minimize" title="最小化"></button>
+              <button class="maximize" title="最大化"></button>
+              <button class="close" title="关闭"></button>
+            </div>
+          </div>
+        </header>
+        <div id="update-banner" class="banner" hidden>
+          <span class="message"></span>
+          <span class="buttons"></span>
+        </div>
+        <div id="banner" class="banner warning" hidden>
+          <span class="message"></span>
+          <span class="buttons"></span>
+        </div>
         <div id="findbar" hidden>
           <input class="query" placeholder="查找" spellcheck="false" />
           <span class="count"></span>
@@ -43,18 +56,28 @@
           <button class="icon-button close" title="关闭"></button>
           <div class="replace-row">
             <input class="replacement" placeholder="替换为" spellcheck="false" />
-            <button class="text-button replace-one">替换</button>
-            <button class="text-button replace-all">全部替换</button>
+            <button class="pill-button replace-one">替换</button>
+            <button class="pill-button replace-all">全部替换</button>
           </div>
         </div>
         <div id="panes">
           <div id="source-pane" class="pane" hidden></div>
           <div id="rich-pane" class="pane"><div id="editor"></div></div>
         </div>
+        <div id="empty-state" hidden>
+          <div class="empty-card">
+            <div class="empty-icon"></div>
+            <h2>没有打开的文档</h2>
+            <p>直接开始输入，或者：</p>
+            <div class="empty-list" id="empty-actions"></div>
+            <div class="empty-label" id="empty-recent-label">最近打开</div>
+            <div class="empty-list" id="empty-recent"></div>
+          </div>
+        </div>
       </section>
-      <aside id="outline" hidden></aside>
+      <aside id="outline"></aside>
     </main>
-    <div id="toast" hidden></div>
+    <div id="toast"></div>
     <script type="module" src="./main.js"></script>
   </body>
 </html>

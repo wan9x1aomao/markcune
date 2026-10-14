@@ -2,7 +2,6 @@ import './style.css';
 import { api, appWindow } from './bridge.js';
 import { COMMANDS } from './commands.js';
 import { createRichEditor } from './editor.js';
-import { buildHtml } from './export.js';
 import { createFindbar } from './findbar.js';
 import { icons } from './icons.js';
 import { createOutline } from './outline.js';
@@ -21,7 +20,11 @@ const els = {
   status: $('save-status'),
   banner: $('banner'),
   sidebar: $('sidebar'),
+  sidebarBody: $('sidebar-body'),
   outline: $('outline'),
+  panes: $('panes'),
+  modeSwitch: $('mode-switch'),
+  empty: $('empty-state'),
   richPane: $('rich-pane'),
   sourcePane: $('source-pane'),
   editorRoot: $('editor'),
@@ -60,12 +63,18 @@ const STATUS_TEXT = {
 };
 
 function setStatus(status, detail = '') {
+  const changed = status !== app.status;
   app.status = status;
   app.statusDetail = detail;
-  els.status.textContent = STATUS_TEXT[status];
+  els.status.querySelector('.text').textContent = STATUS_TEXT[status];
   els.status.className = `status ${status}`;
+  els.status.hidden = !STATUS_TEXT[status];
   els.status.title = status === 'error' ? `${detail}\n点击重试` : '';
-  els.status.previousElementSibling.hidden = !STATUS_TEXT[status];
+  // A small nudge when the state settles (not on every "saving").
+  if (changed && status !== 'saving') {
+    void els.status.offsetWidth;
+    els.status.classList.add('bump');
+  }
   updateGuard();
 }
 
@@ -267,10 +276,13 @@ async function mountEditor(content, position) {
   editor.setPosition(position);
   refreshOutline();
   findbar.refresh();
+  syncModeSwitch();
+  updateEmpty();
 }
 
 function onChange() {
   if (!app.editor) return;
+  if (document.body.classList.contains('empty')) setEmpty(false);
   app.pending = true;
   if (app.status !== 'conflict') setStatus('saving');
   clearTimeout(app.saveTimer);
@@ -482,19 +494,114 @@ async function setMode(mode, split) {
   app.editor.focus();
 }
 
+/**
+ * FLIP: apply a layout change in one step, then let the document and the top bar glide from
+ * where they were. Only `translate` animates, so it stays smooth on high-refresh displays.
+ */
+function glide(change) {
+  const targets = [els.panes, els.modeSwitch, document.querySelector('.topbar-left'), document.querySelector('#topbar .actions')];
+  const anchor = (target) =>
+    target === els.panes
+      ? (els.richPane.hidden ? els.sourcePane.querySelector('.cm-content') : els.editorRoot.querySelector('.milkdown')) ?? target
+      : target;
+  const before = targets.map((target) => anchor(target).getBoundingClientRect().left);
+  change();
+  targets.forEach((target, i) => {
+    const dx = before[i] - anchor(target).getBoundingClientRect().left;
+    target.classList.remove('glide');
+    target.style.translate = Math.abs(dx) > 0.5 ? `${dx}px 0` : '';
+  });
+  void document.body.offsetWidth;
+  for (const target of targets) {
+    target.classList.add('glide');
+    target.style.translate = '';
+  }
+}
+
+function applyPanels() {
+  document.body.classList.toggle('sidebar-hidden', !app.settings.sidebar);
+  document.body.classList.toggle('outline-open', !!app.settings.outline);
+  $('toggle-outline').classList.toggle('on', !!app.settings.outline);
+}
+
 function setPanel(name, visible) {
   app.settings[name] = visible;
-  els.sidebar.hidden = !app.settings.sidebar;
-  els.outline.hidden = !app.settings.outline;
+  glide(applyPanels);
   api.setSetting(name, visible);
   if (name === 'outline' && visible) refreshOutline();
 }
 
 function setFocus(on) {
   app.focus = on;
-  document.body.classList.toggle('focus', on);
-  document.body.classList.remove('reveal-topbar');
+  glide(() => {
+    document.body.classList.toggle('focus', on);
+    document.body.classList.remove('reveal-topbar');
+  });
   app.editor?.focus();
+}
+
+// Mode switch (所见即所得 / 源码 / 分屏)
+
+const currentMode = () => (app.mode === 'source' ? (app.split ? 'split' : 'source') : 'rich');
+
+function syncModeSwitch() {
+  const buttons = [...els.modeSwitch.querySelectorAll('button[data-mode]')];
+  const index = Math.max(0, buttons.findIndex((b) => b.dataset.mode === currentMode()));
+  buttons.forEach((button, i) => {
+    button.classList.toggle('on', i === index);
+    button.setAttribute('aria-selected', String(i === index));
+  });
+  els.modeSwitch.querySelector('.thumb').style.transform = `translateX(${index * 100}%)`;
+}
+
+els.modeSwitch.addEventListener('click', (event) => {
+  const mode = event.target.closest('button[data-mode]')?.dataset.mode;
+  if (!mode || mode === currentMode() || !app.editor) return;
+  if (mode === 'rich') setMode('rich', false);
+  else setMode('source', mode === 'split');
+});
+
+// Empty state: an untouched untitled document shows what you can do; typing just starts writing.
+
+function setEmpty(on) {
+  document.body.classList.toggle('empty', on);
+  els.empty.hidden = !on;
+}
+
+function updateEmpty() {
+  const empty =
+    !app.doc.path &&
+    !app.hasDraftContent &&
+    !app.pending &&
+    app.editor?.kind === 'rich' &&
+    app.editor.getMarkdown().trim() === '';
+  if (empty) renderEmpty();
+  setEmpty(empty);
+}
+
+function renderEmpty() {
+  const row = (icon, label, hint, run) => {
+    const button = document.createElement('button');
+    button.className = 'empty-row';
+    button.innerHTML = `${icons[icon]}<span class="label"></span><span class="hint"></span>`;
+    button.querySelector('.label').textContent = label;
+    button.querySelector('.hint').textContent = hint;
+    button.addEventListener('click', run);
+    return button;
+  };
+  $('empty-actions').replaceChildren(
+    row('pen', '开始写作', '', () => {
+      setEmpty(false);
+      app.editor?.focus();
+    }),
+    row('file', '打开文件…', formatKeys('Mod+O'), () => run('open-file')),
+    row('folder', '打开文件夹…', formatKeys('Mod+Shift+O'), () => run('open-folder')),
+  );
+  const recent = app.recentFiles.slice(0, 5);
+  $('empty-recent-label').hidden = !recent.length;
+  $('empty-recent').replaceChildren(
+    ...recent.map((path) => row('clock', basename(path), basename(dirname(path)), () => openFile(path))),
+  );
 }
 
 document.addEventListener('mousemove', (event) => {
@@ -544,21 +651,67 @@ els.sourcePane.addEventListener('scroll', () => onScroll(els.sourcePane), { pass
 
 // Export
 
+/** The document to export: the rich editor's, or the split view's preview (brought up to date). */
+async function exportDocument() {
+  if (app.editor?.kind !== 'rich' && !app.preview) await setMode('rich', false);
+  if (app.preview) {
+    clearTimeout(previewTimer);
+    app.preview.setMarkdown(app.editor.getMarkdown());
+  }
+  return (app.editor.kind === 'rich' ? app.editor : app.preview).view.state.doc;
+}
+
+const exportTitle = () => (app.doc.path ? splitExtension(basename(app.doc.path))[0] : '未命名');
+const exportDiagram = async (code) => (await import('./diagram.js')).renderMermaid(code, 'light');
+
+/** The exported page as a string (images and math fonts embedded). */
+async function buildExportHtml() {
+  const doc = await exportDocument();
+  const { buildHtml } = await import('./export.js');
+  return buildHtml(doc, exportTitle(), {
+    image: async (src) => {
+      const url = await resolveImage(src);
+      return (await embedImage(url)) ?? url;
+    },
+    diagram: exportDiagram,
+  });
+}
+
 async function exportHtml() {
-  if (app.mode === 'source' && !app.split) await setMode('rich', false);
-  const title = app.doc.path ? splitExtension(basename(app.doc.path))[0] : '未命名';
-  const html = await buildHtml(els.editorRoot, title, embedImage);
+  let html;
   try {
-    if (await api.exportHtml(html, `${title}.html`)) toast('已导出为网页');
+    html = await buildExportHtml();
+  } catch (error) {
+    toast(`导出失败：${error}`);
+    return;
+  }
+  try {
+    if (await api.exportHtml(html, `${exportTitle()}.html`)) toast('已导出为网页');
   } catch (error) {
     toast(`导出失败：${error}`);
   }
 }
 
+/** Fills the print-only container with the fully rendered document. */
+async function preparePrintDocument() {
+  const doc = await exportDocument();
+  const { preparePrint } = await import('./export.js');
+  await preparePrint(doc, { image: async (src) => resolveImage(src), diagram: exportDiagram });
+}
+
 async function exportPdf() {
-  if (app.mode === 'source') await setMode('rich', false);
+  try {
+    await preparePrintDocument();
+  } catch (error) {
+    toast(`导出失败：${error}`);
+    return;
+  }
+  // The print dialog suggests the page title as the PDF's name.
+  const previousTitle = document.title;
+  document.title = exportTitle();
   toast('在打印窗口中选择“存储为 PDF”', 4000);
-  api.print();
+  await api.print();
+  setTimeout(() => (document.title = previousTitle), 1000);
 }
 
 // Commands
@@ -641,6 +794,9 @@ function showMore(anchor) {
   showMenu(
     [
       ...fileItems,
+      item('find'),
+      item('replace'),
+      'separator',
       item('toggle-source', app.mode === 'source' && !app.split),
       item('toggle-split', app.split),
       item('toggle-focus', app.focus),
@@ -663,7 +819,7 @@ function showMore(anchor) {
 
 // Wiring
 
-const sidebar = createSidebar(els.sidebar, {
+const sidebar = createSidebar(els.sidebarBody, {
   api,
   revealLabel: isMac ? '在访达中显示' : '在资源管理器中显示',
   onOpen: openFile,
@@ -684,14 +840,19 @@ const updater = createUpdater($('update-banner'), {
   },
 });
 
-$('toggle-sidebar').innerHTML = icons.sidebar;
-$('open-find').innerHTML = icons.search;
-$('open-more').innerHTML = icons.more;
-$('toggle-sidebar').title = `文件列表（${formatKeys('Mod+Shift+L')}）`;
-$('open-find').title = `搜索（${formatKeys('Mod+F')}）`;
-$('toggle-sidebar').addEventListener('click', () => run('toggle-sidebar'));
-$('open-find').addEventListener('click', () => run('find'));
-$('open-more').addEventListener('click', (event) => showMore(event.currentTarget));
+const buttons = {
+  'toggle-sidebar': [icons.sidebar, `显示文件列表（${formatKeys('Mod+Shift+L')}）`, () => run('toggle-sidebar')],
+  'sidebar-collapse': [icons.sidebar, `收起文件列表（${formatKeys('Mod+Shift+L')}）`, () => run('toggle-sidebar')],
+  'sidebar-search': [icons.search, `快速打开（${formatKeys('Mod+P')}）`, () => run('quick-open')],
+  'toggle-outline': [icons.outline, `大纲（${formatKeys('Mod+Shift+T')}）`, () => run('toggle-outline')],
+  'open-more': [icons.more, '更多', (event) => showMore(event.currentTarget)],
+};
+for (const [id, [icon, title, onClick]] of Object.entries(buttons)) {
+  $(id).innerHTML = icon;
+  $(id).title = title;
+  $(id).addEventListener('click', onClick);
+}
+document.querySelector('#empty-state .empty-icon').innerHTML = icons.file;
 $('exit-focus').addEventListener('click', () => setFocus(false));
 els.status.addEventListener('click', () => {
   if (app.status === 'error') saveNow();
@@ -786,8 +947,7 @@ if (!isMac) installShortcuts({ run, isRichEditor: () => app.editor?.kind === 'ri
 if (init.platform === 'windows') setupWindowControls();
 app.settings = { ...app.settings, ...init.settings };
 app.recentFiles = init.recentFiles;
-els.sidebar.hidden = !app.settings.sidebar;
-els.outline.hidden = !app.settings.outline;
+applyPanels();
 sidebar.setRecent(init.recentFiles, init.recentFolders);
 
 const startup = init.startup;
@@ -809,3 +969,5 @@ setTimeout(() => updater.check(true), 5000);
 
 // Lets tests/scenarios.sh drive the editor through ProseMirror's own input handling.
 window.__mdpadDebug = app;
+// Lets tests check the export output without a save dialog.
+window.__mdpadExport = { html: buildExportHtml, print: preparePrintDocument };

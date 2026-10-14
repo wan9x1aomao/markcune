@@ -18,9 +18,9 @@ let toastTimer;
 export function toast(message, duration = 2400) {
   const el = document.getElementById('toast');
   el.textContent = message;
-  el.hidden = false;
+  el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.hidden = true), duration);
+  toastTimer = setTimeout(() => el.classList.remove('show'), duration);
 }
 
 let closeOpenMenu = null;

@@ -6,6 +6,8 @@ import { editorViewCtx } from '@milkdown/kit/core';
 import { redoCommand, undoCommand } from '@milkdown/kit/plugin/history';
 import { listener } from '@milkdown/kit/plugin/listener';
 import {
+  syncHeadingIdPlugin,
+  syncListOrderPlugin,
   toggleEmphasisCommand,
   toggleInlineCodeCommand,
   toggleStrongCommand,
@@ -16,7 +18,15 @@ import { $prose, callCommand, replaceAll } from '@milkdown/kit/utils';
 import { createLazy, lazyController } from './lazy.js';
 import { preserveMarkdown } from './markdown.js';
 import { incrementalSerializer } from './serialize.js';
-import { findKey, findPlugin, imageActions, linkPaste, markdownMarkers } from './plugins.js';
+import {
+  findKey,
+  findPlugin,
+  imageActions,
+  linkPaste,
+  markdownMarkers,
+  syncHeadingIds,
+  syncListOrder,
+} from './plugins.js';
 
 if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
   await import('@milkdown/crepe/theme/frame-dark.css');
@@ -149,10 +159,13 @@ export async function createRichEditor(options) {
     .use(linkPaste)
     .use(findPlugin)
     .use(imageActions({ onReplace: options.pickImage, onCaption: options.promptCaption }))
+    .use(syncHeadingIds)
+    .use(syncListOrder)
     .use(changeWatcher(() => options.onChange?.()));
   // Crepe always installs Milkdown's listener plugin, which serializes the whole document when the
   // editor starts even though nothing listens. Nothing here uses it (changeWatcher replaces it).
-  await crepe.editor.remove(listener);
+  // The two sync plugins are replaced by faster copies (see plugins.js).
+  await crepe.editor.remove([listener, syncHeadingIdPlugin, syncListOrderPlugin]);
   await crepe.create();
   if (readonly) crepe.setReadonly(true);
 

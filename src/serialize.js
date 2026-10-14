@@ -16,7 +16,8 @@ import { schemaCtx, serializerCtx } from '@milkdown/kit/core';
 const SENTINEL = '\uE000'; // private use; text containing it takes the fallback
 const SEPARATOR = `\n\n${SENTINEL}\n\n`;
 const ENDING = `\n\n${SENTINEL}\n`;
-const isList = (node) => node.type.name === 'bullet_list' || node.type.name === 'ordered_list';
+const BATCH = 200;
+const isList =(node) => node.type.name === 'bullet_list' || node.type.name === 'ordered_list';
 
 /**
  * For the editor's ctx, returns serialize(doc), producing the same markdown as Milkdown's
@@ -67,7 +68,11 @@ export function incrementalSerializer(ctx) {
     const units = unitsOf(doc);
     if (!units) return serializer(doc);
     const missing = units.filter((nodes) => cached(nodes) === undefined);
-    if (missing.length && !fill(missing)) return serializer(doc);
+    // Milkdown's serializer is quadratic in the number of children of a node (it rebuilds the
+    // child array with concat for each child), so batches stay small.
+    for (let i = 0; i < missing.length; i += BATCH) {
+      if (!fill(missing.slice(i, i + BATCH))) return serializer(doc);
+    }
     const markdown = units.map(cached).join('\n\n');
     return markdown && !markdown.endsWith('\n') && !markdown.endsWith('\r') ? markdown + '\n' : markdown;
   };

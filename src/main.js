@@ -233,6 +233,7 @@ function editorOptions() {
 }
 
 async function mountEditor(content, position) {
+  performance.mark('mdpad:mount-start');
   const previous = app.editor;
   app.editor = null;
   await previous?.destroy();
@@ -262,11 +263,14 @@ async function mountEditor(content, position) {
   } else {
     editor = await createRichEditor({ ...editorOptions(), root: els.editorRoot, content, scroller: els.richPane, onChange });
   }
+  performance.mark('mdpad:mount-created');
   app.doc.saved = editor.getMarkdown();
+  performance.mark('mdpad:mount-serialized');
   app.editor = editor;
   editor.setPosition(position);
   refreshOutline();
   findbar.refresh();
+  performance.mark('mdpad:mount-done');
 }
 
 function onChange() {
@@ -291,7 +295,9 @@ function save({ force = false } = {}) {
 async function writeNow(force) {
   if (!app.editor || (!app.pending && !force)) return;
   if (app.status === 'conflict' && !force) return;
+  performance.mark('mdpad:save-start');
   const content = app.editor.getMarkdown();
+  performance.mark('mdpad:save-serialized');
   app.pending = false;
   try {
     if (app.doc.path) {
@@ -305,6 +311,7 @@ async function writeNow(force) {
         showConflict(result.reason);
         return;
       }
+      performance.mark('mdpad:save-written');
       app.doc.saved = content;
       app.doc.raw = content;
       hideBanner();
@@ -396,7 +403,9 @@ async function openFile(path) {
   rememberPosition();
   let opened;
   try {
+    performance.mark('mdpad:read-start');
     opened = await api.readDocument(path);
+    performance.mark('mdpad:read-done');
   } catch (error) {
     toast(`无法打开“${basename(path)}”：${error}`);
     return;

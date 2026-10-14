@@ -173,6 +173,7 @@ export async function createRichEditor(options) {
   return {
     kind: 'rich',
     view,
+    crepe,
     getMarkdown: () => crepe.getMarkdown(),
     setMarkdown: (markdown) => crepe.editor.action(replaceAll(markdown)),
     focus: () => view.focus(),

@@ -1,6 +1,6 @@
 # MDPad
 
-本地使用的 Markdown 所见即所得编辑器，类似 Typora。
+本地使用的 Markdown 所见即所得编辑器
 
 - 编辑器：[Milkdown Crepe](https://milkdown.dev)（`src/`）
 - 外壳：[Tauri 2](https://tauri.app)（`src-tauri/`），macOS 用系统 WebKit，Windows 用 WebView2

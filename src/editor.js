@@ -13,6 +13,7 @@ import {
 import { toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
 import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state';
 import { $prose, callCommand, replaceAll } from '@milkdown/kit/utils';
+import { createLazy, lazyController } from './lazy.js';
 import { preserveMarkdown } from './markdown.js';
 import { findKey, findPlugin, imageActions, linkPaste, markdownMarkers } from './plugins.js';
 
@@ -138,8 +139,11 @@ export async function createRichEditor(options) {
       [Crepe.Feature.Latex]: { katexOptions: { throwOnError: false } },
     },
   });
+  const lazy = createLazy(scroller);
   crepe.editor
     .config(preserveMarkdown)
+    .use(lazy.views)
+    .use(lazy.plugin)
     .use(markdownMarkers)
     .use(linkPaste)
     .use(findPlugin)
@@ -167,6 +171,7 @@ export async function createRichEditor(options) {
   relabelLanguageButtons(root);
 
   const scrollMatch = (match) => {
+    lazyController(view)?.reveal(match.from);
     const { node } = view.domAtPos(match.from);
     const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
     element?.scrollIntoView({ block: 'center' });
@@ -202,6 +207,7 @@ export async function createRichEditor(options) {
       return headings;
     },
     scrollToHeading(heading) {
+      lazyController(view)?.reveal(heading.pos);
       view.nodeDOM(heading.pos)?.scrollIntoView({ block: 'start' });
       const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, heading.pos + 1));
       view.dispatch(tr);
@@ -209,21 +215,45 @@ export async function createRichEditor(options) {
     },
     /** Index of the heading at the top of the visible area. */
     activeHeading(headings) {
+      // Headings are in document order, so their tops increase: binary search for the last one
+      // above the line instead of measuring every heading.
       const top = scroller.getBoundingClientRect().top + 80;
+      const above = (i) => {
+        const dom = view.nodeDOM(headings[i].pos);
+        return !!dom && dom.getBoundingClientRect().top <= top;
+      };
+      let lo = 0;
+      let hi = headings.length - 1;
       let active = -1;
-      headings.forEach((heading, i) => {
-        const dom = view.nodeDOM(heading.pos);
-        if (dom && dom.getBoundingClientRect().top <= top) active = i;
-      });
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (above(mid)) {
+          active = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
       return active;
     },
-    getPosition: () => ({ mode: 'rich', anchor: view.state.selection.anchor, scrollTop: scroller.scrollTop }),
+    getPosition() {
+      const position = { mode: 'rich', anchor: view.state.selection.anchor, scrollTop: scroller.scrollTop };
+      // With lazy rendering, pixel offsets depend on which blocks were measured; remember the block.
+      const top = lazyController(view)?.topBlock();
+      if (top) position.top = top;
+      return position;
+    },
     setPosition(position) {
       if (position?.mode === 'rich' && typeof position.anchor === 'number') {
         const anchor = Math.min(Math.max(position.anchor, 0), view.state.doc.content.size);
         view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(anchor))));
       }
-      if (typeof position?.scrollTop === 'number') scroller.scrollTop = position.scrollTop;
+      const lazy = lazyController(view);
+      if (lazy && typeof position?.top?.pos === 'number') lazy.scrollToBlock(position.top);
+      else if (typeof position?.scrollTop === 'number') scroller.scrollTop = position.scrollTop;
+      lazy?.refresh();
+    },
+    /** Renders the whole document (for printing and export) or returns to lazy rendering. */
+    renderAll(all) {
+      lazyController(view)?.setAll(all);
     },
     find: {
       set(query) {

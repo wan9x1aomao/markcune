@@ -575,7 +575,15 @@ els.sourcePane.addEventListener('scroll', () => onScroll(els.sourcePane), { pass
 async function exportHtml() {
   if (app.mode === 'source' && !app.split) await setMode('rich', false);
   const title = app.doc.path ? splitExtension(basename(app.doc.path))[0] : '未命名';
-  const html = await buildHtml(els.editorRoot, title, embedImage);
+  // Large documents render only the blocks near the viewport; export needs all of them.
+  const rich = app.editor?.kind === 'rich' ? app.editor : app.preview;
+  rich?.renderAll(true);
+  let html;
+  try {
+    html = await buildHtml(els.editorRoot, title, embedImage);
+  } finally {
+    rich?.renderAll(false);
+  }
   try {
     if (await api.exportHtml(html, `${title}.html`)) toast('已导出为网页');
   } catch (error) {
@@ -586,6 +594,20 @@ async function exportHtml() {
 async function exportPdf() {
   if (app.mode === 'source') await setMode('rich', false);
   toast('在打印窗口中选择“存储为 PDF”', 4000);
+  // Printing needs every block rendered; return to lazy rendering once the user is back.
+  const editor = app.editor;
+  editor?.renderAll(true);
+  const restore = () => {
+    removeEventListener('afterprint', restore);
+    removeEventListener('pointerdown', restore, true);
+    removeEventListener('keydown', restore, true);
+    if (app.editor === editor) editor.renderAll(false);
+  };
+  addEventListener('afterprint', restore);
+  setTimeout(() => {
+    addEventListener('pointerdown', restore, true);
+    addEventListener('keydown', restore, true);
+  }, 1000);
   api.print();
 }
 

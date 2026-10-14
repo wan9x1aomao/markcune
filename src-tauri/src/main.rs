@@ -197,6 +197,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     menu.append(&Submenu::with_items(app, "MDPad", true, &[
         &PredefinedMenuItem::about(app, Some("关于 MDPad"), None)?,
         &item("check-update", "检查更新…", None)?,
+        &item("changelog", "更新日志", None)?,
         &separator()?,
         &PredefinedMenuItem::hide(app, Some("隐藏 MDPad"))?,
         &PredefinedMenuItem::hide_others(app, Some("隐藏其他"))?,
@@ -274,7 +275,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     ])?)?;
 
     if !mac {
-        menu.append(&Submenu::with_items(app, "帮助", true, &[&item("check-update", "检查更新…", None)?])?)?;
+        menu.append(&Submenu::with_items(app, "帮助", true, &[&item("check-update", "检查更新…", None)?, &item("changelog", "更新日志", None)?])?)?;
     }
 
     #[cfg(target_os = "macos")]

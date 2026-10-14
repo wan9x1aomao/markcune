@@ -13,6 +13,7 @@ import { createUpdater } from './update.js';
 import { formatKeys, prompt, showMenu, toast } from './ui.js';
 
 const AUTOSAVE_DELAY = 1000;
+const CHANGELOG_URL = 'https://mdpad.app.workbuddy.host/#changelog';
 const isMac = navigator.userAgent.includes('Mac');
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -739,6 +740,7 @@ const actions = {
   'toggle-sidebar': () => setPanel('sidebar', !app.settings.sidebar),
   'toggle-outline': () => setPanel('outline', !app.settings.outline),
   'check-update': () => updater.check(false),
+  changelog: () => api.openUrl(CHANGELOG_URL),
   // Handled by the shell (native menu items on macOS).
   'zoom-in': () => api.nativeAction('zoom-in'),
   'zoom-out': () => api.nativeAction('zoom-out'),
@@ -812,6 +814,7 @@ function showMore(anchor) {
       item('reveal'),
       'separator',
       item('check-update'),
+      item('changelog'),
     ],
     anchor,
   );

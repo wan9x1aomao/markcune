@@ -28,6 +28,7 @@ export const COMMANDS = [
   { id: 'toggle-outline', title: '大纲', keys: 'Mod+Shift+T' },
   { id: 'command-palette', title: '命令面板…', keys: 'Mod+K' },
   { id: 'check-update', title: '检查更新…' },
+  { id: 'changelog', title: '更新日志' },
   { id: 'close', title: '关闭窗口', keys: 'Mod+W' },
 ];
 

@@ -401,8 +401,23 @@ async function setRoot(path) {
   if (app.doc.path) await sidebar.setActive(app.doc.path);
 }
 
+/** Shows the progress bar while `task` runs, unless it finishes quickly. */
+async function withProgress(task) {
+  const timer = setTimeout(() => document.body.classList.add('loading'), 150);
+  try {
+    return await task();
+  } finally {
+    clearTimeout(timer);
+    document.body.classList.remove('loading');
+  }
+}
+
 async function openFile(path) {
   if (samePath(path, app.doc.path)) return;
+  return withProgress(() => openFileNow(path));
+}
+
+async function openFileNow(path) {
   // Never drop an unsaved draft: open the file next to it instead.
   if (!app.doc.path && app.hasDraftContent) return api.openInNewWindow(path);
   await save();

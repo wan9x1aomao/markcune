@@ -104,7 +104,7 @@ if [[ -n "$SITE_DIR" ]]; then
   cp "$OUT/$MAC.dmg" "$OUT/$MAC.tar.gz" "$OUT/$WIN" "$OUT/$LINUX" "$OUT/$DEB" "$SITE_DIR/downloads/"
   cp "$OUT/latest.json" "$SITE_DIR/latest.json"
   [[ -f "$SITE_DIR/index.html" ]] && node scripts/update-site.mjs "$SITE_DIR" "$VERSION" \
-    "mac=$OUT/$MAC.dmg" "windows=$OUT/$WIN" "linux=$OUT/$LINUX"
+    "mac=$OUT/$MAC.dmg" "windows=$OUT/$WIN" "linux=$OUT/$LINUX" "deb=$OUT/$DEB"
   echo
   echo "已放入官网目录 ${SITE_DIR}，用 WorkBuddy 重新发布这个目录即可。"
 else

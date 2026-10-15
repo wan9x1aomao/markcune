@@ -1,6 +1,7 @@
-// Updates the official site for a release: version labels, file names, sizes and SHA-256.
-// Usage: node scripts/update-site.mjs <site dir> <version> mac=<file> windows=<file> linux=<file>
-// Elements are found by data-mdpad markers in index.html (version, size-<platform>, sha-<platform>).
+// Updates the official site for a release: download links, version labels, sizes and SHA-256.
+// Usage: node scripts/update-site.mjs <site dir> <version> mac=<file> windows=<file> linux=<file> deb=<file>
+// Elements are found by data-mdpad markers in index.html (link-<platform>, version, size-<platform>, sha-<platform>).
+// Downloads live under one fixed name per platform (overwritten each release), so links never carry a version.
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -11,8 +12,28 @@ const files = Object.fromEntries(pairs.map((pair) => pair.split('=')));
 const file = join(site, 'index.html');
 let html = readFileSync(file, 'utf8');
 
+// Fixed download names, keyed by the data-mdpad link marker. Keep in sync with scripts/release.sh.
+const LINKS = {
+  'link-mac': 'MDPad-macOS-arm64.dmg',
+  'link-windows': 'MDPad-windows-x64-setup.exe',
+  'link-linux': 'MDPad-linux-amd64.deb',
+  'link-linux-appimage': 'MDPad-linux-x86_64.AppImage',
+};
+const seen = new Set();
+html = html.replace(/<a\b[^>]*\bdata-mdpad="(link-[a-z-]+)"[^>]*>/g, (tag, marker) => {
+  const name = LINKS[marker];
+  if (!name) return tag;
+  seen.add(marker);
+  const href = `href="downloads/${name}"`;
+  return /\shref="[^"]*"/.test(tag) ? tag.replace(/(\s)href="[^"]*"/, `$1${href}`) : tag.replace(/^<a\b/, `<a ${href}`);
+});
+for (const marker of Object.keys(LINKS)) {
+  if (!seen.has(marker)) console.warn(`update-site: 页面里没有 data-mdpad="${marker}" 的下载链接`);
+}
+
 html = html
-  .replace(/MDPad-\d+\.\d+\.\d+-(macOS|windows|linux)/g, `MDPad-${version}-$1`)
+  // Any other mention of a versioned file (unmarked buttons, install commands) becomes the fixed name too.
+  .replace(/MDPad-\d+\.\d+\.\d+-(macOS-arm64\.dmg|macOS-arm64\.tar\.gz|windows-x64-setup\.exe|linux-amd64\.deb|linux-x86_64\.AppImage)/g, 'MDPad-$1')
   .replace(/<b>v\d+\.\d+\.\d+<\/b>/g, `<b>v${version}</b>`)
   .replace(/(data-mdpad="version">)[^<]*/g, `$1${version}`);
 

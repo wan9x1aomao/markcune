@@ -80,16 +80,31 @@ for file in "$WIN" "$WIN.sig" "$LINUX" "$LINUX.sig" "$DEB"; do
   [[ -f "$OUT/$file" ]] || { echo "缺少 $file"; exit 1; }
 done
 
+# The site serves each platform under one fixed name, overwritten on every release; release/<版本号>/
+# keeps the versioned names as an archive. Signatures cover file contents, so renaming keeps them valid.
+SITE_MAC_DMG="MDPad-macOS-arm64.dmg"
+SITE_MAC="MDPad-macOS-arm64.tar.gz"
+SITE_WIN="MDPad-windows-x64-setup.exe"
+SITE_LINUX="MDPad-linux-x86_64.AppImage"
+SITE_DEB="MDPad-linux-amd64.deb"
+
 # 3. One latest.json for every platform (non-ASCII escaped so any viewer shows it correctly).
-VERSION="$VERSION" NOTES="$NOTES" BASE="$DOWNLOAD_BASE_URL" OUT="$OUT" MAC="$MAC.tar.gz" WIN="$WIN" LINUX="$LINUX" node -e '
+# Signatures come from the versioned files in $OUT; urls point at the fixed names on the site.
+VERSION="$VERSION" NOTES="$NOTES" BASE="$DOWNLOAD_BASE_URL" OUT="$OUT" \
+  MAC="$MAC.tar.gz" WIN="$WIN" LINUX="$LINUX" \
+  SITE_MAC="$SITE_MAC" SITE_WIN="$SITE_WIN" SITE_LINUX="$SITE_LINUX" node -e '
   const fs = require("fs");
-  const { VERSION, NOTES, BASE, OUT, MAC, WIN, LINUX } = process.env;
-  const entry = (file) => ({ signature: fs.readFileSync(`${OUT}/${file}.sig`, "utf8"), url: `${BASE}/${file}` });
+  const { VERSION, NOTES, BASE, OUT, MAC, WIN, LINUX, SITE_MAC, SITE_WIN, SITE_LINUX } = process.env;
+  const entry = (file, name) => ({ signature: fs.readFileSync(`${OUT}/${file}.sig`, "utf8"), url: `${BASE}/${name}` });
   const manifest = {
     version: VERSION,
     notes: NOTES,
     pub_date: new Date().toISOString(),
-    platforms: { "darwin-aarch64": entry(MAC), "windows-x86_64": entry(WIN), "linux-x86_64": entry(LINUX) },
+    platforms: {
+      "darwin-aarch64": entry(MAC, SITE_MAC),
+      "windows-x86_64": entry(WIN, SITE_WIN),
+      "linux-x86_64": entry(LINUX, SITE_LINUX),
+    },
   };
   const text = JSON.stringify(manifest, null, 2).replace(/[\u0080-￿]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
   fs.writeFileSync(`${OUT}/latest.json`, text + "\n");'
@@ -101,7 +116,11 @@ ls -lh "$OUT" | tail -n +2
 
 if [[ -n "$SITE_DIR" ]]; then
   mkdir -p "$SITE_DIR/downloads"
-  cp "$OUT/$MAC.dmg" "$OUT/$MAC.tar.gz" "$OUT/$WIN" "$OUT/$LINUX" "$OUT/$DEB" "$SITE_DIR/downloads/"
+  cp "$OUT/$MAC.dmg"    "$SITE_DIR/downloads/$SITE_MAC_DMG"
+  cp "$OUT/$MAC.tar.gz" "$SITE_DIR/downloads/$SITE_MAC"
+  cp "$OUT/$WIN"        "$SITE_DIR/downloads/$SITE_WIN"
+  cp "$OUT/$LINUX"      "$SITE_DIR/downloads/$SITE_LINUX"
+  cp "$OUT/$DEB"        "$SITE_DIR/downloads/$SITE_DEB"
   cp "$OUT/latest.json" "$SITE_DIR/latest.json"
   [[ -f "$SITE_DIR/index.html" ]] && node scripts/update-site.mjs "$SITE_DIR" "$VERSION" \
     "mac=$OUT/$MAC.dmg" "windows=$OUT/$WIN" "linux=$OUT/$LINUX" "deb=$OUT/$DEB"
@@ -109,5 +128,10 @@ if [[ -n "$SITE_DIR" ]]; then
   echo "已放入官网目录 ${SITE_DIR}，用 WorkBuddy 重新发布这个目录即可。"
 else
   echo
-  echo "发布步骤：把 latest.json 以外的文件上传到 ${DOWNLOAD_BASE_URL}/，再把 latest.json 上传到 ${UPDATE_ENDPOINT}。"
+  echo "发布步骤：把 latest.json 以外的文件改成固定文件名后上传到 ${DOWNLOAD_BASE_URL}/，再把 latest.json 上传到 ${UPDATE_ENDPOINT}："
+  echo "  $MAC.dmg → $SITE_MAC_DMG"
+  echo "  $MAC.tar.gz → $SITE_MAC"
+  echo "  $WIN → $SITE_WIN"
+  echo "  $LINUX → $SITE_LINUX"
+  echo "  $DEB → $SITE_DEB"
 fi

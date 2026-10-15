@@ -6,6 +6,7 @@ import { languages } from '@codemirror/language-data';
 import { EditorSelection, EditorState, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, drawSelection, keymap } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
+import { countMarkdownWords } from './count.js';
 
 const style = HighlightStyle.define([
   { tag: tags.heading1, fontSize: '1.45em', fontWeight: '700' },
@@ -113,6 +114,7 @@ export function createSourceEditor({ root, content, scroller, onChange }) {
     kind: 'source',
     view,
     getMarkdown: () => view.state.doc.toString(),
+    getWordCount: () => countMarkdownWords(view.state.doc.toString()),
     getMarkdownAsync: async (snapshot = view.state.doc) => snapshot.toString(),
     snapshot: () => view.state.doc,
     matches: (snapshot) => !!snapshot && (snapshot === view.state.doc || view.state.doc.eq(snapshot)),

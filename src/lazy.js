@@ -363,14 +363,26 @@ export function createLazy(scroller) {
               if (!rect) return null;
               return { pos: startsOf(doc)[index], offset: Math.round(scroller.getBoundingClientRect().top - rect.top) };
             },
-            scrollToBlock({ pos, offset }) {
+            scrollToBlock({ pos, offset = 0 }) {
+              const target = () => {
+                const { doc } = view.state;
+                const index = indexAt(doc, Math.min(Math.max(pos, 0), doc.content.size));
+                const rect = rectOf(doc, index);
+                if (!rect) return;
+                scroller.scrollTop += rect.top - scroller.getBoundingClientRect().top - offset;
+                refresh();
+              };
               const { doc } = view.state;
               const index = indexAt(doc, Math.min(Math.max(pos, 0), doc.content.size));
               this.reveal(startsOf(doc)[index]);
-              const rect = rectOf(view.state.doc, index);
-              if (rect) scroller.scrollTop += rect.top - scroller.getBoundingClientRect().top + offset;
-              refresh();
-            },
+              target();
+              // Rendering a pinned block can change its measured height. Re-apply the target
+              // position after the DOM update so clicks work for distant headings too.
+              requestAnimationFrame(() => {
+                target();
+                requestAnimationFrame(target);
+              });
+            }
           });
           return {
             update(_, previous) {

@@ -18,6 +18,7 @@ const isMac = navigator.userAgent.includes('Mac');
 const $ = (id) => document.getElementById(id);
 const els = {
   docName: $('doc-name'),
+  wordCount: $('word-count'),
   status: $('save-status'),
   banner: $('banner'),
   sidebar: $('sidebar'),
@@ -282,6 +283,7 @@ async function mountEditor(content, position) {
   performance.mark('mdpad:mount-serialized');
   app.editor = editor;
   editor.setPosition(position);
+  updateWordCount();
   refreshOutline();
   findbar.refresh();
   syncModeSwitch();
@@ -289,8 +291,21 @@ async function mountEditor(content, position) {
   performance.mark('mdpad:mount-done');
 }
 
+let wordCountTimer;
+function updateWordCount() {
+  if (!els.wordCount) return;
+  const count = app.editor?.getWordCount?.() ?? 0;
+  els.wordCount.textContent = `全文 ${count.toLocaleString('zh-CN')} 字`;
+}
+
+function scheduleWordCount() {
+  clearTimeout(wordCountTimer);
+  wordCountTimer = setTimeout(updateWordCount, 120);
+}
+
 function onChange() {
   if (!app.editor) return;
+  scheduleWordCount();
   if (document.body.classList.contains('empty')) setEmpty(false);
   app.pending = true;
   if (app.status !== 'conflict') setStatus('saving');

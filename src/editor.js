@@ -20,6 +20,7 @@ import { $prose, callCommand, replaceAll } from '@milkdown/kit/utils';
 import { createLazy, lazyController } from './lazy.js';
 import { preserveMarkdown } from './markdown.js';
 import { codeTheme } from './code-theme.js';
+import { countMarkdownWords } from './count.js';
 import { chunkedParsing } from './parse.js';
 import { incrementalSerializer } from './serialize.js';
 import {
@@ -210,6 +211,7 @@ export async function createRichEditor(options) {
     view,
     crepe,
     getMarkdown: () => serialize(view.state.doc),
+    getWordCount: () => countMarkdownWords(serialize(view.state.doc)),
     /** The markdown of a snapshot (default: the current document), without blocking the page. */
     getMarkdownAsync: (snapshot = view.state.doc) => serializeAsync(snapshot),
     /** An immutable value identifying the current document, for matches(). */
@@ -235,8 +237,15 @@ export async function createRichEditor(options) {
       return headings;
     },
     scrollToHeading(heading) {
-      lazyController(view)?.reveal(heading.pos);
-      view.nodeDOM(heading.pos)?.scrollIntoView({ block: 'start' });
+      const lazy = lazyController(view);
+      if (lazy) {
+        lazy.scrollToBlock({ pos: heading.pos, offset: 12 });
+      } else {
+        const dom = view.nodeDOM(heading.pos);
+        if (dom) {
+          scroller.scrollTop += dom.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 12;
+        }
+      }
       const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, heading.pos + 1));
       view.dispatch(tr);
       view.focus();

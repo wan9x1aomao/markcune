@@ -55,7 +55,7 @@ run_app "$WORK/sample.md" fetch-test.js fetch-log 180
 if grep -q 'verdict=pass' "$WORK/fetch-log.txt"; then
   echo "PASS fetch"
 elif grep -q 'verdict=skip' "$WORK/fetch-log.txt"; then
-  # 这台机器到不了 GitHub。链接识别与解压的围栏已由 cargo test 的 21 个单测覆盖，
+  # 这台机器到不了 GitHub。链接识别与解压的围栏已由 cargo test 的单测覆盖，
   # 所以这里只记 SKIP，不让网络问题挡住发版。
   echo "SKIP fetch（连不上 GitHub，未验证端到端）"
 else

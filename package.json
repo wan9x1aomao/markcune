@@ -9,7 +9,7 @@
     "build": "tauri build --bundles app",
     "build:debug": "tauri build --debug --bundles app",
     "build:win": "tauri build --bundles nsis",
-    "test": "node tests/tidy.test.mjs && node tests/gateway.test.mjs"
+    "test": "node tests/tidy.test.mjs && node tests/gateway.test.mjs && node tests/notices.test.mjs"
   },
   "license": "ISC",
   "devDependencies": {

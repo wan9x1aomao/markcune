@@ -26,6 +26,20 @@ check() {
   fi
 }
 
+# For claims that something is *absent* — "the note only shows when there is something to report"
+# cannot be proved by looking for a string that is there.
+check_absent() {
+  local name="$1" result="$2" unwanted="$3"
+  if [[ "$result" != *"$unwanted"* ]]; then
+    echo "PASS  $name"
+  else
+    echo "FAIL  $name"
+    echo "      should not contain: $unwanted"
+    echo "      got:                $result"
+    FAILED=1
+  fi
+}
+
 fresh() {
   WORK=$(mktemp -d)
   mkdir -p "$WORK/.data"
@@ -129,5 +143,12 @@ check "侧栏指向的是书的文件夹" "$result" '"root":"es6tutorial"'
 # 图片跟着 zip 一起下来了（这是选整仓下载而不是抓单文件的意义）
 check "书里的图片也落了盘" "$(ls "$WORK/library/es6tutorial/images" 2>/dev/null | wc -l | tr -d ' ')" "9"
 check "书里的章节文件都在" "$(ls "$WORK/library/es6tutorial/docs" 2>/dev/null | wc -l | tr -d ' ')" "37"
+
+# 13. 回执里不该出现"跳过"这句话：只有真的跳过了文件才说。这句话的文案由 tests/notices.test.mjs
+#     覆盖（含 skipped=2 的正例），这里只确认正常下载时界面上看不到它。
+#     ⚠️ 别在这条路上想办法造出 skipped：`window.__TAURI_INTERNALS__.invoke` 是
+#     `writable:false, configurable:false` 的属性，换桩会**静默失效**（实测 hits=0），
+#     想端到端验证只能在一台真的 Windows 上跑。
+check_absent "正常下载不会多一句跳过说明" "$result" "无法保存"
 
 exit $FAILED

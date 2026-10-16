@@ -59,7 +59,7 @@ $fetchOut = Invoke-App $sample 'fetch-test.js' 'fetch-log' 180000
 if ($fetchOut -match 'verdict=pass') {
   Write-Host 'PASS fetch'
 } elseif ($fetchOut -match 'verdict=skip') {
-  # 这台机器到不了 GitHub。链接识别与解压的围栏已由 cargo test 的 21 个单测覆盖，
+  # 这台机器到不了 GitHub。链接识别与解压的围栏已由 cargo test 的单测覆盖，
   # 所以这里只记 SKIP，不让网络问题挡住发版。
   Write-Host 'SKIP fetch（连不上 GitHub，未验证端到端）'
 } else {

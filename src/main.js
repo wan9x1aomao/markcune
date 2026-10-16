@@ -4,6 +4,7 @@ import { COMMANDS } from './commands.js';
 import { createRichEditor } from './editor.js';
 import { createFindbar } from './findbar.js';
 import { icons } from './icons.js';
+import { downloadNotice } from './notices.js';
 import { createOutline } from './outline.js';
 import { openPalette } from './palette.js';
 import { basename, dirname, isInside, relative, samePath, splitExtension } from './paths.js';
@@ -529,11 +530,7 @@ async function openFromUrl() {
     const result = await withProgress(() => api.openFromUrl(url.trim()));
     if (result.root) await setRoot(result.root);
     await openFile(result.path);
-    toast(
-      result.kind === 'book'
-        ? `已下载《${result.title}》，共 ${result.files} 个文件`
-        : `已下载 ${result.title}`,
-    );
+    toast(downloadNotice(result));
   } catch (error) {
     await api.confirm('没有下载成功', String(error), '知道了');
   }

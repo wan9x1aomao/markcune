@@ -132,6 +132,55 @@ fn relative_path(segments: &[String]) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Device names Windows keeps for itself — a file called `con.md` cannot be created there at all.
+const RESERVED_NAMES: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Whether one name can be written to disk on the given platform.
+///
+/// Windows is the strict one, and the difference is not academic: `: " < > | ? *` cannot appear in
+/// a file name there at all, a trailing dot or space is dropped without a word (leaving a file whose
+/// name is not the one the archive asked for), and [`RESERVED_NAMES`] are devices. Linux and macOS
+/// accept most of that, which is why the platform is an argument instead of a `cfg!` — the rule has
+/// to be provable from whichever platform the tests happen to run on.
+///
+/// The 255-byte ceiling applies to all three: ext4 and APFS count bytes, NTFS counts UTF-16 units,
+/// and none of them takes more than 255.
+fn name_fits(name: &str, windows: bool) -> bool {
+    if name.is_empty() || name.len() > 255 {
+        return false;
+    }
+    if !windows {
+        return true;
+    }
+    if name.ends_with('.') || name.ends_with(' ') || name.chars().any(char::is_control) {
+        return false;
+    }
+    if name.chars().any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')) {
+        return false;
+    }
+    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    !RESERVED_NAMES.contains(&stem.as_str())
+}
+
+/// Whether every part of a relative path can be written on the given platform.
+///
+/// Every part, not just the last one: a chapter sitting inside a folder called `Day 3: 复习/` is
+/// just as unsavable as that folder itself.
+fn savable(path: &Path, windows: bool) -> bool {
+    let mut parts = 0usize;
+    for part in path.components() {
+        let std::path::Component::Normal(name) = part else { return false };
+        if !name.to_str().is_some_and(|text| name_fits(text, windows)) {
+            return false;
+        }
+        parts += 1;
+    }
+    parts > 0
+}
+
 /// Accepts one path segment: no separators, not `.` or `..`, usable as a file name on every platform.
 fn safe_name(segment: &str) -> Result<String, String> {
     let decoded = percent_decode_str(segment).decode_utf8().map_err(|_| "链接里有无法识别的内容")?;
@@ -145,12 +194,8 @@ fn safe_name(segment: &str) -> Result<String, String> {
     if name.chars().count() > 120 {
         return Err("链接里的文件名太长了".into());
     }
-    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
-    const RESERVED: [&str; 22] = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    ];
-    if RESERVED.contains(&stem.as_str()) {
+    // `true` on purpose: a link has to work on every platform we ship, not only this one.
+    if !name_fits(name, true) {
         return Err("链接里的文件名不能用来保存".into());
     }
     Ok(name.to_string())
@@ -270,11 +315,26 @@ fn decode(bytes: &[u8]) -> Result<String, String> {
 // Unpacking a book
 // ---------------------------------------------------------------------------------------------
 
-/// Extracts an archive into `dest`, returning how many files landed there.
+/// What came out of an archive.
+#[derive(Debug, Default, PartialEq)]
+struct Unpacked {
+    /// Files actually written.
+    files: usize,
+    /// Entries left out because this platform cannot hold their names.
+    skipped: usize,
+}
+
+/// Extracts an archive into `dest`, reporting what landed and what could not.
 ///
-/// Every entry is checked twice: `enclosed_name` refuses absolute paths and `..` that climb out,
-/// and symbolic links are skipped outright because a link can point somewhere else entirely.
-fn unpack(archive: &[u8], dest: &Path) -> Result<usize, String> {
+/// Every entry is checked three times: `enclosed_name` refuses absolute paths and `..` that climb
+/// out, symbolic links are skipped outright because a link can point somewhere else entirely, and
+/// names this platform cannot write are passed over rather than allowed to abort the download.
+fn unpack(archive: &[u8], dest: &Path) -> Result<Unpacked, String> {
+    unpack_with(archive, dest, cfg!(windows))
+}
+
+/// [`unpack`] with the platform stated, so the Windows-only rule stays testable from the others.
+fn unpack_with(archive: &[u8], dest: &Path, windows: bool) -> Result<Unpacked, String> {
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(archive))
         .map_err(|error| format!("下载到的压缩包无法读取：{error}"))?;
     if zip.len() > MAX_ENTRIES {
@@ -282,7 +342,7 @@ fn unpack(archive: &[u8], dest: &Path) -> Result<usize, String> {
     }
     std::fs::create_dir_all(dest).map_err(|error| format!("无法创建目录：{error}"))?;
 
-    let mut files = 0usize;
+    let mut out = Unpacked::default();
     let mut total = 0u64;
     for index in 0..zip.len() {
         let mut entry = zip.by_index(index).map_err(|error| format!("压缩包损坏：{error}"))?;
@@ -294,6 +354,13 @@ fn unpack(archive: &[u8], dest: &Path) -> Result<usize, String> {
         }
         // GitHub wraps everything in a single <repo>-<branch>/ folder; drop it.
         let Some(relative) = strip_wrapper(&inside) else { continue };
+        // A book is worth more than any single file in it: a repository is free to contain a name
+        // this platform cannot write — `Day 3: review.md` is enough on Windows — and failing the
+        // whole download over it would cost the reader the other three hundred chapters.
+        if !savable(&relative, windows) {
+            out.skipped += 1;
+            continue;
+        }
         let target = dest.join(relative);
         if entry.is_dir() {
             std::fs::create_dir_all(&target).map_err(|error| format!("无法创建目录：{error}"))?;
@@ -310,9 +377,9 @@ fn unpack(archive: &[u8], dest: &Path) -> Result<usize, String> {
         let mut content = Vec::with_capacity(entry.size().min(1 << 20) as usize);
         entry.read_to_end(&mut content).map_err(|error| format!("解压出错：{error}"))?;
         std::fs::write(&target, &content).map_err(|error| format!("无法写入文件：{error}"))?;
-        files += 1;
+        out.files += 1;
     }
-    Ok(files)
+    Ok(out)
 }
 
 fn strip_wrapper(path: &Path) -> Option<PathBuf> {
@@ -372,6 +439,8 @@ pub struct Fetched {
     title: String,
     /// How many files came with it (1 for a single document).
     files: usize,
+    /// Files the book contained whose names this platform cannot hold, so they were left out.
+    skipped: usize,
 }
 
 /// Where downloaded books live. `MDPAD_LIBRARY_DIR` overrides it, following `MDPAD_DATA_DIR`.
@@ -406,17 +475,18 @@ pub async fn open_from_url(app: AppHandle, url: String) -> Result<Fetched, Strin
             }
             atomic_write(&dest, text.as_bytes())?;
             let title = dest.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-            Ok(Fetched { path: dest, root, kind: "file", title, files: 1 })
+            Ok(Fetched { path: dest, root, kind: "file", title, files: 1, skipped: 0 })
         }
         Target::Repo { owner, repo, branch } => {
             let archive = fetch_archive(&client, &owner, &repo, branch.as_deref())
                 .await
                 .map_err(Failure::message)?;
             let root = library.join(safe_name(&repo)?);
-            let files = unpack(&archive, &root)?;
+            let unpacked = unpack(&archive, &root)?;
+            let files = unpacked.files;
             let entry = pick_entry(&root)
                 .ok_or_else(|| format!("这本书里没有找到能打开的 Markdown 文件（已解压 {files} 个文件）"))?;
-            Ok(Fetched { path: entry, root, kind: "book", title: repo, files })
+            Ok(Fetched { path: entry, root, kind: "book", title: repo, files, skipped: unpacked.skipped })
         }
     }
 }
@@ -735,7 +805,7 @@ mod tests {
             ("book-main/README.md", "# 书\n", FILE),
             ("book-main/src/ch1.md", "# 一\n", FILE),
         ]);
-        assert_eq!(unpack(&bytes, &dest).unwrap(), 2);
+        assert_eq!(unpack(&bytes, &dest).unwrap().files, 2);
         assert!(dest.join("README.md").is_file());
         assert!(dest.join("src/ch1.md").is_file());
         assert!(!dest.join("book-main").exists(), "the wrapper folder should be gone");
@@ -771,9 +841,55 @@ mod tests {
             ("book-main/escape", "/etc/passwd", LINK),
         ]);
         // The link is dropped, the real file still arrives, and nothing is written for the link.
-        assert_eq!(unpack(&bytes, &dest).unwrap(), 1);
+        assert_eq!(unpack(&bytes, &dest).unwrap().files, 1);
         assert!(dest.join("README.md").is_file());
         assert!(!dest.join("escape").exists());
+    }
+
+    #[test]
+    fn windows_is_the_platform_that_cannot_hold_every_name() {
+        // Names a book may legitimately contain that Windows refuses outright.
+        for rejected in
+            ["Day 3: review.md", "why?.md", "a*.md", "a|b.md", "a<b>.md", "quote\".md", "trailing. ", "CON.md", "nul"]
+        {
+            assert!(!name_fits(rejected, true), "{rejected:?} should be unsavable on Windows");
+        }
+        // …and the very same names are ordinary files elsewhere.
+        for accepted in ["Day 3: review.md", "why?.md", "a*.md", "CON.md"] {
+            assert!(name_fits(accepted, false), "{accepted:?} should be fine off Windows");
+        }
+        // A full-width colon is a different character from the ASCII one, and is allowed everywhere.
+        for fine in ["第 3 天：复习.md", "a b.md", "笔记.md", "chapter-01.md"] {
+            assert!(name_fits(fine, true), "{fine:?} should be savable on Windows too");
+        }
+        // Length is the one limit all three filesystems share (255 bytes; CJK is three bytes each).
+        assert!(name_fits(&"长".repeat(85), false), "255 bytes still fits");
+        assert!(!name_fits(&"长".repeat(86), false), "258 bytes does not");
+        assert!(!name_fits("", true) && !name_fits("", false));
+    }
+
+    #[test]
+    fn a_name_windows_cannot_save_costs_one_file_not_the_whole_book() {
+        let bytes = archive(&[
+            ("book-main/README.md", "# ok\n", FILE),
+            ("book-main/why?.md", "# also a chapter\n", FILE),
+            ("book-main/Day 3: notes/ch.md", "# inside a folder Windows cannot name\n", FILE),
+            ("book-main/src/ch1.md", "# one\n", FILE),
+        ]);
+
+        // Windows: the two unsavable entries — one file, one folder — are passed over and the rest
+        // of the book arrives intact. Aborting here would have cost the reader everything.
+        let windows = scratch("win-names");
+        assert_eq!(unpack_with(&bytes, &windows, true).unwrap(), Unpacked { files: 2, skipped: 2 });
+        assert!(windows.join("README.md").is_file());
+        assert!(windows.join("src/ch1.md").is_file(), "unrelated entries must be unaffected");
+        assert!(!windows.join("why?.md").exists());
+
+        // Everywhere else those names are ordinary, so nothing is left out.
+        let unix = scratch("unix-names");
+        assert_eq!(unpack_with(&bytes, &unix, false).unwrap(), Unpacked { files: 4, skipped: 0 });
+        assert!(unix.join("why?.md").is_file());
+        assert!(unix.join("Day 3: notes/ch.md").is_file());
     }
 
     #[test]

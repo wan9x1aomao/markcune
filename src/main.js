@@ -514,6 +514,31 @@ async function openFileDialog() {
   for (const path of rest) api.openInNewWindow(path);
 }
 
+// Downloads a pasted link into the library folder and opens it. A repository comes down as a whole
+// folder, so the sidebar is pointed at the book instead of the single file inside it.
+async function openFromUrl() {
+  const url = await prompt({
+    title: '粘贴链接：GitHub 上的书，或一个 Markdown 文件的地址',
+    value: '',
+    okLabel: '下载并打开',
+  });
+  if (!url?.trim()) return;
+  try {
+    // Two steps on purpose: point the sidebar at the book first, then open the entry document —
+    // opening would otherwise narrow the folder down to wherever that one file happens to live.
+    const result = await withProgress(() => api.openFromUrl(url.trim()));
+    if (result.root) await setRoot(result.root);
+    await openFile(result.path);
+    toast(
+      result.kind === 'book'
+        ? `已下载《${result.title}》，共 ${result.files} 个文件`
+        : `已下载 ${result.title}`,
+    );
+  } catch (error) {
+    await api.confirm('没有下载成功', String(error), '知道了');
+  }
+}
+
 async function newDocument(dir) {
   dir ??= app.root ?? (app.doc.path && dirname(app.doc.path));
   if (!dir) return api.newWindow();
@@ -674,6 +699,7 @@ function renderEmpty() {
     }),
     row('file', '打开文件…', formatKeys('Mod+O'), () => run('open-file')),
     row('folder', '打开文件夹…', formatKeys('Mod+Shift+O'), () => run('open-folder')),
+    row('download', '从链接打开…', '', () => run('open-from-url')),
   );
   const recent = app.recentFiles.slice(0, 5);
   $('empty-recent-label').hidden = !recent.length;
@@ -799,6 +825,7 @@ const actions = {
   'new-document': () => newDocument(),
   'open-file': openFileDialog,
   'open-folder': () => openFolder(),
+  'open-from-url': openFromUrl,
   'quick-open': () => showPalette('files'),
   'command-palette': () => showPalette('all'),
   save: saveNow,
@@ -864,6 +891,7 @@ function showMore(anchor) {
         item('new-window'),
         item('open-file'),
         item('open-folder'),
+        item('open-from-url'),
         item('quick-open'),
         'separator',
         item('save'),

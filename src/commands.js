@@ -8,6 +8,7 @@ export const COMMANDS = [
   { id: 'new-document', title: '在文件夹中新建文档' },
   { id: 'open-file', title: '打开文件…', keys: 'Mod+O' },
   { id: 'open-folder', title: '打开文件夹…', keys: 'Mod+Shift+O' },
+  { id: 'open-from-url', title: '从链接打开…' },
   { id: 'quick-open', title: '快速打开…', keys: 'Mod+P' },
   { id: 'save', title: '保存', keys: 'Mod+S' },
   { id: 'save-as', title: '另存为…', keys: 'Mod+Shift+S' },

@@ -9,7 +9,9 @@ FAILED=0
 # run <data-dir> <js> [file] — runs the app until the JS reports, prints the result line.
 run() {
   local data="$1" js="$2" file="${3:-}"
-  MDPAD_DATA_DIR="$data" MDPAD_TEST_JS="$js" "$BIN" ${file:+"$file"} 2>&1 | grep -m1 'TEST_RESULT' | sed 's/^TEST_RESULT: //'
+  # MDPAD_LIBRARY_DIR 指向临时目录，否则「从链接打开」会往用户真实的 ~/Documents/MDPad 里写书
+  MDPAD_DATA_DIR="$data" MDPAD_LIBRARY_DIR="$WORK/library" MDPAD_TEST_JS="$js" "$BIN" ${file:+"$file"} 2>&1 \
+    | grep -m1 'TEST_RESULT' | sed 's/^TEST_RESULT: //'
 }
 
 check() {
@@ -112,5 +114,20 @@ check "直接请求私密文件被拒绝" "$result" '"direct":"blocked"'
 result=$(run "$WORK/.data" "$WAIT const call = window.__TAURI_INTERNALS__.invoke; const ok = await call('image_data_url', { path: '$WORK/assets/icon.png' }).then((d) => d.slice(0, 22), String); const leak = await call('image_data_url', { path: '$WORK/leak.png' }).then(() => 'leaked', String); return JSON.stringify({ ok, leak });" "$WORK/sample.md")
 check "导出网页可嵌入本地图片" "$result" '"ok":"data:image/png;base64,"'
 check "导出不会嵌入伪装成图片的文件" "$result" '"leak":"不是图片文件"'
+
+# 12. 「从链接打开」的完整用户路径：菜单 → 弹窗 → 下载 → 落盘 → 打开（要联网）
+#     第 3 段冒烟测试直接调 open_from_url，绕过了菜单到弹窗这一段；这里把整条路走一遍。
+fresh
+MENU="window.__TAURI_INTERNALS__.invoke('plugin:event|emit_to', { target: { kind: 'AnyLabel', label: 'doc-0' }, event: 'menu', payload: 'open-from-url' });"
+result=$(run "$WORK/.data" "$WAIT $MENU for (let i = 0; i < 60 && !document.querySelector('.overlay .prompt'); i++) await wait(100); const box = document.querySelector('.overlay .prompt'); if (!box) return 'menus did not open a dialog'; box.querySelector('input').value = 'https://github.com/ruanyf/es6tutorial'; box.querySelector('.ok').click(); for (let i = 0; i < 900 && !document.getElementById('toast').textContent.includes('已下载'); i++) await wait(100); await wait(300); return JSON.stringify({ promptTitle: box.querySelector('.title').textContent, okLabel: box.querySelector('.ok').textContent, toast: document.getElementById('toast').textContent, docName: document.getElementById('doc-name').textContent, heading: document.querySelector('.ProseMirror h1')?.innerText ?? '', root: document.querySelector('#sidebar .panel-header .title')?.textContent ?? '' });" "$WORK/sample.md")
+check "菜单打开的是粘贴链接的弹窗" "$result" "粘贴链接：GitHub 上的书"
+check "按钮说的是要发生的事" "$result" '"okLabel":"下载并打开"'
+check "下完给了一句回执" "$result" "已下载《es6tutorial》"
+check "打开的是书的第一章" "$result" '"docName":"README.md"'
+check "正文确实渲染出了书的内容" "$result" "ES6 入门教程"
+check "侧栏指向的是书的文件夹" "$result" '"root":"es6tutorial"'
+# 图片跟着 zip 一起下来了（这是选整仓下载而不是抓单文件的意义）
+check "书里的图片也落了盘" "$(ls "$WORK/library/es6tutorial/images" 2>/dev/null | wc -l | tr -d ' ')" "9"
+check "书里的章节文件都在" "$(ls "$WORK/library/es6tutorial/docs" 2>/dev/null | wc -l | tr -d ' ')" "37"
 
 exit $FAILED

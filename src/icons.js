@@ -22,4 +22,5 @@ export const icons = {
   outline: svg('<path d="M5 6h14M8 12h11M11 18h8"/>'),
   pen: svg('<path d="M12 20h8"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
   clock: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
+  download: svg('<path d="M12 3.5v11"/><path d="m7.5 10 4.5 4.5L16.5 10"/><path d="M5 20h14"/>'),
 };

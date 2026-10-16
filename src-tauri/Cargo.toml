@@ -17,7 +17,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 percent-encoding = "2"
 base64 = "0.22"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
+# 只解压 deflate（GitHub 的 zip 用的就是它）。默认 feature 会拖进 zstd / lzma / bzip2，编译很重且用不上。
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

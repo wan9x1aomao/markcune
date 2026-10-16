@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ai;
+mod fetch;
 mod files;
 mod state;
 mod store;
@@ -213,6 +214,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         &separator()?,
         &item("open-file", "打开文件…", Some("CmdOrCtrl+O"))?,
         &item("open-folder", "打开文件夹…", Some("CmdOrCtrl+Shift+O"))?,
+        &item("open-from-url", "从链接打开…", None)?,
         &item("quick-open", "快速打开…", Some("CmdOrCtrl+P"))?,
         &separator()?,
         &item("save", "保存", Some("CmdOrCtrl+S"))?,
@@ -820,6 +822,7 @@ fn main() {
             files::rename_path,
             files::draft_write,
             files::draft_delete,
+            fetch::open_from_url,
             update::check_update,
             update::download_update,
             update::restart_to_update,

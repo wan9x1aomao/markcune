@@ -34,6 +34,7 @@ export const api = {
   newWindow: () => invoke('new_window'),
   nativeAction: (id) => invoke('native_action', { id }),
   openUrl: (url) => invoke('open_url', { url }),
+  openFromUrl: (url) => invoke('open_from_url', { url }),
   reveal: (path) => invoke('reveal', { path }),
   print: () => invoke('print_page'),
   exportHtml: (html, name) => invoke('export_html', { html, name }),

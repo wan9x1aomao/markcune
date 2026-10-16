@@ -1,9 +1,31 @@
-"""Renders the bright MDPad app icon to src-tauri/app-icon.png (1024x1024, macOS icon grid)."""
+"""Renders the bright MDPad app icon to src-tauri/app-icon.png.
+
+The design is drawn on the old 1024 grid (100px of clear space) and then scaled up to the
+macOS icon grid the system's own icons use — see BODY below.
+
+整套图标这样重做，顺序别换：
+
+    python3 scripts/icon.py
+    npx tauri icon src-tauri/app-icon.png
+    rm -rf src-tauri/icons/android src-tauri/icons/ios src-tauri/icons/64x64.png \\
+           src-tauri/icons/StoreLogo.png src-tauri/icons/Square*.png
+
+第三条是因为 `tauri icon` 会顺带生成 iOS / Android / Windows Store 的一整套，
+而本项目只在 tauri.conf.json 里用到 6 个文件。之后再手动把
+icons/128x128@2x.png 覆盖到 mdpad-site/icon.png、icons/32x32.png 覆盖到 favicon.png。
+"""
 from PIL import Image, ImageDraw, ImageFilter, ImageChops
 
 S = 4  # supersampling
 N = 1024 * S
-PAD, R = 100 * S, 186 * S  # 824px squircle-ish tile, like the previous icon
+PAD, R = 100 * S, 166 * S  # the tile in design coordinates; R grows with it, see BODY
+
+# macOS 26 的图标网格：实测系统自带图标（计算器 / Safari / 备忘录 …）的图形都占画布 87.5%
+# （1024 画布上留白 64px），圆角半径约图形的 20%。
+# 我们原来按旧网格留白 100px（80.5%），在 Dock 里比旁边的图标小一圈，看着"没填满"。
+BODY = 896                 # 824 的设计稿放大到 896
+DESIGN = 1024 - 2 * 100    # 设计稿中方块的实际边长
+GROW = BODY / DESIGN
 
 
 def lerp(a, b, t):
@@ -83,8 +105,16 @@ cap_mask = Image.new('L', cap.size, 0)
 ImageDraw.Draw(cap_mask).rounded_rectangle((0, 0, cap.size[0] - 1, cap.size[1] - 1), 9 * S, fill=255)
 icon.paste(cap, (622 * S, (line_y - 9) * S), cap_mask)
 
-icon = icon.resize((1024, 1024), Image.LANCZOS)
-# Keep everything inside the tile.
-icon.putalpha(ImageChops.multiply(icon.getchannel('A'), tile_mask.resize((1024, 1024), Image.LANCZOS)))
-icon.save('src-tauri/app-icon.png')
-print('wrote src-tauri/app-icon.png')
+# 整体等比放大到 macOS 26 的网格：方块、发丝边、图形一起放大，构图比例一点不变。
+square = icon.crop((PAD, PAD, N - PAD, N - PAD))
+side = round(DESIGN * S * GROW)
+square = square.resize((side, side), Image.LANCZOS)
+canvas = Image.new('RGBA', (N, N), (0, 0, 0, 0))
+offset = (N - side) // 2
+canvas.paste(square, (offset, offset))
+# 放大后方块的圆角也跟着变大了，按同一比例重新裁一次，让它和系统图标的圆角对上。
+grid = mask_rrect((offset, offset, offset + side, offset + side), round(R * GROW))
+canvas.putalpha(ImageChops.multiply(canvas.getchannel('A'), grid))
+
+canvas.resize((1024, 1024), Image.LANCZOS).save('src-tauri/app-icon.png')
+print(f'wrote src-tauri/app-icon.png — 图形占画布 {BODY / 1024 * 100:.1f}%，圆角 {round(R * GROW / S)}/1024')

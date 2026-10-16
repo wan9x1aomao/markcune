@@ -2236,6 +2236,7 @@ version = "3.3.4"
 dependencies = [
  "base64 0.22.1",
  "block2",
+ "flate2",
  "notify",
  "objc2",
  "percent-encoding",

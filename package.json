@@ -8,7 +8,8 @@
     "dev": "tauri dev",
     "build": "tauri build --bundles app",
     "build:debug": "tauri build --debug --bundles app",
-    "build:win": "tauri build --bundles nsis"
+    "build:win": "tauri build --bundles nsis",
+    "test": "node tests/tidy.test.mjs && node tests/gateway.test.mjs"
   },
   "license": "ISC",
   "devDependencies": {

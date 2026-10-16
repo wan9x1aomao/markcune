@@ -54,6 +54,9 @@ jobs:
 
       - run: npm ci
 
+      - name: 单元测试
+        run: npm test
+
       - name: 冒烟测试（Windows）
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -75,6 +78,10 @@ jobs:
         run: |
           source scripts/release.conf
           export MDPAD_UPDATE_ENDPOINT="$UPDATE_ENDPOINT"
+          # 「一键整理」的网关地址，和 macOS 本机打包取自同一个 release.conf。
+          # 留空则不注入，这一版的 Windows / Linux 包只做规则整理。
+          if [ -n "${TIDY_URL:-}" ]; then export MDPAD_TIDY_URL="$TIDY_URL"; fi
+          echo "整理服务：${MDPAD_TIDY_URL:-未配置，只做规则整理}"
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           CONFIG='{"bundle":{"createUpdaterArtifacts":true}}'
           BUNDLE=src-tauri/target.noindex/release/bundle

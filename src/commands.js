@@ -15,6 +15,7 @@ export const COMMANDS = [
   { id: 'reveal', title: isMac ? '在访达中显示' : '在资源管理器中显示' },
   { id: 'export-html', title: '导出为网页…' },
   { id: 'export-pdf', title: '导出为 PDF…' },
+  { id: 'tidy', title: '一键整理格式', keys: 'Mod+Alt+L' },
   { id: 'find', title: '查找…', keys: 'Mod+F' },
   { id: 'replace', title: '替换…', keys: isMac ? 'Mod+Alt+F' : 'Ctrl+H' },
   { id: 'bold', title: '加粗', keys: 'Mod+B' },

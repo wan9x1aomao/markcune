@@ -26,6 +26,15 @@ source scripts/release.conf
 "$GH" auth status >/dev/null 2>&1 || { echo "请先登录 GitHub：$GH auth login"; exit 1; }
 [[ -z "$(git status --porcelain)" ]] || { echo "还有未提交的改动，请先提交，保证三个平台打包的是同一份代码"; exit 1; }
 
+# 0. 单元测试：和 Windows / Linux 的 CI 走同一个 npm test，测试不过就不发布，
+#    这样 macOS 这一侧也不会漏掉一道闸（CI 只覆盖 Windows 和 Linux）。
+echo "运行单元测试…"
+if ! npm test; then
+  echo "单元测试没有通过，已停止发布"
+  exit 1
+fi
+echo
+
 # 1. One version everywhere, committed so GitHub Actions builds exactly this code.
 VERSION="$VERSION" node -e '
   const fs = require("fs");
@@ -56,6 +65,14 @@ done
 echo "Windows / Linux 正在 GitHub Actions 上打包：$("$GH" run view "$RUN" --json url --jq .url)"
 
 export MDPAD_UPDATE_ENDPOINT="$UPDATE_ENDPOINT"
+# 「一键整理」的网关地址。留空则不注入，应用只做规则整理。
+# Windows / Linux 由 build.yml 从同一个 release.conf 读，三个平台的取值完全一致。
+if [[ -n "${TIDY_URL:-}" ]]; then
+  export MDPAD_TIDY_URL="$TIDY_URL"
+  echo "整理服务：$MDPAD_TIDY_URL"
+else
+  echo "整理服务：未配置，这一次的包只做规则整理"
+fi
 export TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGNING_KEY_FILE")"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
 npx tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":true}}'

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai;
 mod files;
 mod state;
 mod store;
@@ -256,6 +257,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         &item("italic", "斜体", Some("CmdOrCtrl+I"))?,
         &item("strikethrough", "删除线", Some("CmdOrCtrl+Alt+X"))?,
         &item("inline-code", "行内代码", Some("CmdOrCtrl+E"))?,
+        &separator()?,
+        &item("tidy", "一键整理格式", Some("CmdOrCtrl+Alt+L"))?,
     ])?)?;
 
     menu.append(&Submenu::with_items(app, "显示", true, &[
@@ -799,6 +802,8 @@ fn main() {
             export_html,
             remember_position,
             set_setting,
+            ai::ai_available,
+            ai::ai_label,
             test_report,
             files::read_document,
             files::write_document,

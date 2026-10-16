@@ -11,6 +11,7 @@ import { installShortcuts } from './shortcuts.js';
 import { createSidebar } from './sidebar.js';
 import { createUpdater } from './update.js';
 import { formatKeys, prompt, showMenu, toast } from './ui.js';
+import { createTidyHint, tidyDocument } from './tidy-ui.js';
 
 const AUTOSAVE_DELAY = 1000;
 const CHANGELOG_URL = 'https://mdpad.app.workbuddy.host/#changelog';
@@ -288,8 +289,16 @@ async function mountEditor(content, position) {
   findbar.refresh();
   syncModeSwitch();
   updateEmpty();
+  tidyHint.schedule();
   performance.mark('mdpad:mount-done');
 }
+
+const tidyHint = createTidyHint({
+  button: $('tidy-hint'),
+  getEditor: () => app.editor,
+  // Dismissing the button is remembered for this document until the app restarts.
+  docKey: () => app.doc.path ?? 'draft',
+});
 
 let wordCountTimer;
 function updateWordCount() {
@@ -314,6 +323,7 @@ function onChange() {
   scheduleOutline();
   schedulePreview();
   updateGuard();
+  tidyHint.schedule();
 }
 
 // Saving
@@ -797,6 +807,7 @@ const actions = {
   reveal: () => (app.doc.path || app.root) && api.reveal(app.doc.path ?? app.root),
   'export-html': exportHtml,
   'export-pdf': exportPdf,
+  tidy: () => tidyHint.run(),
   find: () => findbar.show(false),
   replace: () => findbar.show(true),
   'find-next': () => findbar.go(1),
@@ -865,6 +876,7 @@ function showMore(anchor) {
       ...fileItems,
       item('find'),
       item('replace'),
+      item('tidy'),
       'separator',
       item('toggle-source', app.mode === 'source' && !app.split),
       item('toggle-split', app.split),

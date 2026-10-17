@@ -1,19 +1,32 @@
-"""Renders the bright MDPad app icon to src-tauri/app-icon.png.
+"""Renders the bright MDPad app icon to src-tauri/app-icon.png (+ the full-bleed macOS version).
 
 The design is drawn on the old 1024 grid (100px of clear space) and then scaled up to the
 macOS icon grid the system's own icons use — see BODY below.
 
 整套图标这样重做，顺序别换：
 
-    python3 scripts/icon.py
-    npx tauri icon src-tauri/app-icon.png
+    python3 scripts/icon.py                 # 写 app-icon.png（圆角、带透明）与 app-icon-mac.png（满版不透明）
+    npx tauri icon src-tauri/app-icon.png   # 生成全套（Windows .ico、小尺寸 png、icns）
+    python3 scripts/icon.py --icns          # 用满版图重建 macOS 的 icon.icns（覆盖上一步）
     rm -rf src-tauri/icons/android src-tauri/icons/ios src-tauri/icons/64x64.png \\
            src-tauri/icons/StoreLogo.png src-tauri/icons/Square*.png
 
 第三条是因为 `tauri icon` 会顺带生成 iOS / Android / Windows Store 的一整套，
 而本项目只在 tauri.conf.json 里用到 6 个文件。之后再手动把
 icons/128x128@2x.png 覆盖到 mdpad-site/icon.png、icons/32x32.png 覆盖到 favicon.png。
+
+⚠️ 为什么 macOS 要单独一份满版不透明图（2026-10-17 实测，别再走弯路）
+macOS 26 里改「留白多少」根本没用：拿 NSWorkspace.icon(forFile:) 渲染验证过，
+一幅 60% 的方块和一幅 100% 的方块，系统都先裁掉透明边再缩放到同一个方框里 ——
+所以 824 / 896 / 1024 三种留白在程序坞里长得**一模一样**。
+真正的差别在**有没有透明像素**：带透明边的图，系统会在下面垫一块中性灰底板
+（实测 208,208,208）再把图案缩小放上去 —— 这才是「没填满」的真身；
+把画布填成完全不透明，图案就直接铺满整个圆角方块，与系统自带图标齐平。
 """
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageChops
 
 S = 4  # supersampling
@@ -117,4 +130,34 @@ grid = mask_rrect((offset, offset, offset + side, offset + side), round(R * GROW
 canvas.putalpha(ImageChops.multiply(canvas.getchannel('A'), grid))
 
 canvas.resize((1024, 1024), Image.LANCZOS).save('src-tauri/app-icon.png')
+
+# macOS 专用：同一幅构图，但铺满画布且**没有任何透明像素**（见文件头的实测说明）。
+# 铺满靠的是把方块直接拉到满版、垫一层同色渐变接住圆角处的空隙，系统之后自己会切圆角。
+bleed = icon.crop((PAD, PAD, N - PAD, N - PAD)).resize((N, N), Image.LANCZOS)
+backdrop = gradient((N, N), (255, 255, 255, 255), (236, 241, 252, 255)).convert('RGBA')
+backdrop.alpha_composite(bleed)
+backdrop.putalpha(Image.new('L', (N, N), 255))
+backdrop.resize((1024, 1024), Image.LANCZOS).save('src-tauri/app-icon-mac.png')
+
 print(f'wrote src-tauri/app-icon.png — 图形占画布 {BODY / 1024 * 100:.1f}%，圆角 {round(R * GROW / S)}/1024')
+print('wrote src-tauri/app-icon-mac.png — 满版不透明（macOS 用）')
+
+
+def build_icns(source: str, target: str) -> None:
+    """Rebuilds an .icns from one PNG, so the macOS icon can differ from the Windows one."""
+    sizes = [(16, '16x16'), (32, '16x16@2x'), (32, '32x32'), (64, '32x32@2x'),
+             (128, '128x128'), (256, '128x128@2x'), (256, '256x256'), (512, '256x256@2x'),
+             (512, '512x512'), (1024, '512x512@2x')]
+    image = Image.open(source).convert('RGBA')
+    with tempfile.TemporaryDirectory() as tmp:
+        iconset = Path(tmp) / 'icon.iconset'
+        iconset.mkdir()
+        for pixels, name in sizes:
+            image.resize((pixels, pixels), Image.LANCZOS).save(iconset / f'icon_{name}.png')
+        subprocess.run(['iconutil', '-c', 'icns', '-o', target, str(iconset)], check=True)
+
+
+if '--icns' in sys.argv:
+    # 这一步必须在 `npx tauri icon` 之后跑，否则会被它生成的 icns 覆盖。
+    build_icns('src-tauri/app-icon-mac.png', 'src-tauri/icons/icon.icns')
+    print('rebuilt src-tauri/icons/icon.icns from app-icon-mac.png (满版不透明)')

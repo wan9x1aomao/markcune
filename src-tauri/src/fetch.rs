@@ -72,6 +72,7 @@ pub fn classify(input: &str) -> Result<Target, String> {
                 path,
             })
         }
+        _ if host.ends_with(".github.io") => classify_pages(&host, &segments),
         _ => {
             // Any other host: treat it as a direct link to a file.
             let last = segments.last().ok_or("这个链接没有指向具体的文件")?;
@@ -79,6 +80,23 @@ pub fn classify(input: &str) -> Result<Target, String> {
             Ok(Target::File { url: url.to_string(), folder: host.clone(), path: PathBuf::from(name) })
         }
     }
+}
+
+/// GitHub Pages sites: `<user>.github.io/<repo>/` is just the published form of `<user>/<repo>`.
+///
+/// Reading the site itself would mean scraping HTML — the repository holds the real Markdown, so
+/// map the address back to it. A Pages site with no path segment is the user site, whose
+/// repository is named after the host (`<user>/<user>.github.io`).
+fn classify_pages(host: &str, segments: &[String]) -> Result<Target, String> {
+    let owner = &host[..host.len() - ".github.io".len()];
+    if !valid_name(owner) {
+        return Err("这个 GitHub Pages 链接里的账号名不合法".into());
+    }
+    let repo = segments.first().cloned().unwrap_or_else(|| host.to_string());
+    if !valid_name(&repo) {
+        return Err("链接里的仓库名不合法".into());
+    }
+    Ok(Target::Repo { owner: owner.to_string(), repo, branch: None })
 }
 
 fn classify_github(segments: &[String]) -> Result<Target, String> {
@@ -306,7 +324,7 @@ fn decode(bytes: &[u8]) -> Result<String, String> {
     let opening = text.trim_start();
     let head = opening.get(..64).unwrap_or(opening).to_ascii_lowercase();
     if head.starts_with("<!doctype html") || head.starts_with("<html") {
-        return Err("这个链接返回的是网页而不是文本文件".into());
+        return Err("这个链接返回的是网页而不是文本文件——如果它是 GitHub 上的书，请改用它的仓库地址".into());
     }
     Ok(text.to_string())
 }
@@ -595,6 +613,38 @@ mod tests {
         assert_eq!(url, "https://example.com/notes/today.md");
         assert_eq!(folder, "example.com");
         assert_eq!(path, PathBuf::from("today.md"));
+    }
+
+    #[test]
+    fn a_github_pages_site_is_traced_back_to_its_repository() {
+        // The page itself is HTML; only the repository has the Markdown. Every form of the same
+        // address has to land on the same place, or one of them silently downloads a web page.
+        for input in [
+            "https://arthaks.github.io/anthropic-engineering-guide/",
+            "https://arthaks.github.io/anthropic-engineering-guide",
+            "https://arthaks.github.io/anthropic-engineering-guide/book/03-claude-code.html",
+            "https://arthaks.github.io/anthropic-engineering-guide/?from=weibo",
+        ] {
+            assert_eq!(
+                repo(classify(input).unwrap()),
+                ("arthaks".into(), "anthropic-engineering-guide".into(), None),
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_github_pages_user_site_maps_to_the_repository_named_after_the_host() {
+        assert_eq!(
+            repo(classify("https://arthaks.github.io/").unwrap()),
+            ("arthaks".into(), "arthaks.github.io".into(), None)
+        );
+    }
+
+    #[test]
+    fn plain_github_dot_io_is_not_mistaken_for_a_pages_site() {
+        // No subdomain means no repository to fall back to, so it stays an ordinary direct file.
+        assert!(classify("https://github.io/report.md").is_ok());
     }
 
     #[test]

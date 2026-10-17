@@ -59,6 +59,21 @@ try {
   else recordError(error);
 }
 
+// 4) GitHub Pages 的书站地址 —— 它自己是 HTML，必须被还原成对应的仓库。
+//    这是用户实际报上来的那种链接：直接抓页面只会得到「返回的是网页」。
+try {
+  const pages = await invoke('open_from_url', { url: 'https://arthaks.github.io/anthropic-engineering-guide/' });
+  out.push(`PAGES ok kind=${pages.kind} files=${pages.files} title=${pages.title}`);
+  out.push(`PAGES path=${pages.path}`);
+  const opened = await invoke('read_document', { path: pages.path });
+  out.push(`PAGES chars=${opened.content.length} head=${JSON.stringify(opened.content.slice(0, 24))}`);
+  record(pages.kind === 'book' && pages.title === 'anthropic-engineering-guide'
+    && pages.files > 50 && opened.content.startsWith('#'));
+} catch (error) {
+  out.push(`PAGES fail ${error}`);
+  recordError(error);
+}
+
 const passed = verdicts.filter((value) => value === true).length;
 const broken = verdicts.some((value) => value === false);
 const verdict = broken ? 'fail' : passed === verdicts.length ? 'pass' : 'skip';

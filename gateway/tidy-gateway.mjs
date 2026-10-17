@@ -12,6 +12,8 @@
 //   TIDY_MODEL      模型名。默认 deepseek-chat
 //   TIDY_MAX_TOKENS 一次生成的上限。默认 4096
 //   PORT            监听端口。默认 8787
+//   TIDY_HOST       监听地址。默认 127.0.0.1（只有本机能连）。
+//                   改成 0.0.0.0 之类的对外地址时，必须同时设 TIDY_TOKEN，否则拒绝启动。
 //   TIDY_TOKEN      可选。设了之后要求请求带 Authorization: Bearer <token>
 //   TIDY_JSON_MODE  默认 1，要求上游返回 JSON；个别上游不支持时设 0
 //   TIDY_TIMEOUT_MS 调上游的超时。默认 45000（应用那边是 60 秒）
@@ -43,10 +45,33 @@ export function configFromEnv(env = process.env) {
     model: env.TIDY_MODEL || 'deepseek-chat',
     maxTokens: Number(env.TIDY_MAX_TOKENS || 4096),
     port: Number(env.PORT || 8787),
+    // 只听回环：别人扫不到这个端口，也就不需要令牌。要对外必须先想清楚鉴权。
+    host: env.TIDY_HOST || '127.0.0.1',
     token: env.TIDY_TOKEN || '',
     jsonMode: env.TIDY_JSON_MODE !== '0',
     timeoutMs: Number(env.TIDY_TIMEOUT_MS || 45_000),
   };
+}
+
+/** True for addresses that only accept connections from this machine. */
+export function isLoopback(host) {
+  const name = String(host ?? '').toLowerCase().replace(/^\[|\]$/g, '');
+  return name === 'localhost' || name === '::1' || /^127\./.test(name) || name === '::ffff:127.0.0.1';
+}
+
+/**
+ * Refuses a configuration that would expose the gateway to the network without a token.
+ * Being reachable by an unknown party is not the same as being usable by it: without a token
+ * anyone on the same LAN can spend the upstream model budget, one request at a time.
+ */
+export function checkExposure(config) {
+  if (config.host && !isLoopback(config.host) && !config.token) {
+    throw new Error(
+      `监听地址是 ${config.host}（对外可达），但没有设置 TIDY_TOKEN —— 同网段的任何人都能拿它刷模型的额度。\n` +
+        '要么去掉 TIDY_HOST（只给本机用），要么设一个 TIDY_TOKEN 并让调用方带上 Authorization: Bearer <token>。',
+    );
+  }
+  return config;
 }
 
 /** Pulls a label array out of whatever the model wrote: a JSON object, a bare array, or either inside prose. */
@@ -136,6 +161,15 @@ function send(res, status, body) {
 
 const fail = (message) => ({ error: { message } });
 
+/** Whether an `Origin` header belongs to the host this request was addressed to. */
+function sameHost(origin, host) {
+  try {
+    return new URL(origin).host === String(host ?? '');
+  } catch {
+    return false;
+  }
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0;
@@ -184,11 +218,25 @@ export function createGateway(config, { fetchImpl = fetch, log = () => {} } = {}
     const path = new URL(req.url, 'http://localhost').pathname;
 
     if (req.method === 'GET' && path === '/health') {
+      // 设了令牌就一并保护：/health 会说出模型名和上游地址，没必要给陌生人看。
+      if (config.token && req.headers.authorization !== `Bearer ${config.token}`) {
+        return send(res, 401, fail('没有带访问令牌'));
+      }
       return send(res, 200, { ok: true, ready: Boolean(config.apiKey), model: config.model, baseUrl: config.baseUrl });
     }
     if (req.method !== 'POST') return send(res, 405, fail('只接受 POST'));
     if (config.token && req.headers.authorization !== `Bearer ${config.token}`) {
       return send(res, 401, fail('没有带访问令牌'));
+    }
+    // 别的网站也能往这个端口发「简单请求」（text/plain，不触发预检），所以按类型挡：
+    // 只认 application/json，跨站想发就必须预检，而这里不回应预检。
+    const type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (type !== 'application/json') {
+      return send(res, 415, fail('只接受 Content-Type: application/json'));
+    }
+    // 兜底：如果浏览器还是带上了 Origin，就和本次请求的 Host 对一下。
+    if (req.headers.origin && !sameHost(req.headers.origin, req.headers.host)) {
+      return send(res, 403, fail('不接受跨站请求'));
     }
 
     let body;
@@ -221,11 +269,15 @@ export function createGateway(config, { fetchImpl = fetch, log = () => {} } = {}
 }
 
 async function main() {
-  const config = configFromEnv();
+  const config = checkExposure(configFromEnv());
   if (!config.apiKey) console.error('提示：还没有设置 TIDY_API_KEY，整理请求会一律返回 503，应用会退回规则整理。');
+  if (!isLoopback(config.host)) {
+    console.error(`注意：网关正在监听 ${config.host}，本机以外也能访问（已要求 TIDY_TOKEN）。`);
+  }
   const server = createGateway(config, { log: (line) => console.error(line) });
-  server.listen(config.port, () => {
-    console.error(`整理网关已启动：http://127.0.0.1:${config.port}（模型 ${config.model}，上游 ${config.baseUrl}）`);
+  server.listen(config.port, config.host, () => {
+    const shown = config.host.includes(':') ? `[${config.host}]` : config.host;
+    console.error(`整理网关已启动：http://${shown}:${config.port}（模型 ${config.model}，上游 ${config.baseUrl}）`);
     console.error(`接到应用：MDPAD_TIDY_URL=http://127.0.0.1:${config.port}/tidy`);
   });
 }

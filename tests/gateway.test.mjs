@@ -2,7 +2,7 @@
 // 关键是最后那条——网关给出的标签必须能通过应用自己的校验，否则应用会把整段退回规则整理。
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { configFromEnv, createGateway, fit, parseLabels } from '../gateway/tidy-gateway.mjs';
+import { checkExposure, configFromEnv, createGateway, fit, isLoopback, parseLabels } from '../gateway/tidy-gateway.mjs';
 import { applyLabels, ruleLabels, sameWords, splitLines, validateLabels } from '../src/tidy.js';
 
 const LINES = ['项目周报', '', '一、本周进展', '完成了登录页面'];
@@ -114,6 +114,25 @@ console.log('ok  模型输出的三种写法都能解析');
   console.log('ok  空/超长/坏 JSON/缺 lines/错方法：都被挡住');
 }
 
+// 5b. 跨站与类型：浏览器里别的网站能发「简单请求」，必须在碰模型之前挡住
+{
+  const before = upstream.calls.length;
+  const plain = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'text/plain', origin: 'https://evil.example' },
+    body: JSON.stringify({ lines: LINES }),
+  });
+  assert.equal(plain.status, 415, 'text/plain 不是 application/json');
+  const crossSite = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    body: JSON.stringify({ lines: LINES }),
+  });
+  assert.equal(crossSite.status, 403, '外来 Origin 不该被处理');
+  assert.equal(upstream.calls.length, before, '这两次都不该花掉上游额度');
+  console.log('ok  跨站请求：text/plain 与外来 Origin 都挡在模型之前');
+}
+
 // 6. 没有模型 Key：明确说清楚，而不是假装成功
 {
   const bare = await startGateway({ baseUrl: upstream.url, apiKey: '' });
@@ -187,7 +206,19 @@ console.log('ok  模型输出的三种写法都能解析');
   assert.equal(env.jsonMode, true);
   assert.equal(configFromEnv({ TIDY_JSON_MODE: '0', TIDY_BASE_URL: 'http://x/v1/' }).jsonMode, false);
   assert.equal(configFromEnv({ TIDY_BASE_URL: 'http://x/v1/' }).baseUrl, 'http://x/v1');
-  console.log('ok  纯函数与默认配置');
+
+  // 默认只听回环；要对外必须自带令牌，否则拒绝启动。
+  assert.equal(env.host, '127.0.0.1', '默认不能是对外地址');
+  for (const host of ['127.0.0.1', '127.0.0.5', 'localhost', '::1', '[::1]']) {
+    assert.ok(isLoopback(host), `${host} 应视为回环`);
+  }
+  for (const host of ['0.0.0.0', '192.168.1.5', '::', 'example.com']) {
+    assert.equal(isLoopback(host), false, `${host} 不是回环`);
+  }
+  assert.throws(() => checkExposure({ host: '0.0.0.0', token: '' }), /TIDY_TOKEN/);
+  assert.equal(checkExposure({ host: '0.0.0.0', token: 'x' }).host, '0.0.0.0');
+  assert.equal(checkExposure({ host: '127.0.0.1', token: '' }).host, '127.0.0.1');
+  console.log('ok  纯函数与默认配置（含监听地址与暴露检查）');
 }
 
 await gateway.close();

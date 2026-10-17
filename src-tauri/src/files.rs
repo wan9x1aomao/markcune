@@ -24,6 +24,16 @@ pub fn is_document(path: &Path) -> bool {
         .is_some_and(|ext| DOC_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
 }
 
+/// The extension a pasted image keeps, falling back to `png` for anything unrecognised —
+/// the name comes from the page, so it does not get to choose what lands in `assets/`.
+fn image_ext(name: &Path) -> String {
+    name.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .filter(|e| IMAGE_EXTENSIONS.contains(&e.as_str()))
+        .unwrap_or_else(|| "png".to_string())
+}
+
 /// Chinese description of an I/O error (OS messages are often English).
 pub fn describe(err: &std::io::Error) -> String {
     match err.kind() {
@@ -107,6 +117,12 @@ fn remember_document(app: &AppHandle, label: &str, path: &Path, content: &str) {
 #[tauri::command]
 pub fn read_document(window: WebviewWindow, path: PathBuf) -> Result<Opened, String> {
     let path = absolute(&path);
+    // 这条命令拿的是页面给的路径，读之前必须自己判一次：同目录的 list_dir / list_documents
+    // 早就按 is_document 过滤了，唯独「真正读内容」的这一条没过滤，等于给渲染层留下了
+    // 任意读本机 UTF-8 文件的口子（~/.ssh/id_rsa 这类）。渲染层一旦被攻破，这里就是最后一道门。
+    if !is_document(&path) {
+        return Err("只能打开 Markdown 或纯文本文件".into());
+    }
     let bytes = std::fs::read(&path).map_err(|e| describe(&e))?;
     let content = String::from_utf8(bytes).map_err(|_| "文件不是 UTF-8 编码的文本".to_string())?;
     let app = window.app_handle();
@@ -426,7 +442,7 @@ pub fn save_image(window: WebviewWindow, request: Request<'_>) -> Result<String,
     std::fs::create_dir_all(&dir).map_err(|e| describe(&e))?;
 
     let name = Path::new(&name);
-    let ext = name.extension().and_then(|e| e.to_str()).filter(|e| !e.is_empty()).unwrap_or("png");
+    let ext = image_ext(name);
     let mut stem = String::new();
     for c in name.file_stem().and_then(|s| s.to_str()).unwrap_or("").chars() {
         if c.is_alphanumeric() || c == '_' || c == '-' {
@@ -673,6 +689,29 @@ mod tests {
             rest = &rest[b..];
         }
         assert_eq!(urls, ["assets/a.png", "pic/b.jpg", "my pic.png"]);
+    }
+
+    #[test]
+    fn only_image_extensions_survive_a_pasted_name() {
+        assert_eq!(image_ext(Path::new("a.PNG")), "png");
+        assert_eq!(image_ext(Path::new("照片.jpeg")), "jpeg");
+        // 页面给的名字不能决定写出去的后缀。
+        assert_eq!(image_ext(Path::new("x.sh")), "png");
+        assert_eq!(image_ext(Path::new("x")), "png");
+        assert_eq!(image_ext(Path::new("x.tar.gz")), "png");
+        assert_eq!(image_ext(Path::new("x.")), "png");
+    }
+
+    #[test]
+    fn only_documents_are_readable_through_the_page() {
+        assert!(is_document(Path::new("/tmp/a.md")));
+        assert!(is_document(Path::new("/tmp/a.MARKDOWN")));
+        assert!(is_document(Path::new("/tmp/a.txt")));
+        // 渲染层一旦被攻破，这些路径必须进不去。
+        assert!(!is_document(Path::new("/home/u/.ssh/id_rsa")));
+        assert!(!is_document(Path::new("/home/u/.aws/credentials")));
+        assert!(!is_document(Path::new("/etc/passwd")));
+        assert!(!is_document(Path::new("/tmp/a.sh")));
     }
 
     #[cfg(unix)]

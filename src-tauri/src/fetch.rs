@@ -400,6 +400,16 @@ fn unpack_with(archive: &[u8], dest: &Path, windows: bool) -> Result<Unpacked, S
     Ok(out)
 }
 
+/// The name a downloaded single document lands under: a link without an extension gets `.md`,
+/// because the library should only contain files the app can open again.
+fn document_name(path: PathBuf) -> PathBuf {
+    if crate::files::is_document(&path) {
+        path
+    } else {
+        path.with_extension("md")
+    }
+}
+
 fn strip_wrapper(path: &Path) -> Option<PathBuf> {
     let mut parts = path.components();
     parts.next()?;
@@ -462,22 +472,26 @@ pub struct Fetched {
 }
 
 /// Where downloaded books live. `MDPAD_LIBRARY_DIR` overrides it, following `MDPAD_DATA_DIR`.
-fn library_dir(app: &AppHandle) -> PathBuf {
+fn library_dir(app: &AppHandle) -> Result<PathBuf, String> {
     if let Some(dir) = std::env::var_os("MDPAD_LIBRARY_DIR") {
-        return PathBuf::from(dir);
+        return Ok(PathBuf::from(dir));
     }
     app.path()
         .document_dir()
         .map(|dir| dir.join("MDPad"))
         .or_else(|_| app.path().home_dir().map(|home| home.join("Documents").join("MDPad")))
-        .unwrap_or_else(|_| std::env::temp_dir().join("MDPad"))
+        // 共享临时目录谁都能预建、也能换成符号链接（多用户机器上就是把书库交出去），
+        // 所以最后退的是用户自己的应用数据目录，和 main.rs 里设置/草稿的落点保持一致。
+        .or_else(|_| app.path().app_data_dir().map(|dir| dir.join("MDPad")))
+        .or_else(|_| app.path().home_dir().map(|home| home.join(".mdpad").join("library")))
+        .map_err(|_| "找不到可以存放书库的位置".to_string())
 }
 
 #[tauri::command]
 pub async fn open_from_url(app: AppHandle, url: String) -> Result<Fetched, String> {
     let target = classify(&url)?;
     let client = client()?;
-    let library = library_dir(&app);
+    let library = library_dir(&app)?;
 
     match target {
         Target::File { url, folder, path } => {
@@ -487,6 +501,9 @@ pub async fn open_from_url(app: AppHandle, url: String) -> Result<Fetched, Strin
                 return Err("这个文件是空的".into());
             }
             let root = library.join(safe_name(&folder)?);
+            // 链接末尾可能没有扩展名（`https://example.com/readme`）。书库里的文件必须能再次打开，
+            // 而 read_document 只认文档类型，所以这里就把名字补成 .md。
+            let path = document_name(path);
             let dest = root.join(&path);
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent).map_err(|error| format!("无法创建目录：{error}"))?;
@@ -683,6 +700,16 @@ mod tests {
         }
         assert_eq!(safe_name("笔记.md").unwrap(), "笔记.md");
         assert_eq!(safe_name("%E7%AC%94%E8%AE%B0.md").unwrap(), "笔记.md");
+    }
+
+    #[test]
+    fn a_link_without_an_extension_still_lands_as_something_openable() {
+        assert_eq!(document_name(PathBuf::from("readme")), PathBuf::from("readme.md"));
+        assert_eq!(document_name(PathBuf::from("chapter.2")), PathBuf::from("chapter.md"));
+        assert_eq!(document_name(PathBuf::from("notes.rst")), PathBuf::from("notes.md"));
+        // 已经是文档类型的名字保持原样，别把 README.md 变成 README.md.md。
+        assert_eq!(document_name(PathBuf::from("README.md")), PathBuf::from("README.md"));
+        assert_eq!(document_name(PathBuf::from("a.txt")), PathBuf::from("a.txt"));
     }
 
     #[test]

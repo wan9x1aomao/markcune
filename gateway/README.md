@@ -16,7 +16,7 @@
 TIDY_API_KEY=sk-xxxx node gateway/tidy-gateway.mjs
 ```
 
-零依赖，Node 18+ 即可（用的是内置 `fetch`）。默认监听 `8787`。
+零依赖，Node 18+ 即可（用的是内置 `fetch`）。默认监听 `127.0.0.1:8787`——只有本机能连。
 
 ### 环境变量
 
@@ -26,12 +26,20 @@ TIDY_API_KEY=sk-xxxx node gateway/tidy-gateway.mjs
 | `TIDY_BASE_URL` | `https://api.deepseek.com/v1` | 任何 OpenAI 兼容接口 |
 | `TIDY_MODEL` | `deepseek-chat` | 模型名 |
 | `PORT` | `8787` | 监听端口 |
-| `TIDY_TOKEN` | 空 | 设了之后要求 `Authorization: Bearer <token>` |
+| `TIDY_HOST` | `127.0.0.1` | 监听地址。**改成对外地址时必须有 `TIDY_TOKEN`，否则拒绝启动** |
+| `TIDY_TOKEN` | 空 | 设了之后要求 `Authorization: Bearer <token>`（`/health` 也一起保护） |
 | `TIDY_JSON_MODE` | `1` | 要求上游返回 JSON；个别上游不支持时设 `0` |
 | `TIDY_MAX_TOKENS` | `4096` | 一次生成的上限 |
 | `TIDY_TIMEOUT_MS` | `45000` | 调上游的超时（应用那边是 60 秒） |
 
 自检：`curl http://127.0.0.1:8787/health` → `{"ok":true,"ready":true,…}`
+
+### 请求侧的两道门
+
+- **只认 `Content-Type: application/json`**，别的一律 `415`。浏览器里别的网站能往本机端口发
+  「简单请求」（`text/plain`，不触发预检），按类型挡掉就不用再指望浏览器替你守门。
+  真要跨站发 `application/json` 必须先预检，而这个服务不回应预检。
+- **带 `Origin` 且和本次 `Host` 对不上就 `403`**。应用自己（reqwest）不发 `Origin`，不受影响。
 
 ## 接到应用
 

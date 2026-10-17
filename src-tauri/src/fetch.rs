@@ -934,8 +934,21 @@ mod tests {
         assert!(windows.join("README.md").is_file());
         assert!(windows.join("src/ch1.md").is_file(), "unrelated entries must be unaffected");
         assert!(!windows.join("why?.md").exists());
+    }
 
-        // Everywhere else those names are ordinary, so nothing is left out.
+    // 那些名字在别处是普通文件，所以一个都不该落下。
+    // 这条只能在非 Windows 上跑：它要证明的是「放开规则后真的写得下去」，
+    // 而 Windows 的文件系统本身就不接受 `?` 和 `:`，在那边跑不出这个结论 —— 会以
+    // os error 123 失败，看起来像产品坏了，其实是被测的宿主文件系统不配合。
+    #[cfg(not(windows))]
+    #[test]
+    fn names_windows_rejects_are_ordinary_files_elsewhere() {
+        let bytes = archive(&[
+            ("book-main/README.md", "# ok\n", FILE),
+            ("book-main/why?.md", "# also a chapter\n", FILE),
+            ("book-main/Day 3: notes/ch.md", "# inside a folder Windows cannot name\n", FILE),
+            ("book-main/src/ch1.md", "# one\n", FILE),
+        ]);
         let unix = scratch("unix-names");
         assert_eq!(unpack_with(&bytes, &unix, false).unwrap(), Unpacked { files: 4, skipped: 0 });
         assert!(unix.join("why?.md").is_file());

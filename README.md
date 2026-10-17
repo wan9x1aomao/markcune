@@ -1,5 +1,7 @@
 # MDPad
 
+[![CI](https://github.com/wan9x1aomao/mdpad/actions/workflows/ci.yml/badge.svg)](https://github.com/wan9x1aomao/mdpad/actions/workflows/ci.yml)
+
 轻量、免费的本地 Markdown 编辑器。打开就能写字，写下的每个字都留在你自己的硬盘上 —— 不登录、不联网、不上传。
 
 ![MDPad 界面](docs/screenshot.png)

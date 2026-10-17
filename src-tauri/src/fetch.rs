@@ -340,6 +340,8 @@ struct Unpacked {
     files: usize,
     /// Entries left out because this platform cannot hold their names.
     skipped: usize,
+    /// The folder already held a copy of this book, so this download overwrote its files.
+    replaced: bool,
 }
 
 /// Extracts an archive into `dest`, reporting what landed and what could not.
@@ -358,9 +360,16 @@ fn unpack_with(archive: &[u8], dest: &Path, windows: bool) -> Result<Unpacked, S
     if zip.len() > MAX_ENTRIES {
         return Err("压缩包里的文件太多了，已停止".into());
     }
+    // The same book can be downloaded again to pick up upstream changes; that is meant to refresh
+    // the folder rather than create `book-2`, but overwriting someone's local edits must not happen
+    // quietly — the receipt says so (see `downloadNotice`).
+    let replaced = dest
+        .read_dir()
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false);
     std::fs::create_dir_all(dest).map_err(|error| format!("无法创建目录：{error}"))?;
 
-    let mut out = Unpacked::default();
+    let mut out = Unpacked { replaced, ..Unpacked::default() };
     let mut total = 0u64;
     for index in 0..zip.len() {
         let mut entry = zip.by_index(index).map_err(|error| format!("压缩包损坏：{error}"))?;
@@ -469,6 +478,8 @@ pub struct Fetched {
     files: usize,
     /// Files the book contained whose names this platform cannot hold, so they were left out.
     skipped: usize,
+    /// Same book downloaded before: the folder was refreshed in place.
+    replaced: bool,
 }
 
 /// Where downloaded books live. `MDPAD_LIBRARY_DIR` overrides it, following `MDPAD_DATA_DIR`.
@@ -510,7 +521,7 @@ pub async fn open_from_url(app: AppHandle, url: String) -> Result<Fetched, Strin
             }
             atomic_write(&dest, text.as_bytes())?;
             let title = dest.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-            Ok(Fetched { path: dest, root, kind: "file", title, files: 1, skipped: 0 })
+            Ok(Fetched { path: dest, root, kind: "file", title, files: 1, skipped: 0, replaced: false })
         }
         Target::Repo { owner, repo, branch } => {
             let archive = fetch_archive(&client, &owner, &repo, branch.as_deref())
@@ -521,7 +532,15 @@ pub async fn open_from_url(app: AppHandle, url: String) -> Result<Fetched, Strin
             let files = unpacked.files;
             let entry = pick_entry(&root)
                 .ok_or_else(|| format!("这本书里没有找到能打开的 Markdown 文件（已解压 {files} 个文件）"))?;
-            Ok(Fetched { path: entry, root, kind: "book", title: repo, files, skipped: unpacked.skipped })
+            Ok(Fetched {
+                path: entry,
+                root,
+                kind: "book",
+                title: repo,
+                files,
+                skipped: unpacked.skipped,
+                replaced: unpacked.replaced,
+            })
         }
     }
 }
@@ -889,6 +908,16 @@ mod tests {
     }
 
     #[test]
+    fn downloading_the_same_book_again_reports_that_it_replaced_the_old_copy() {
+        let dest = scratch("again");
+        let bytes = archive(&[("book-main/README.md", "# 第一版\n", FILE)]);
+        assert!(!unpack(&bytes, &dest).unwrap().replaced, "a new folder is not a replacement");
+        let second = unpack(&bytes, &dest).unwrap();
+        assert!(second.replaced, "the second download overwrote an existing folder");
+        assert_eq!(second.files, 1);
+    }
+
+    #[test]
     fn an_entry_that_climbs_out_of_the_folder_is_refused() {
         let dest = scratch("climb");
         let bytes = archive(&[
@@ -957,7 +986,10 @@ mod tests {
         // Windows: the two unsavable entries — one file, one folder — are passed over and the rest
         // of the book arrives intact. Aborting here would have cost the reader everything.
         let windows = scratch("win-names");
-        assert_eq!(unpack_with(&bytes, &windows, true).unwrap(), Unpacked { files: 2, skipped: 2 });
+        assert_eq!(
+            unpack_with(&bytes, &windows, true).unwrap(),
+            Unpacked { files: 2, skipped: 2, replaced: false }
+        );
         assert!(windows.join("README.md").is_file());
         assert!(windows.join("src/ch1.md").is_file(), "unrelated entries must be unaffected");
         assert!(!windows.join("why?.md").exists());
@@ -977,7 +1009,10 @@ mod tests {
             ("book-main/src/ch1.md", "# one\n", FILE),
         ]);
         let unix = scratch("unix-names");
-        assert_eq!(unpack_with(&bytes, &unix, false).unwrap(), Unpacked { files: 4, skipped: 0 });
+        assert_eq!(
+            unpack_with(&bytes, &unix, false).unwrap(),
+            Unpacked { files: 4, skipped: 0, replaced: false }
+        );
         assert!(unix.join("why?.md").is_file());
         assert!(unix.join("Day 3: notes/ch.md").is_file());
     }

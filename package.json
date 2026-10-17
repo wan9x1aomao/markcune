@@ -2,6 +2,24 @@
   "name": "mdpad",
   "version": "3.3.5",
   "description": "本地 Markdown 所见即所得编辑器",
+  "license": "MIT",
+  "author": "wan9x1aomao",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wan9x1aomao/mdpad.git"
+  },
+  "homepage": "https://mdpad.app.workbuddy.host",
+  "bugs": {
+    "url": "https://github.com/wan9x1aomao/mdpad/issues"
+  },
+  "keywords": [
+    "markdown",
+    "editor",
+    "wysiwyg",
+    "tauri",
+    "milkdown",
+    "desktop"
+  ],
   "scripts": {
     "dev:web": "vite",
     "build:web": "vite build",
@@ -11,7 +29,6 @@
     "build:win": "tauri build --bundles nsis",
     "test": "node tests/tidy.test.mjs && node tests/gateway.test.mjs && node tests/notices.test.mjs"
   },
-  "license": "ISC",
   "devDependencies": {
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-markdown": "^6.5.2",

@@ -5,3 +5,4 @@ build/
 release/
 src-tauri/target.noindex/
 src-tauri/gen/
+.claude/

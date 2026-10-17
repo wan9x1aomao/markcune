@@ -1,0 +1,65 @@
+name: CI
+
+# 每个 PR 和每次推 main 都跑一遍三平台的单测。
+# 冒烟测试（tests/smoke）不放在这里：它会真的去 GitHub 下载一个仓库，容易受网络和限流影响，
+# 只由 .github/workflows/build.yml 在发版时跑。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 测试（${{ matrix.platform }}）
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-22.04
+          - platform: macos
+            os: macos-latest
+          - platform: windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux 依赖
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+                                  librsvg2-dev libxdo-dev libssl-dev patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target.noindex
+
+      - run: npm ci
+
+      - name: 前端单测
+        run: npm test
+
+      - name: 前端构建
+        if: matrix.platform == 'linux'
+        run: npm run build:web
+
+      - name: Rust 单测
+        working-directory: src-tauri
+        run: cargo test

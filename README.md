@@ -16,7 +16,7 @@
 | Windows | 10 / 11，使用系统自带的 WebView2 |
 | Linux | 需要 WebKitGTK 4.1（`.deb` 与 `.AppImage` 都提供） |
 
-历史版本和每个版本的源码快照见 Releases。
+历史版本按 [`v3.2.1` → `v3.3.5`](https://github.com/wan9x1aomao/mdpad/tags) 打了 tag，每个 tag 就是那个版本的源码快照。
 
 ## 功能
 

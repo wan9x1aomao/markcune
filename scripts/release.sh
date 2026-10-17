@@ -152,3 +152,40 @@ else
   echo "  $LINUX → $SITE_LINUX"
   echo "  $DEB → $SITE_DEB"
 fi
+
+# 4. 删掉本次的草稿 Release。它只是 Windows / Linux 产物的搬运工：资产已经收进
+#    release/<版本号>/，也进了官网目录，留着只会一版一个地堆着（2026-10-17 一次清过 8 个）。
+#    想让某个版本在 GitHub 上留一份正式 Release，用 KEEP_RELEASE=1 跑（草稿会留着，
+#    之后 gh release edit v<版本号> --draft=false 发布）；历史版本靠 git tag 记录。
+cleanup_draft() {
+  local is_draft
+  if [[ -n "${KEEP_RELEASE:-}" ]]; then
+    echo
+    echo "KEEP_RELEASE=1：保留草稿 Release v$VERSION，要发布就执行 $GH release edit v$VERSION --draft=false"
+    return 0
+  fi
+  is_draft=$("$GH" release view "v$VERSION" --json isDraft --jq .isDraft 2>/dev/null || true)
+  case "$is_draft" in
+    true)
+      # 草稿的 tag 还没在远端创建（gh 给的是 untagged-… 占位），所以不要加 --cleanup-tag：
+      # 它去删一个不存在的 tag 会以非零码退出，让成功删除被误判成失败。删完按实际状态复核。
+      "$GH" release delete "v$VERSION" --yes >/dev/null 2>&1 || true
+      if [[ -z "$("$GH" release view "v$VERSION" --json tagName --jq .tagName 2>/dev/null || true)" ]]; then
+        echo
+        echo "已删除草稿 Release v$VERSION（资产保留在 ${OUT} 和官网目录）"
+      else
+        echo
+        echo "草稿 Release v$VERSION 没能自动删除，可手动执行：$GH release delete v$VERSION --yes"
+      fi
+      ;;
+    false)
+      echo
+      echo "Release v$VERSION 已经是正式版，未删除"
+      ;;
+    *)
+      echo
+      echo "没有找到 v$VERSION 的 Release，跳过清理"
+      ;;
+  esac
+}
+cleanup_draft

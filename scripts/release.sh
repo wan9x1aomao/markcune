@@ -161,7 +161,7 @@ cleanup_draft() {
   local is_draft
   if [[ -n "${KEEP_RELEASE:-}" ]]; then
     echo
-    echo "KEEP_RELEASE=1：保留草稿 Release v$VERSION，要发布就执行 $GH release edit v$VERSION --draft=false"
+    echo "KEEP_RELEASE=1：保留草稿 Release v${VERSION}，要发布就执行 $GH release edit v${VERSION} --draft=false"
     return 0
   fi
   is_draft=$("$GH" release view "v$VERSION" --json isDraft --jq .isDraft 2>/dev/null || true)
@@ -172,7 +172,7 @@ cleanup_draft() {
       "$GH" release delete "v$VERSION" --yes >/dev/null 2>&1 || true
       if [[ -z "$("$GH" release view "v$VERSION" --json tagName --jq .tagName 2>/dev/null || true)" ]]; then
         echo
-        echo "已删除草稿 Release v$VERSION（资产保留在 ${OUT} 和官网目录）"
+        echo "已删除草稿 Release v${VERSION}（资产保留在 ${OUT} 和官网目录）"
       else
         echo
         echo "草稿 Release v$VERSION 没能自动删除，可手动执行：$GH release delete v$VERSION --yes"

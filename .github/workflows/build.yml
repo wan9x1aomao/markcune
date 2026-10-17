@@ -28,8 +28,16 @@ jobs:
         run: |
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          gh release view "v$VERSION" >/dev/null 2>&1 || \
+          # 已经发布出去的版本不许被重跑覆盖：产物不一样，用户签名校验也会对不上。
+          # 没提升版本号就重跑发版，是这里唯一能拦的地方。
+          EXISTING=$(gh release view "v$VERSION" --json isDraft --jq .isDraft 2>/dev/null || echo missing)
+          if [ "$EXISTING" = "false" ]; then
+            echo "::error::v$VERSION 已经是正式发布版，拒绝用新产物覆盖。请先在 tauri.conf.json 提升版本号。"
+            exit 1
+          fi
+          if [ "$EXISTING" = "missing" ]; then
             gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "MDPad $VERSION" --notes "构建产物，由 scripts/release.sh 收集后发布到官网。"
+          fi
 
   build:
     needs: prepare

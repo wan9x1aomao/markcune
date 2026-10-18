@@ -1,13 +1,17 @@
 // The WYSIWYG editor (Milkdown Crepe), configured in Chinese.
 import { LanguageDescription } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
+import { EditorView } from '@codemirror/view';
 import { Crepe } from '@milkdown/crepe';
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame.css';
-import { editorViewCtx } from '@milkdown/kit/core';
+import { commandsCtx, editorViewCtx } from '@milkdown/kit/core';
 import { redoCommand, undoCommand } from '@milkdown/kit/plugin/history';
 import { listener } from '@milkdown/kit/plugin/listener';
 import {
+  addBlockTypeCommand,
+  clearTextInCurrentBlockCommand,
+  codeBlockSchema,
   syncHeadingIdPlugin,
   syncListOrderPlugin,
   toggleEmphasisCommand,
@@ -37,9 +41,130 @@ const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 if (dark) await import('@milkdown/crepe/theme/frame-dark.css');
 
 const LANGUAGE_NAMES = { latex: '公式', mermaid: '流程图', text: '纯文本', plaintext: '纯文本', '': '纯文本' };
+/**
+ * Canonical name for a fence language: exact name, then alias, then file extension ("py" → Python).
+ * The fuzzy matcher is tried last by the caller — it is loose enough to pick "C" for "C++".
+ */
+const exactLanguageName = (language) => {
+  const key = language.toLowerCase();
+  const hit = languages.find(
+    (desc) =>
+      desc.name.toLowerCase() === key ||
+      desc.alias.some((alias) => alias.toLowerCase() === key) ||
+      desc.extensions.some((extension) => extension.toLowerCase() === key),
+  );
+  return hit?.name;
+};
 /** Chinese names for special blocks, proper names ("Python", "C++") for the rest. */
 const languageLabel = (language) =>
-  LANGUAGE_NAMES[language.toLowerCase()] ?? LanguageDescription.matchLanguageName(languages, language, true)?.name ?? language;
+  LANGUAGE_NAMES[language.toLowerCase()] ??
+  exactLanguageName(language) ??
+  LanguageDescription.matchLanguageName(languages, language, true)?.name ??
+  language;
+
+/**
+ * Mermaid has no CodeMirror grammar, so `@codemirror/language-data` never offered it in the language
+ * picker — the block was reachable only by typing a ```mermaid fence. Register it here: no syntax
+ * highlighting (the block draws the diagram instead), but the aliases make it searchable.
+ */
+const DIAGRAM_LANGUAGE = LanguageDescription.of({
+  name: 'mermaid',
+  alias: ['mermaid', '流程图', 'flowchart', 'flow', '图表'],
+  load: () => Promise.resolve(undefined),
+});
+
+/**
+ * Copies for the picker. Crepe deep-merges its feature config with lodash, and that merge writes
+ * into the arrays it is handed: pointing it at `languages` itself pushed other languages' aliases
+ * onto innocent entries (C ended up with "c++", Go with "html"), so the list searched and labelled
+ * wrongly. Copies keep the shared data pristine.
+ */
+const languageCopy = (description, extraAliases = []) =>
+  LanguageDescription.of({
+    name: description.name,
+    alias: [...new Set([...description.alias, ...extraAliases])],
+    support: description.support,
+    load: () => description.load(),
+  });
+
+/** Chinese aliases so that 「公式」 finds LaTeX — the picker filters by name/alias, not by label. */
+const MATH_ALIASES = ['公式', '数学公式', '数学', 'math', 'formula'];
+
+/** Everything the picker offers: the CodeMirror language list, plus the diagram entry at the top. */
+const CODE_LANGUAGES = [
+  DIAGRAM_LANGUAGE,
+  ...languages.map((description) =>
+    languageCopy(description, description.name.toLowerCase() === 'latex' ? MATH_ALIASES : []),
+  ),
+];
+
+/**
+ * Label inside the picker. The list already holds exact names, so only the special blocks need
+ * translating — running them through `languageLabel` fuzzy-matched "C++" down to "C" and "JSON" to
+ * "Jinja", which made the list look like it had duplicates.
+ */
+const pickerLabel = (language) => LANGUAGE_NAMES[language.toLowerCase()] ?? language;
+
+// Menu icons: strokes only, 24×24. The `fill: none` has to be inline — the menu stylesheet sets
+// `fill` on the svg element for Crepe's solid glyphs, which would turn these outlines into blobs.
+const icon = (shapes) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" style="fill:none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${shapes}</svg>`;
+
+const FLOW_ICON = icon(`
+  <rect x="9" y="2.5" width="6" height="4.6" rx="1.2"/>
+  <rect x="2.5" y="16.4" width="6" height="4.6" rx="1.2"/>
+  <rect x="15.5" y="16.4" width="6" height="4.6" rx="1.2"/>
+  <path d="M12 7.1v5.2M5.5 12.3h13M5.5 12.3v4.1M18.5 12.3v4.1"/>`);
+const SEQUENCE_ICON = icon(`
+  <rect x="2" y="2.5" width="8" height="4.5" rx="1.2"/>
+  <rect x="14" y="2.5" width="8" height="4.5" rx="1.2"/>
+  <path d="M6 7v13M18 7v13M9.5 11h5.5M13.4 9.6l1.6 1.4-1.6 1.4"/>`);
+const GANTT_ICON = icon(`<path stroke-width="3" d="M4 6.5h8M4 12h13M4 17.5h5.5"/>`);
+const PIE_ICON = icon(`<circle cx="12" cy="12" r="8.5"/><path d="M12 12V3.5M12 12l7.2 4.4"/>`);
+const CLASS_ICON = icon(`
+  <rect x="4.5" y="2.5" width="15" height="19" rx="2"/>
+  <path d="M4.5 8.5h15M8 12.5h5.5M8 16.5h8"/>`);
+const FORMULA_ICON = icon(`<path d="M16.5 5h-9l4.5 7-4.5 7h9"/>`);
+
+/**
+ * What the slash menu can insert besides plain text: a fenced block of `language` with a sample
+ * inside. The sample matters — an empty mermaid block only shows an error and an empty LaTeX block
+ * shows nothing at all — and `selectSnippet` selects it, so the first keystroke replaces it.
+ */
+const FORMULA_SNIPPET = { label: '公式', language: 'LaTeX', starter: 'E = mc^2', icon: FORMULA_ICON };
+
+const DIAGRAM_SNIPPETS = [
+  { key: 'diagram-flow', label: '流程图', language: 'mermaid', starter: 'graph LR\n  开始 --> 结束', icon: FLOW_ICON },
+  {
+    key: 'diagram-sequence',
+    label: '时序图',
+    language: 'mermaid',
+    starter: 'sequenceDiagram\n  用户->>应用: 打开文档\n  应用-->>用户: 显示内容',
+    icon: SEQUENCE_ICON,
+  },
+  {
+    key: 'diagram-gantt',
+    label: '甘特图',
+    language: 'mermaid',
+    starter:
+      'gantt\n  title 写作计划\n  dateFormat YYYY-MM-DD\n  axisFormat %m-%d\n  section 初稿\n  第一章 :a1, 2026-01-05, 10d\n  第二章 :a2, after a1, 10d\n  section 定稿\n  通读全稿 :a3, after a2, 7d',
+    icon: GANTT_ICON,
+  },
+  {
+    key: 'diagram-pie',
+    label: '饼图',
+    language: 'mermaid',
+    starter: 'pie title 时间分配\n  "写作" : 60\n  "修改" : 30\n  "其他" : 10',
+    icon: PIE_ICON,
+  },
+  {
+    key: 'diagram-class',
+    label: '类图',
+    language: 'mermaid',
+    starter: 'classDiagram\n  class 文档 {\n    +String 标题\n    +save() 保存\n  }',
+    icon: CLASS_ICON,
+  },
+];
 
 /** The code block's language button shows the raw name (or "Text"); show Chinese names instead. */
 function relabelLanguageButtons(root) {
@@ -58,6 +183,42 @@ const COMMANDS = {
   undo: undoCommand,
   redo: redoCommand,
 };
+
+/**
+ * Selects the sample inside the block that was just inserted, so the next keystroke replaces it
+ * instead of landing in front of it. Goes through the ProseMirror position rather than the text,
+ * because the document may already hold a block that looks the same. The code editor mounts a
+ * frame or two later, hence the retry.
+ */
+function selectSnippet(view, pos) {
+  let tries = 20;
+  const run = () => {
+    const $pos = view.state.doc.resolve(Math.min(pos, view.state.doc.content.size));
+    const block = view.nodeDOM($pos.before($pos.depth));
+    const host = block?.querySelector?.('.cm-editor');
+    const editor = host && EditorView.findFromDOM(host);
+    if (!editor) {
+      if (--tries > 0) requestAnimationFrame(run);
+      return;
+    }
+    editor.dispatch({ selection: { anchor: 0, head: editor.state.doc.length } });
+    editor.focus();
+  };
+  requestAnimationFrame(run);
+}
+
+/** Slash-menu action: turn the current block into a `language` block holding `starter`. */
+function insertSnippet({ language, starter }) {
+  return (ctx) => {
+    const commands = ctx.get(commandsCtx);
+    const view = ctx.get(editorViewCtx);
+    commands.call(clearTextInCurrentBlockCommand.key);
+    commands.call(addBlockTypeCommand.key, { nodeType: codeBlockSchema.type(ctx), attrs: { language } });
+    const { from } = view.state.selection;
+    view.dispatch(view.state.tr.insertText(starter, from));
+    selectSnippet(view, view.state.selection.from);
+  };
+}
 
 /** Calls `onChange` after every document change, without serializing markdown. */
 function changeWatcher(onChange) {
@@ -111,7 +272,24 @@ export async function createRichEditor(options) {
           image: { label: '图片' },
           codeBlock: { label: '代码块' },
           table: { label: '表格' },
-          math: { label: '公式' },
+          // Replaced below: Crepe's own item leaves the formula block empty, which reads as broken.
+          math: null,
+        },
+        // Runs after the groups above are built, so this appends to 「插入」 and adds 「图表」.
+        buildMenu: (builder) => {
+          builder.getGroup('advanced')?.addItem('formula', {
+            label: FORMULA_SNIPPET.label,
+            icon: FORMULA_SNIPPET.icon,
+            onRun: insertSnippet(FORMULA_SNIPPET),
+          });
+          const diagrams = builder.addGroup('diagram', '图表');
+          for (const snippet of DIAGRAM_SNIPPETS) {
+            diagrams.addItem(snippet.key, {
+              label: snippet.label,
+              icon: snippet.icon,
+              onRun: insertSnippet(snippet),
+            });
+          }
         },
       },
       [Crepe.Feature.Toolbar]: {
@@ -124,6 +302,7 @@ export async function createRichEditor(options) {
       },
       [Crepe.Feature.CodeMirror]: {
         theme: codeTheme(dark),
+        languages: CODE_LANGUAGES,
         searchPlaceholder: '搜索语言',
         noResultText: '没有匹配的语言',
         copyText: '复制',
@@ -131,7 +310,7 @@ export async function createRichEditor(options) {
         previewToggleText: (previewOnly) => (previewOnly ? '编辑' : '隐藏'),
         previewLabel: '预览',
         previewLoading: '正在加载…',
-        renderLanguage: languageLabel,
+        renderLanguage: pickerLabel,
         renderPreview: (language, code, apply) => {
           if (!options.renderDiagram || language.toLowerCase() !== 'mermaid') return null;
           options.renderDiagram(code).then(apply, () => apply('无法绘制这个流程图'));

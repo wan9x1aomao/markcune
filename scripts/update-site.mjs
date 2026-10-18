@@ -47,6 +47,10 @@ for (const [platform, path] of Object.entries(files)) {
 // The changelog section mirrors CHANGELOG.md, up to the version being released.
 const changelog = join(dirname(fileURLToPath(import.meta.url)), '..', 'CHANGELOG.md');
 const escape = (text) => text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+// Backticks in CHANGELOG.md mean inline code; without this they show up as literal ` marks.
+// Runs of two or more backticks are fence notation (```html) and must stay as typed, so the
+// pattern only accepts a single backtick that is not adjacent to another one.
+const inline = (text) => escape(text).replace(/(^|[^`])`([^`\n]+)`(?=[^`]|$)/g, '$1<code>$2</code>');
 const newer = (a, b) => {
   const [x, y] = [a, b].map((v) => v.split('.').map(Number));
   for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i];
@@ -62,7 +66,7 @@ const shown = releases.filter((r) => !newer(r.version, version));
 const rendered = shown
   .map((r, i) =>
     `<article class="release"><div class="ver"><b>${r.version}</b>${i === 0 ? '<em>最新</em>' : ''}<span>${escape(r.date)}</span></div>` +
-    `<ul>${r.items.map((item) => `<li>${escape(item)}</li>`).join('')}</ul></article>`,
+    `<ul>${r.items.map((item) => `<li>${inline(item)}</li>`).join('')}</ul></article>`,
   )
   .join('');
 html = html.replace(/(<!-- changelog:start -->)[\s\S]*?(<!-- changelog:end -->)/, `$1${rendered}$2`);

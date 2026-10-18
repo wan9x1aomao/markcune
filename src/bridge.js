@@ -42,6 +42,12 @@ export const api = {
   setSetting: (key, value) => invoke('set_setting', { key, value }),
   aiAvailable: () => invoke('ai_available'),
   aiLabel: (lines) => invoke('ai_label', { lines }),
+  aiStatus: () => invoke('ai_status'),
+  /** `apiKey` omitted keeps the stored key; an empty string removes it. */
+  aiConfigure: (options) => invoke('ai_configure', options),
+  aiComplete: (before, after) => invoke('ai_complete', { before, after }),
+  aiRewrite: (text, instruction) => invoke('ai_rewrite', { text, instruction }),
+  aiTest: () => invoke('ai_test'),
   checkUpdate: (automatic) => invoke('check_update', { automatic }),
   downloadUpdate: () => invoke('download_update'),
   restartToUpdate: () => invoke('restart_to_update'),

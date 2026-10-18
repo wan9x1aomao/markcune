@@ -21,6 +21,9 @@ import {
 import { toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
 import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state';
 import { $prose, callCommand, replaceAll } from '@milkdown/kit/utils';
+import { ghostControls, ghostFeature } from './ai-ghost.js';
+import { proposalFeature } from './ai-proposal.js';
+import { slashItems } from './ai-skills.js';
 import { createLazy, lazyController } from './lazy.js';
 import { preserveMarkdown } from './markdown.js';
 import { codeTheme } from './code-theme.js';
@@ -125,6 +128,8 @@ const CLASS_ICON = icon(`
   <rect x="4.5" y="2.5" width="15" height="19" rx="2"/>
   <path d="M4.5 8.5h15M8 12.5h5.5M8 16.5h8"/>`);
 const FORMULA_ICON = icon(`<path d="M16.5 5h-9l4.5 7-4.5 7h9"/>`);
+/** AI commands in the slash menu: a four-point spark, the same idea as the "AI" pill. */
+const AI_ICON = icon(`<path d="M12 3.4l1.8 4.7 4.7 1.8-4.7 1.8-1.8 4.7-1.8-4.7-4.7-1.8 4.7-1.8z"/><path d="M18.4 15.4l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>`);
 
 /**
  * What the slash menu can insert besides plain text: a fenced block of `language` with a sample
@@ -290,6 +295,19 @@ export async function createRichEditor(options) {
               onRun: insertSnippet(snippet),
             });
           }
+          // The slash menu is where users look for commands; the skills live there too. It is built
+          // again for every keystroke of the filter, so the list follows the AI configuration.
+          const aiItems = slashItems();
+          if (aiItems.length) {
+            const aiGroup = builder.addGroup('ai', 'AI 改写');
+            for (const item of aiItems) {
+              aiGroup.addItem(item.key, {
+                label: item.label,
+                icon: AI_ICON,
+                onRun: (ctx) => item.run(ctx.get(editorViewCtx)),
+              });
+            }
+          }
         },
       },
       [Crepe.Feature.Toolbar]: {
@@ -345,6 +363,8 @@ export async function createRichEditor(options) {
     .use(markdownMarkers)
     .use(linkPaste)
     .use(findPlugin)
+    .use(proposalFeature)
+    .use(ghostFeature)
     .use(imageActions({ onReplace: options.pickImage, onCaption: options.promptCaption }))
     .use(syncHeadingIds)
     .use(syncListOrder)
@@ -389,6 +409,8 @@ export async function createRichEditor(options) {
     kind: 'rich',
     view,
     crepe,
+    /** Completion controls: accept / reject / has / now, or undefined if the feature failed to load. */
+    ai: ghostControls(view),
     getMarkdown: () => serialize(view.state.doc),
     getWordCount: () => countMarkdownWords(serialize(view.state.doc)),
     /** The markdown of a snapshot (default: the current document), without blocking the page. */

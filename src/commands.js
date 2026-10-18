@@ -17,6 +17,7 @@ export const COMMANDS = [
   { id: 'export-html', title: '导出为网页…' },
   { id: 'export-pdf', title: '导出为 PDF…' },
   { id: 'tidy', title: '一键整理格式', keys: 'Mod+Alt+L' },
+  { id: 'ai-settings', title: 'AI 设置…' },
   { id: 'find', title: '查找…', keys: 'Mod+F' },
   { id: 'replace', title: '替换…', keys: isMac ? 'Mod+Alt+F' : 'Ctrl+H' },
   { id: 'bold', title: '加粗', keys: 'Mod+B' },

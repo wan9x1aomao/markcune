@@ -1,5 +1,9 @@
 import './style.css';
 import { api, appWindow } from './bridge.js';
+import { ai } from './ai-core.js';
+import { installReview } from './ai-review.js';
+import { installAiActions, skillCommands } from './ai-skills.js';
+import { openAiSettings } from './ai-settings.js';
 import { COMMANDS } from './commands.js';
 import { createRichEditor } from './editor.js';
 import { createFindbar } from './findbar.js';
@@ -48,6 +52,10 @@ const app = {
   mode: 'rich',
   split: false,
   focus: false,
+  /** The AI selection button for the current editor, or null in source mode. */
+  aiActions: null,
+  /** The review list for the current editor, or null in source mode. */
+  review: null,
   editor: null,
   preview: null,
   pending: false,
@@ -284,6 +292,11 @@ async function mountEditor(content, position) {
   app.doc.snapshot = editor.snapshot();
   performance.mark('mdpad:mount-serialized');
   app.editor = editor;
+  // The AI button only exists in the rich editor: there is no selection to rewrite in source mode.
+  app.aiActions?.destroy();
+  app.aiActions = editor.kind === 'rich' ? installAiActions(editor.view) : null;
+  app.review?.();
+  app.review = editor.kind === 'rich' ? installReview(editor.view) : null;
   editor.setPosition(position);
   updateWordCount();
   refreshOutline();
@@ -832,6 +845,7 @@ const actions = {
   'export-html': exportHtml,
   'export-pdf': exportPdf,
   tidy: () => tidyHint.run(),
+  'ai-settings': () => openAiSettings(),
   find: () => findbar.show(false),
   replace: () => findbar.show(true),
   'find-next': () => findbar.go(1),
@@ -866,7 +880,11 @@ function showPalette(mode) {
   });
   openPalette({
     mode,
-    commands: COMMANDS.map((c) => ({ title: c.title, hint: formatKeys(c.keys), run: () => run(c.id) })),
+    commands: [
+      ...COMMANDS.map((c) => ({ title: c.title, hint: formatKeys(c.keys), run: () => run(c.id) })),
+      // Rewrite skills live here too, so a keyboard user never needs the floating button.
+      ...(mode === 'all' && ai.available() && app.editor?.kind === 'rich' ? skillCommands(app.editor.view) : []),
+    ],
     recent: app.recentFiles.filter((p) => !samePath(p, app.doc.path)).slice(0, 8).map(fileItem),
     files: async () => {
       if (!app.root) return [];
@@ -902,6 +920,7 @@ function showMore(anchor) {
       item('find'),
       item('replace'),
       item('tidy'),
+      item('ai-settings'),
       'separator',
       item('toggle-source', app.mode === 'source' && !app.split),
       item('toggle-split', app.split),
@@ -1054,6 +1073,8 @@ if (!isMac) installShortcuts({ run, isRichEditor: () => app.editor?.kind === 'ri
 if (init.platform === 'windows') setupWindowControls();
 app.settings = { ...app.settings, ...init.settings };
 app.recentFiles = init.recentFiles;
+// Ask the shell once, before any editor mounts, whether AI is configured.
+await ai.refresh();
 applyPanels();
 sidebar.setRecent(init.recentFiles, init.recentFolders);
 

@@ -28,11 +28,22 @@ let closeOpenMenu = null;
 /**
  * Shows a popup menu at `anchor` (an element or {x, y}).
  * Items: { label, hint, checked, run } or 'separator'.
+ * Options: { title } — a small heading above the items.
+ *
+ * The left gutter that holds the check mark is only reserved when some item can actually carry one;
+ * a plain list of actions would otherwise sit behind an empty column.
  */
-export function showMenu(items, anchor) {
+export function showMenu(items, anchor, options = {}) {
   closeOpenMenu?.();
+  const checkable = items.some((item) => item !== 'separator' && item.checked !== undefined);
   const menu = document.createElement('div');
-  menu.className = 'popup-menu';
+  menu.className = 'popup-menu' + (checkable ? ' with-check' : '');
+  if (options.title) {
+    const heading = document.createElement('div');
+    heading.className = 'menu-title';
+    heading.textContent = options.title;
+    menu.appendChild(heading);
+  }
   for (const item of items) {
     if (item === 'separator') {
       menu.appendChild(Object.assign(document.createElement('div'), { className: 'separator' }));
@@ -56,6 +67,9 @@ export function showMenu(items, anchor) {
   const y = rect ? rect.bottom + 4 : anchor.y;
   menu.style.left = `${Math.max(8, Math.min(x, innerWidth - menu.offsetWidth - 8))}px`;
   menu.style.top = `${Math.max(8, Math.min(y, innerHeight - menu.offsetHeight - 8))}px`;
+  // Grow out of the corner nearest the anchor, or a menu pinned to a caret looks like it slides in
+  // from the wrong side.
+  menu.style.transformOrigin = rect ? 'top right' : anchor.origin ?? 'top left';
 
   const onPointer = (event) => {
     if (!menu.contains(event.target)) close();

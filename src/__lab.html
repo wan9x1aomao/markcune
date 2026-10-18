@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>MDPad AI lab</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #f6f6f8;
+      }
+      #root {
+        height: 100%;
+        overflow: auto;
+      }
+    </style>
+    <script>
+      // Anything thrown inside an async call would otherwise vanish.
+      window.__err = null;
+      window.addEventListener('unhandledrejection', (event) => {
+        const reason = event.reason;
+        window.__err = String((reason && (reason.stack || reason.message)) || reason);
+      });
+      window.addEventListener('error', (event) => {
+        window.__err = String((event.error && (event.error.stack || event.error.message)) || event.message || 'error');
+      });
+      // Stands in for the Tauri shell, so the editor runs in a plain browser.
+      window.__stub = {
+        calls: [],
+        completion: '接下来会展开说明。',
+        rewrite: '改写之后的文字，更短了。',
+        fail: '',
+        status: {
+          mode: 'direct',
+          direct: true,
+          gateway: false,
+          baseUrl: 'https://example.test/v1',
+          model: 'test-model',
+          hasKey: true,
+          completion: true,
+        },
+      };
+      window.__TAURI_INTERNALS__ = {
+        metadata: {
+          currentWindow: { label: 'main' },
+          currentWebview: { label: 'main', windowLabel: 'main' },
+        },
+        transformCallback(callback) {
+          const id = Math.floor(Math.random() * 1e9);
+          window[`_${id}`] = callback;
+          return id;
+        },
+        async invoke(cmd, args) {
+          window.__stub.calls.push([cmd, args]);
+          if (cmd === 'ai_status') return window.__stub.status;
+          if (cmd === 'ai_configure') {
+            // Echo what was sent, the way the shell reports the new state back.
+            const hasKey = 'apiKey' in args ? Boolean(args.apiKey) : window.__stub.status.hasKey;
+            window.__stub.status = { ...window.__stub.status, ...args, hasKey, mode: hasKey ? 'direct' : 'none' };
+            return window.__stub.status;
+          }
+          if (cmd === 'ai_complete' || cmd === 'ai_rewrite') {
+            if (window.__stub.fail) throw window.__stub.fail;
+            return cmd === 'ai_complete' ? window.__stub.completion : window.__stub.rewrite;
+          }
+          if (cmd === 'ai_test') {
+            if (window.__stub.fail) throw window.__stub.fail;
+            return 'test-model 可用（回复：ok）';
+          }
+          return {};
+        },
+      };
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="toast"></div>
+    <script type="module" src="./__lab.js"></script>
+  </body>
+</html>

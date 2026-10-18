@@ -26,6 +26,21 @@ const lazyKey = new PluginKey('mdpad-lazy');
 const isLarge = (doc) => doc.childCount >= LAZY_MIN_BLOCKS;
 const isReal = (decorations) => decorations.some((d) => d.spec.mdpadReal);
 
+// ProseMirror asks every plugin for decorations and keeps only the first non-null answer, and this
+// plugin almost always has one (it marks which blocks are real). So features that need decorations
+// of their own — the AI suggestion and the AI proposal — register them here instead of losing that
+// race. Providers are called with the editor state on every update.
+const extraDecorations = [];
+
+/** Adds a decorations provider. Returns a function that removes it again. */
+export function addExtraDecorations(provider) {
+  extraDecorations.push(provider);
+  return () => {
+    const at = extraDecorations.indexOf(provider);
+    if (at >= 0) extraDecorations.splice(at, 1);
+  };
+}
+
 /** Start positions of the top-level blocks, cached per document. */
 const startsCache = new WeakMap();
 function startsOf(doc) {
@@ -257,7 +272,14 @@ export function createLazy(scroller) {
           },
         },
         props: {
-          decorations: (state) => lazyKey.getState(state).decorations ?? null,
+          decorations: (state) => {
+            let set = lazyKey.getState(state).decorations ?? null;
+            for (const provider of extraDecorations) {
+              const more = provider(state);
+              if (more) set = set ? set.add(state.doc, more) : more;
+            }
+            return set;
+          },
         },
         view(view) {
           performance.mark('mdpad:view-created');

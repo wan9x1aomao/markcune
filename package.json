@@ -27,7 +27,8 @@
     "build": "tauri build --bundles app",
     "build:debug": "tauri build --debug --bundles app",
     "build:win": "tauri build --bundles nsis",
-    "test": "node tests/tidy.test.mjs && node tests/gateway.test.mjs && node tests/notices.test.mjs"
+    "test": "node tests/tidy.test.mjs && node tests/ai.test.mjs && node tests/gateway.test.mjs && node tests/notices.test.mjs",
+    "test:browser": "node tests/ai-browser.mjs"
   },
   "devDependencies": {
     "@codemirror/commands": "^6.11.1",

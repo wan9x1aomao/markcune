@@ -966,10 +966,20 @@ body.empty #editor [data-placeholder]::before {
   gap: 16px;
   width: 100%;
   height: 32px;
-  padding: 0 10px 0 28px;
+  padding: 0 10px;
   border-radius: 8px;
   text-align: left;
   position: relative;
+}
+/* Only menus that can show a check mark need room for it. */
+.popup-menu.with-check .item {
+  padding-left: 28px;
+}
+.popup-menu .menu-title {
+  padding: 4px 10px 7px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
 }
 .popup-menu .item:hover,
 .popup-menu .item.selected {
@@ -1633,3 +1643,532 @@ h3 .md-marker {
     animation: none;
   }
 }
+
+/* AI: completion, proposals and settings */
+
+/* The grey suggestion after the caret. Never selectable, never part of the document. */
+.ai-ghost {
+  color: var(--text-faint);
+  opacity: 0.72;
+  user-select: none;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+/* The text a proposal would replace, and the text it would become.
+   Crepe ships `.milkdown * { margin: 0; padding: 0 }`, which is one class plus a universal selector
+   and therefore beats a single class — so these three need the editor in the selector. */
+.milkdown .ProseMirror .ai-old {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  color: var(--text-faint);
+  opacity: 0.85;
+}
+.milkdown .ProseMirror .ai-new {
+  color: var(--success);
+  background: rgba(34, 160, 101, 0.1);
+  border-radius: 3px;
+  padding: 0 2px;
+  white-space: pre-wrap;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+/* A long replacement gets its own block under the paragraph instead of running inline: two long
+   sentences laid one after the other are unreadable, and the old one hides the new one. */
+.milkdown .ProseMirror .ai-new-block {
+  display: block;
+  margin: 6px 0 2px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: rgba(34, 160, 101, 0.08);
+  box-shadow: inset 2px 0 0 var(--success);
+}
+
+/* The accept / retry / reject bar, anchored under the proposal. */
+.ai-bar {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 5px 6px 5px 8px;
+  border-radius: 11px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-float);
+  font-size: 12.5px;
+  color: var(--text-muted);
+  animation: pop-in 160ms var(--ease);
+  transform-origin: top left;
+}
+/* While a proposal is on screen the AI bar is the only floating UI: the formatting toolbar would
+   land on exactly the same spot, and the selection button would sit on top of the new text. */
+body.ai-pending .milkdown .milkdown-toolbar,
+body.ai-pending .ai-pick {
+  display: none;
+}
+.ai-bar-busy {
+  color: var(--text-faint);
+}
+.ai-bar-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.ai-bar-note {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 500;
+}
+.ai-bar-actions {
+  display: flex;
+  gap: 2px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.ai-bar-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.ai-bar-actions button:hover {
+  background: var(--hover);
+}
+.ai-bar-actions button[data-act='accept'] {
+  color: var(--success);
+  font-weight: 500;
+}
+.ai-bar-actions kbd {
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* The small button that appears beside a selection. */
+.ai-pick {
+  position: fixed;
+  z-index: 55;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-float);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent-text);
+  opacity: 0.92;
+}
+.ai-pick:hover {
+  opacity: 1;
+  background: var(--accent-soft);
+}
+
+/* Settings panel */
+.ai-panel {
+  width: min(520px, 92vw);
+  max-height: min(88vh, 720px);
+  overflow: auto;
+  padding: 22px 24px 18px;
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-pop);
+  animation: pop-in var(--t-med) var(--ease);
+  font-size: 13px;
+  color: var(--text);
+}
+.ai-panel h2 {
+  margin: 0 0 4px;
+  font-size: 15.5px;
+  font-weight: 600;
+}
+.ai-lead {
+  margin: 0 0 16px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+.ai-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+.ai-row > span {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+.ai-row input,
+.ai-row select {
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--app-bg);
+  font-size: 12.5px;
+  font-family: var(--font-code);
+  outline: none;
+}
+.ai-row select {
+  font-family: var(--font-ui);
+}
+.ai-row input:focus,
+.ai-row select:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.ai-key-state {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 12px 82px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+.ai-key-state .ai-key-note {
+  flex: 1;
+  min-width: 0;
+}
+/* Only shown when a key is stored: an empty field means "keep it", so removal needs its own way. */
+.ai-clear {
+  flex: none;
+  padding: 0;
+  background: none;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  text-decoration: underline;
+}
+.ai-clear:hover {
+  color: var(--danger);
+}
+.ai-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.ai-toggle em {
+  font-style: normal;
+  color: var(--text-faint);
+  margin-left: 4px;
+}
+.ai-privacy {
+  margin: 0 0 16px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-line);
+  color: #6b5320;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+@media (prefers-color-scheme: dark) {
+  .ai-privacy {
+    color: #e6cf95;
+  }
+}
+.ai-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-footer button {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.ai-footer button:hover {
+  background: var(--hover);
+}
+.ai-footer .ai-save {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+.ai-footer .ai-save:hover {
+  background: var(--accent-text);
+}
+.ai-footer .ai-save:disabled,
+.ai-footer .ai-test:disabled {
+  opacity: 0.6;
+}
+.ai-result {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+.ai-result[data-state='ok'] {
+  color: var(--success);
+}
+.ai-result[data-state='error'] {
+  color: var(--danger);
+}
+
+/* A whole section replaced at once: the strike has to run through every line inside the block, which
+   is why this is a node decoration and not an inline one. */
+.milkdown .ProseMirror .ai-old-block {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--text-faint);
+  color: var(--text-muted);
+  opacity: 0.9;
+}
+/* One line of a section replacement; the block itself is the green card. */
+.milkdown .ProseMirror .ai-new-line {
+  display: block;
+}
+
+/* The review list: every pending proposal, for a batch. */
+.ai-review {
+  position: fixed;
+  z-index: 58;
+  top: 76px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  width: 308px;
+  max-height: min(62vh, 560px);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-pop);
+  overflow: hidden;
+  animation: pop-in 160ms var(--ease);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.ai-review-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 8px;
+}
+.ai-review-title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.ai-review-count {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+.ai-review-close {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--text-faint);
+  font-size: 15px;
+  line-height: 1;
+}
+.ai-review-close:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.ai-review-list {
+  overflow: auto;
+  padding: 0 8px 6px;
+}
+.ai-review-row {
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 9px;
+}
+.ai-review-row + .ai-review-row {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+.ai-review-row.is-active {
+  background: var(--accent-soft);
+}
+.ai-review-jump {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  text-align: left;
+}
+.ai-review-jump:hover {
+  background: var(--hover);
+}
+.ai-review-label {
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+.ai-review-old,
+.ai-review-new {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-review-old {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  text-decoration: line-through;
+}
+.ai-review-new {
+  color: var(--success);
+  font-size: 12px;
+}
+.ai-review-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+.ai-review-actions button {
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+.ai-review-actions button:hover {
+  background: var(--hover);
+}
+.ai-review-accept {
+  color: var(--success);
+}
+.ai-review-reject {
+  color: var(--text-muted);
+}
+.ai-review-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  box-shadow: inset 0 1px 0 var(--line);
+}
+.ai-review-tip {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.ai-review-foot button {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.ai-review-all {
+  background: var(--accent);
+  color: #fff;
+}
+.ai-review-all:hover {
+  background: var(--accent-text);
+}
+.ai-review-none {
+  color: var(--text-muted);
+}
+.ai-review-none:hover {
+  background: var(--hover);
+}
+
+/* Custom rewrites in the settings panel. */
+.ai-custom {
+  margin: 10px 0 12px;
+}
+.ai-custom-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+.ai-custom-head > span {
+  font-size: 12.5px;
+  color: var(--text);
+}
+.ai-custom-add {
+  color: var(--accent-text);
+  font-size: 11.5px;
+}
+.ai-custom-add:hover {
+  text-decoration: underline;
+}
+.ai-custom-lead {
+  margin: 0 0 8px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+.ai-custom-eg {
+  margin: 0 0 10px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--app-bg);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.ai-custom-eg b {
+  color: var(--text);
+  font-weight: 500;
+}
+.ai-custom-row {
+  display: grid;
+  grid-template-columns: 96px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.ai-custom-row input {
+  height: 30px;
+  min-width: 0;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line-strong);
+  background: var(--app-bg);
+  font-size: 12px;
+  outline: none;
+}
+.ai-custom-row input:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.ai-custom-drop {
+  padding: 0 4px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+.ai-custom-drop:hover {
+  color: var(--danger);
+}
+@media (prefers-color-scheme: dark) {
+  .ai-review-all {
+    color: #0f1426;
+  }
+}
+

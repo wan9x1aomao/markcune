@@ -851,6 +851,7 @@ fn main() {
             voice::voice_start,
             voice::voice_stop,
             voice::voice_cancel,
+            voice::voice_test,
             test_report,
             files::read_document,
             files::write_document,

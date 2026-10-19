@@ -78,7 +78,10 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice 
         <label class="settings-field"><span>模型</span><input class="voice-model" spellcheck="false" /></label>
         <label class="settings-field"><span>API Key</span><input class="voice-key" type="password" spellcheck="false" autocomplete="off" /></label>
         <p class="settings-note voice-state"></p>
-        <button class="text-button voice-clear" type="button" hidden>清除 Key</button>
+        <div class="voice-actions">
+          <button class="text-button voice-test" type="button">验证 Key</button>
+          <button class="text-button voice-clear" type="button" hidden>清除 Key</button>
+        </div>
       </section>
 
       <section>
@@ -147,6 +150,8 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice 
 
   // 语音输入：和聊天分开配，因为常见情况是聊天用一家、语音用另一家。改动即时保存。
   const voiceSection = $('.voice-section');
+  // 关闭面板时补一次保存：输入框只有失焦才触发 change，按 Esc 关掉面板会让刚填的 Key 悄悄丢掉。
+  let flushVoice = () => {};
   if (voice) {
     voiceSection.hidden = false;
     const baseInput = $('.voice-base');
@@ -154,12 +159,15 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice 
     const keyInput = $('.voice-key');
     const voiceState = $('.voice-state');
     const clearVoice = $('.voice-clear');
+    const testButton = $('.voice-test');
     let stored = { hasKey: false, ready: false };
     const describeVoice = () => {
       if (stored.hasKey) {
         voiceState.textContent = '已配置。编辑区右下角会出现麦克风按钮，点一下开始、再点一下结束。';
-      } else if (stored.ready) {
-        voiceState.textContent = '正在借用 AI 设置里的 Key。如果那家没有音频接口（比如 DeepSeek），请在上面单独填一个。';
+      } else if (stored.borrowed) {
+        voiceState.textContent = '正在借用 AI 设置里的 Key（两家是同一个服务）。想更稳妥的话，可以在上面填一个语音专用的。';
+      } else if (stored.aiHost) {
+        voiceState.textContent = `还没配置。AI 设置里用的是 ${stored.aiHost}，和语音服务不是同一家，Key 不能通用 —— 请在上面单独填一个。`;
       } else {
         voiceState.textContent = '还没配置。填一个支持音频转写的 Key，编辑区右下角就会出现麦克风按钮。';
       }
@@ -190,6 +198,27 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice 
     baseInput.addEventListener('change', save);
     modelInput.addEventListener('change', save);
     keyInput.addEventListener('change', save);
+    // 面板被 Esc / 点外面关掉时，输入框还没来得及失焦，这里补存一次。
+    flushVoice = () => {
+      const typed = keyInput.value.trim();
+      const moved = baseInput.value.trim() !== (stored.baseUrl ?? '')
+        || modelInput.value.trim() !== (stored.model ?? '');
+      return typed || moved ? save() : undefined;
+    };
+    if (!voice.test) testButton.hidden = true;
+    testButton.addEventListener('click', async () => {
+      testButton.disabled = true;
+      // 先把刚填的 Key 存下来再验 —— 验旧值是最容易误导人的一种"通过"。
+      await save();
+      voiceState.textContent = '正在验证…';
+      try {
+        voiceState.textContent = await voice.test();
+      } catch (error) {
+        voiceState.textContent = String(error?.message ?? error);
+      } finally {
+        testButton.disabled = false;
+      }
+    });
     clearVoice.addEventListener('click', async () => {
       try {
         paint(await voice.configure({ apiKey: '' }));
@@ -230,7 +259,8 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice 
     stopTheme();
     overlay.remove();
     document.removeEventListener('keydown', onKey, true);
-    onClose?.();
+    // 等保存落盘再回调，否则语音按钮会按旧的"未配置"状态算一次显隐，得重开面板才出来。
+    Promise.resolve(flushVoice()).then(() => onClose?.());
   }
   return close;
 }

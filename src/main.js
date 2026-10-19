@@ -890,7 +890,11 @@ const actions = {
       settings: app.settings,
       setPanel,
       run,
-      voice: { status: () => api.voiceStatus(), configure: (options) => api.voiceConfigure(options) },
+      voice: {
+        status: () => api.voiceStatus(),
+        configure: (options) => api.voiceConfigure(options),
+        test: () => api.voiceTest(),
+      },
       onClose: () => {
         voice?.refresh();
         app.editor?.focus();

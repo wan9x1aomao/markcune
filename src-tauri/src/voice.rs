@@ -38,8 +38,9 @@ const SILENCE: f32 = 0.001;
 const KEY_BASE: &str = "voice.baseUrl";
 const KEY_MODEL: &str = "voice.model";
 const KEY_SECRET: &str = "voice.apiKey";
-/// 语音 Key 没配时借用的 AI Key。
+/// 语音 Key 没配时借用的 AI Key —— 只在两家是同一个地址时才借。
 const AI_SECRET: &str = "ai.apiKey";
+const AI_BASE: &str = "ai.baseUrl";
 
 // ---------------------------------------------------------------- 录音会话
 
@@ -230,17 +231,48 @@ fn put(store: &mut Store, key: &str, value: Option<String>) {
     }
 }
 
-/// 语音用的 Key：自己的优先，没有就借 AI 的。
-fn secret(app: &AppHandle) -> Option<String> {
-    setting(app, KEY_SECRET).or_else(|| setting(app, AI_SECRET))
+/// 只取 `scheme://host` 这一段，用来判断两家服务是不是同一家。
+/// 不用 `reqwest::Url`：这里只需要一个宽松的比较，写坏的值也不该让整条链路失败。
+fn host_of(url: &str) -> String {
+    let rest = url.split("://").nth(1).unwrap_or(url);
+    let host = rest.split('/').next().unwrap_or("").trim().to_ascii_lowercase();
+    // 端口不参与比较：同一家的 v1 和企业地址常常只有端口不同。
+    host.split(':').next().unwrap_or("").to_string()
+}
+
+fn voice_base(app: &AppHandle) -> String {
+    setting(app, KEY_BASE).unwrap_or_else(|| DEFAULT_BASE.into())
+}
+
+/// 语音用的 Key 和它从哪来。
+///
+/// 自己的 Key 优先；没填时**只在两家服务是同一个地址**时才借 AI 的。跨家借用必然 401 ——
+/// 把 DeepSeek 的 Key 发给硅基流动，硅基流动只会回一句 `Token is invalid`，用户看到的
+/// 却是「语音坏了」。所以这里宁可不借，让按钮不出现、设置里说清要单独填。
+fn secret(app: &AppHandle) -> Option<(String, bool)> {
+    if let Some(key) = setting(app, KEY_SECRET) {
+        return Some((key, false));
+    }
+    let ai = setting(app, AI_SECRET)?;
+    let ai_base = setting(app, AI_BASE).unwrap_or_default();
+    let same = !ai_base.is_empty() && host_of(&voice_base(app)) == host_of(&ai_base);
+    same.then_some((ai, true))
 }
 
 fn status(app: &AppHandle) -> Value {
+    let own = setting(app, KEY_SECRET).is_some();
+    let borrowed = !own && secret(app).is_some();
+    let voice = voice_base(app);
+    let ai = setting(app, AI_BASE).unwrap_or_default();
     json!({
-        "baseUrl": setting(app, KEY_BASE).unwrap_or_else(|| DEFAULT_BASE.into()),
+        "baseUrl": voice,
         "model": setting(app, KEY_MODEL).unwrap_or_else(|| DEFAULT_MODEL.into()),
-        "hasKey": setting(app, KEY_SECRET).is_some(),
-        "ready": secret(app).is_some(),
+        "hasKey": own,
+        "ready": own || borrowed,
+        "borrowed": borrowed,
+        // 设置里据此说明「AI 的 Key 借不过来，要单独填」。
+        "aiHost": host_of(&ai),
+        "sameService": !ai.is_empty() && host_of(&voice) == host_of(&ai),
         "defaultBase": DEFAULT_BASE,
         "defaultModel": DEFAULT_MODEL,
     })
@@ -305,7 +337,7 @@ pub async fn voice_stop(app: AppHandle) -> Result<String, String> {
         return Err("没有收到声音：检查系统设置里是否允许 MDPad 使用麦克风".into());
     }
     let mono = resample(&captured, rate, TARGET_RATE);
-    transcribe(&app, wav(&mono, TARGET_RATE)).await
+    transcribe(&app, wav(&mono, TARGET_RATE), false).await
 }
 
 #[tauri::command]
@@ -314,6 +346,21 @@ pub fn voice_cancel() -> Result<(), String> {
         finish(session);
     }
     Ok(())
+}
+
+/// 用一段很轻的提示音试跑一次上传：验的是 Key、地址和模型名，不用真的说话。
+/// 识别结果为空也算通过 —— 安静的音频本来就该是空的，能拿到 200 就说明这三样都对。
+#[tauri::command]
+pub async fn voice_test(app: AppHandle) -> Result<String, String> {
+    let samples: Vec<f32> = (0..TARGET_RATE as usize * 8 / 10)
+        .map(|index| {
+            let t = index as f32 / TARGET_RATE as f32;
+            (t * 440.0 * std::f32::consts::TAU).sin() * 0.08
+        })
+        .collect();
+    transcribe(&app, wav(&samples, TARGET_RATE), true).await?;
+    let model = setting(&app, KEY_MODEL).unwrap_or_else(|| DEFAULT_MODEL.into());
+    Ok(format!("Key 可用 · {model}"))
 }
 
 // ---------------------------------------------------------------- 上传
@@ -341,10 +388,20 @@ fn transport(error: &reqwest::Error) -> String {
     }
 }
 
-async fn transcribe(app: &AppHandle, audio: Vec<u8>) -> Result<String, String> {
-    let base = setting(app, KEY_BASE).unwrap_or_else(|| DEFAULT_BASE.into());
+async fn transcribe(app: &AppHandle, audio: Vec<u8>, allow_empty: bool) -> Result<String, String> {
+    let base = voice_base(app);
     let model = setting(app, KEY_MODEL).unwrap_or_else(|| DEFAULT_MODEL.into());
-    let key = secret(app).ok_or_else(|| "还没有配置语音识别：先在设置里填一个 Key".to_string())?;
+    let (key, borrowed) = secret(app).ok_or_else(|| {
+        if setting(app, AI_SECRET).is_some() {
+            format!(
+                "语音要单独填 Key：AI 设置里那家（{}）和语音服务（{}）不是同一家，它的 Key 发过去一定会被拒",
+                host_of(&setting(app, AI_BASE).unwrap_or_default()),
+                host_of(&base),
+            )
+        } else {
+            "还没有配置语音识别：先在设置里填一个 Key".to_string()
+        }
+    })?;
 
     let url = format!("{}/audio/transcriptions", base.trim_end_matches('/'));
     let part = reqwest::multipart::Part::bytes(audio)
@@ -373,9 +430,18 @@ async fn transcribe(app: &AppHandle, audio: Vec<u8>) -> Result<String, String> {
             .or_else(|| body.get("message"))
             .and_then(Value::as_str)
             .filter(|text| !text.is_empty());
+        // 401/403 且用的是借来的 Key：这是"填错地方"而不是"语音坏了"，要说清出处。
+        let reason = if matches!(code, 401 | 403) && borrowed {
+            format!(
+                "语音服务不认这个 Key：它来自 AI 设置（{}）。请在设置 → 语音输入里单独填一个",
+                host_of(&setting(app, AI_BASE).unwrap_or_default()),
+            )
+        } else {
+            failure(code)
+        };
         return Err(match detail {
-            Some(detail) if detail.chars().count() <= 160 => format!("{}：{detail}", failure(code)),
-            _ => failure(code),
+            Some(detail) if detail.chars().count() <= 160 => format!("{reason}：{detail}"),
+            _ => reason,
         });
     }
     let text = body
@@ -384,7 +450,7 @@ async fn transcribe(app: &AppHandle, audio: Vec<u8>) -> Result<String, String> {
         .map(str::trim)
         .unwrap_or("")
         .to_string();
-    if text.is_empty() {
+    if text.is_empty() && !allow_empty {
         return Err("没有听出内容，再试一次".into());
     }
     Ok(text)
@@ -416,6 +482,19 @@ mod tests {
     fn resample_of_matching_rate_is_a_copy() {
         let input = vec![0.25f32; 10];
         assert_eq!(resample(&input, 16_000, 16_000), input);
+    }
+
+    /// 这条规则挡住了最常见的一次误报：把 DeepSeek 的 Key 发给硅基流动。
+    #[test]
+    fn host_comparison_ignores_scheme_path_and_port() {
+        assert_eq!(host_of("https://api.siliconflow.cn/v1"), "api.siliconflow.cn");
+        assert_eq!(host_of("https://API.SiliconFlow.cn/v1/"), "api.siliconflow.cn");
+        assert_eq!(host_of("http://127.0.0.1:8000/v1"), "127.0.0.1");
+        assert_eq!(host_of(""), "");
+        assert_ne!(
+            host_of("https://api.deepseek.com/v1"),
+            host_of("https://api.siliconflow.cn/v1"),
+        );
     }
 
     /// 真机验证：`cargo test record_from_the_default_input -- --ignored --nocapture`

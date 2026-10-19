@@ -46,6 +46,9 @@
           model: 'FunAudioLLM/SenseVoiceSmall',
           hasKey: false,
           ready: true,
+          borrowed: true,
+          aiHost: 'api.siliconflow.cn',
+          sameService: true,
         },
         transcript: '这是语音转出来的文字。',
         voiceFail: '',
@@ -92,6 +95,10 @@
             return window.__stub.transcript;
           }
           if (cmd === 'voice_cancel') return null;
+          if (cmd === 'voice_test') {
+            if (window.__stub.voiceFail) throw window.__stub.voiceFail;
+            return 'Key 可用 · FunAudioLLM/SenseVoiceSmall';
+          }
           return {};
         },
       };

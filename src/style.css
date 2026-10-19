@@ -2468,3 +2468,14 @@ body.ai-pending .ai-pick {
   outline: none;
   box-shadow: 0 0 0 1px var(--accent);
 }
+
+/* 语音设置的两个动作并排：验证和清除，都不该被误当成主按钮。 */
+.voice-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+.voice-actions .text-button[disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}

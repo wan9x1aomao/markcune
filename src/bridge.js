@@ -56,6 +56,8 @@ export const api = {
   /** Stops and returns the transcript; rejects with a ready-to-show reason. */
   voiceStop: () => invoke('voice_stop'),
   voiceCancel: () => invoke('voice_cancel'),
+  /** Uploads a short tone to check the key/address/model without speaking. */
+  voiceTest: () => invoke('voice_test'),
   checkUpdate: (automatic) => invoke('check_update', { automatic }),
   downloadUpdate: () => invoke('download_update'),
   restartToUpdate: () => invoke('restart_to_update'),

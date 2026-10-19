@@ -122,6 +122,17 @@ export function createSourceEditor({ root, content, scroller, onChange }) {
     matches: (snapshot) => !!snapshot && (snapshot === view.state.doc || view.state.doc.eq(snapshot)),
     setMarkdown: (text) => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }),
     focus: () => view.focus(),
+    /** Inserts plain text at the cursor, replacing the selection (voice input lands here). */
+    insert(text) {
+      if (!text) return;
+      const { from, to } = view.state.selection.main;
+      view.dispatch({
+        changes: { from, to, insert: text },
+        selection: { anchor: from + text.length },
+        scrollIntoView: true,
+      });
+      view.focus();
+    },
     command(id) {
       if (id === 'undo') undo(view);
       else if (id === 'redo') redo(view);

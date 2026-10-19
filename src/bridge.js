@@ -49,6 +49,13 @@ export const api = {
   aiComplete: (before, after) => invoke('ai_complete', { before, after }),
   aiRewrite: (text, instruction) => invoke('ai_rewrite', { text, instruction }),
   aiTest: () => invoke('ai_test'),
+  voiceStatus: () => invoke('voice_status'),
+  /** `apiKey` omitted keeps the stored key; an empty string removes it. */
+  voiceConfigure: (options) => invoke('voice_configure', options),
+  voiceStart: () => invoke('voice_start'),
+  /** Stops and returns the transcript; rejects with a ready-to-show reason. */
+  voiceStop: () => invoke('voice_stop'),
+  voiceCancel: () => invoke('voice_cancel'),
   checkUpdate: (automatic) => invoke('check_update', { automatic }),
   downloadUpdate: () => invoke('download_update'),
   restartToUpdate: () => invoke('restart_to_update'),

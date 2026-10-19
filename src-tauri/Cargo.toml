@@ -23,7 +23,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 percent-encoding = "2"
 base64 = "0.22"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "multipart"] }
 # 只解压 deflate（GitHub 的 zip 用的就是它）。默认 feature 会拖进 zstd / lzma / bzip2，编译很重且用不上。
 zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 # ⚠️ flate2 的后端必须由我们自己点名。zip 的 `deflate-flate2` 只声明"用 flate2 解压"，
@@ -32,6 +32,10 @@ zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 # 顺带合并进来了；Windows 上那条路径不存在，于是 CI 编译失败。这种"靠别人顺手开"的写法
 # 在跨平台上不成立。rust_backend 是纯 Rust 的 miniz_oxide，不需要 C 编译器，三平台一致。
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# 录音：三平台各走系统的音频 API（macOS CoreAudio / Windows WASAPI / Linux ALSA）。
+# ⚠️ Linux 后端链接 libasound，CI 和本地 Linux 构建都必须先装 libasound2-dev，否则编译直接失败。
+# ⚠️ webview 里拿不到麦克风（wry 没实现 WKUIDelegate 的 media capture 回调），所以录音只能在 Rust 侧做。
+cpal = "0.15"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

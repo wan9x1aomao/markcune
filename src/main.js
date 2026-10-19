@@ -1,6 +1,6 @@
 import './style.css';
 import { api, appWindow } from './bridge.js';
-import { ai } from './ai-core.js';
+import { ai, onAiChange } from './ai-core.js';
 import { installReview } from './ai-review.js';
 import { installAiActions, skillCommands } from './ai-skills.js';
 import { openAiSettings } from './ai-settings.js';
@@ -16,6 +16,7 @@ import { installShortcuts } from './shortcuts.js';
 import { createSidebar } from './sidebar.js';
 import { createUpdater } from './update.js';
 import { formatKeys, prompt, showMenu, toast } from './ui.js';
+import { createVoiceInput } from './voice.js';
 import { createTidyHint, tidyDocument } from './tidy-ui.js';
 import { openSettings } from './settings.js';
 import { initTheme, onThemeChange, primeTheme, themeState, toggleTheme } from './theme.js';
@@ -44,6 +45,9 @@ const els = {
   editorRoot: $('editor'),
   topbar: $('topbar'),
 };
+
+// 语音输入按钮在启动时创建（要先拿到编辑器和 shell 的配置）。
+let voice = null;
 
 const app = {
   settings: { sidebar: true, outline: false },
@@ -881,7 +885,17 @@ const actions = {
   'export-pdf': exportPdf,
   tidy: () => tidyHint.run(),
   'ai-settings': () => openAiSettings(),
-  settings: () => openSettings({ settings: app.settings, setPanel, run, onClose: () => app.editor?.focus() }),
+  settings: () =>
+    openSettings({
+      settings: app.settings,
+      setPanel,
+      run,
+      voice: { status: () => api.voiceStatus(), configure: (options) => api.voiceConfigure(options) },
+      onClose: () => {
+        voice?.refresh();
+        app.editor?.focus();
+      },
+    }),
   'theme-toggle': toggleTheme,
   find: () => findbar.show(false),
   replace: () => findbar.show(true),
@@ -1124,6 +1138,11 @@ initTheme(init.settings?.theme);
 app.recentFiles = init.recentFiles;
 // Ask the shell once, before any editor mounts, whether AI is configured.
 await ai.refresh();
+// 语音按钮只在配置好识别服务时出现；AI 的 Key 变了也要重新判断（语音可以借它）。
+voice = createVoiceInput({ getEditor: () => app.editor });
+els.panes.appendChild(voice.element);
+await voice.refresh();
+onAiChange(() => voice.refresh());
 applyPanels();
 sidebar.setRecent(init.recentFiles, init.recentFolders);
 

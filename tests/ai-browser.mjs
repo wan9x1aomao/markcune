@@ -1380,7 +1380,7 @@ try {
       settings: { sidebar: true, outline: false },
       setPanel: (name, value) => calls.push(['panel', name, value]),
       run: (id) => calls.push(['run', id]),
-      version: '3.4.1',
+      version: '3.4.2',
     });
     await new Promise((r) => setTimeout(r, 150));
     const overlay = document.querySelector('.settings-overlay');
@@ -1396,7 +1396,7 @@ try {
     outline.checked = true;
     outline.dispatchEvent(new Event('change', { bubbles: true }));
     const info = {
-      headings: [...overlay.querySelectorAll('section h3')].map((h) => h.textContent),
+      headings: [...overlay.querySelectorAll('section:not([hidden]) h3')].map((h) => h.textContent),
       themes, thumbBefore, afterPick,
       ai: overlay.querySelector('.ai-state').textContent,
       version: overlay.querySelector('.version').textContent,
@@ -1415,8 +1415,98 @@ try {
   check('设置', '面板开关走应用自己的面板开关', panel.calls.some((c) => c[0] === 'panel' && c[1] === 'outline' && c[2] === true),
     JSON.stringify(panel.calls));
   check('设置', 'AI 一行说明当前状态，不重复表单', panel.ai.includes('已配置') && panel.ai.includes('test-model'), panel.ai);
-  check('设置', '关于里读得到版本号', panel.version === '3.4.1', panel.version);
+  check('设置', '关于里读得到版本号', panel.version === '3.4.2', panel.version);
   check('设置', '关闭按钮收掉面板', panel.closed === true);
+
+  const voiceSetup = await run(`(async () => {
+    const { openSettings } = await import('/settings.js');
+    const saved = [];
+    openSettings({
+      settings: { sidebar: true, outline: false },
+      setPanel() {},
+      run() {},
+      version: '3.4.2',
+      voice: {
+        status: async () => ({ baseUrl: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/SenseVoiceSmall', hasKey: false, ready: true }),
+        configure: async (options) => {
+          saved.push(options);
+          return { baseUrl: options.baseUrl, model: options.model, hasKey: Boolean(options.apiKey), ready: true };
+        },
+      },
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    const overlay = document.querySelector('.settings-overlay');
+    const before = {
+      headings: [...overlay.querySelectorAll('section:not([hidden]) h3')].map((h) => h.textContent),
+      base: overlay.querySelector('.voice-base').value,
+      model: overlay.querySelector('.voice-model').value,
+      state: overlay.querySelector('.voice-state').textContent,
+      clearHidden: overlay.querySelector('.voice-clear').hidden,
+    };
+    const key = overlay.querySelector('.voice-key');
+    key.value = 'sk-test';
+    key.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 100));
+    const after = { saved, state: overlay.querySelector('.voice-state').textContent, clearHidden: overlay.querySelector('.voice-clear').hidden };
+    overlay.querySelector('.settings-close').click();
+    return { before, after };
+  })()`);
+  check('语音设置', '有独立的语音段，预填硅基流动', voiceSetup.before.headings.includes('语音输入')
+    && voiceSetup.before.base === 'https://api.siliconflow.cn/v1'
+    && voiceSetup.before.model === 'FunAudioLLM/SenseVoiceSmall', JSON.stringify(voiceSetup.before));
+  check('语音设置', '没单独填 Key 时说清是在借 AI 的', voiceSetup.before.state.includes('借用'), voiceSetup.before.state);
+  check('语音设置', '填了 Key 立刻保存并显示已配置', voiceSetup.after.saved.length === 1
+    && voiceSetup.after.saved[0].apiKey === 'sk-test'
+    && voiceSetup.after.state.includes('已配置') && voiceSetup.after.clearHidden === false,
+    JSON.stringify(voiceSetup.after));
+
+  // ============================== 语音输入 ==============================
+  await fresh();
+  const voice = await run(`(async () => {
+    const { __lab: lab, __stub: stub } = window;
+    const out = {};
+    // 没有可用的识别服务时，不摆一个点了就报错的按钮。
+    stub.voice = { ...stub.voice, hasKey: false, ready: false };
+    await lab.voice.refresh();
+    out.hiddenWhenUnconfigured = lab.voice.visible() === false;
+    // 配好之后出现。
+    stub.voice = { ...stub.voice, hasKey: true, ready: true };
+    await lab.voice.refresh();
+    out.shownWhenReady = lab.voice.visible() === true;
+    out.readyFlag = lab.voice.ready();
+    // 点一下开始录音。
+    lab.voice.click();
+    await new Promise((r) => setTimeout(r, 80));
+    out.afterStart = lab.voice.state();
+    out.startCalls = stub.calls.filter((c) => c[0] === 'voice_start').length;
+    // 再点一下结束，文字落在光标处。
+    lab.caretAfter('第一段内容');
+    lab.voice.click();
+    await new Promise((r) => setTimeout(r, 150));
+    out.afterStop = lab.voice.state();
+    out.stopCalls = stub.calls.filter((c) => c[0] === 'voice_stop').length;
+    out.md = lab.md();
+    // 录音中按 Esc：丢掉这段，不落字。
+    stub.calls.length = 0;
+    lab.voice.click();
+    await new Promise((r) => setTimeout(r, 80));
+    const before = lab.md();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    out.cancelCalls = stub.calls.filter((c) => c[0] === 'voice_cancel').length;
+    out.cancelState = lab.voice.state();
+    out.cancelKeptDoc = lab.md() === before;
+    return out;
+  })()`);
+  check('语音', '没配识别服务时不显示按钮', voice.hiddenWhenUnconfigured === true);
+  check('语音', '配好后按钮出现', voice.shownWhenReady === true && voice.readyFlag === 'yes',
+    `visible=${voice.shownWhenReady} ready=${voice.readyFlag}`);
+  check('语音', '点一下开始录音', voice.afterStart === 'recording' && voice.startCalls === 1,
+    `state=${voice.afterStart} calls=${voice.startCalls}`);
+  check('语音', '再点一下，转写结果落在光标处', voice.afterStop === 'idle' && voice.stopCalls === 1
+    && voice.md.includes('这是语音转出来的文字。'), `state=${voice.afterStop} calls=${voice.stopCalls}`);
+  check('语音', '录音中按 Esc 取消，不落字', voice.cancelCalls === 1 && voice.cancelState === 'idle'
+    && voice.cancelKeptDoc === true, JSON.stringify({ calls: voice.cancelCalls, state: voice.cancelState }));
 
   // ============================== 汇总 ==============================
   const failed = results.filter((r) => !r.pass);

@@ -418,6 +418,13 @@ export async function createRichEditor(options) {
     matches: (snapshot) => !!snapshot && (snapshot === view.state.doc || view.state.doc.eq(snapshot)),
     setMarkdown: (markdown) => crepe.editor.action(replaceAll(markdown)),
     focus: () => view.focus(),
+    /** Inserts plain text at the cursor, replacing the selection (voice input lands here). */
+    insert(text) {
+      if (!text) return;
+      const { from, to } = view.state.selection;
+      view.dispatch(view.state.tr.insertText(text, from, to).scrollIntoView());
+      view.focus();
+    },
     command(id) {
       const command = COMMANDS[id];
       if (command) crepe.editor.action(callCommand(command.key));

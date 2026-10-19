@@ -26,4 +26,5 @@ export const icons = {
   // Appearance: a sun means "switch to light", a moon means "switch to dark".
   sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.5 1.5M17.1 17.1l1.5 1.5M18.6 5.4l-1.5 1.5M6.9 17.1l-1.5 1.5"/>'),
   moon: svg('<path d="M20 14.6A8.3 8.3 0 0 1 9.4 4a8.6 8.6 0 1 0 10.6 10.6z"/>'),
+  mic: svg('<rect x="9" y="2.8" width="6" height="11.2" rx="3"/><path d="M5.4 11.4a6.6 6.6 0 0 0 13.2 0"/><path d="M12 18v3.2"/>'),
 };

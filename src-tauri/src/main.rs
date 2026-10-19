@@ -6,6 +6,7 @@ mod files;
 mod state;
 mod store;
 mod update;
+mod voice;
 mod watch;
 
 use std::collections::HashMap;
@@ -845,6 +846,11 @@ fn main() {
             ai::ai_complete,
             ai::ai_rewrite,
             ai::ai_test,
+            voice::voice_status,
+            voice::voice_configure,
+            voice::voice_start,
+            voice::voice_stop,
+            voice::voice_cancel,
             test_report,
             files::read_document,
             files::write_document,

@@ -16,10 +16,11 @@ const THEMES = [
 
 /**
  * Options: settings (live {sidebar, outline}), setPanel(name, visible), run(id),
- * version (optional string — the shell's version is read async otherwise), onClose().
+ * version (optional string — the shell's version is read async otherwise), onClose(),
+ * voice (optional { status(), configure() } — the speech-to-text form is hidden without it).
  * Returns a close function.
  */
-export function openSettings({ settings, setPanel, run, version, onClose }) {
+export function openSettings({ settings, setPanel, run, version, onClose, voice }) {
   document.querySelector('.overlay.settings-overlay')?.remove();
 
   const overlay = document.createElement('div');
@@ -68,6 +69,16 @@ export function openSettings({ settings, setPanel, run, version, onClose }) {
           </div>
           <button class="text-button opt-ai" type="button">AI 设置…</button>
         </div>
+      </section>
+
+      <section class="voice-section" hidden>
+        <h3>语音输入</h3>
+        <p class="settings-note">录音在这台电脑上完成，只是把音频发到你填的地址转成文字。聊天用的服务如果没有音频接口（比如 DeepSeek），这里要单独填一个。</p>
+        <label class="settings-field"><span>服务地址</span><input class="voice-base" spellcheck="false" /></label>
+        <label class="settings-field"><span>模型</span><input class="voice-model" spellcheck="false" /></label>
+        <label class="settings-field"><span>API Key</span><input class="voice-key" type="password" spellcheck="false" autocomplete="off" /></label>
+        <p class="settings-note voice-state"></p>
+        <button class="text-button voice-clear" type="button" hidden>清除 Key</button>
       </section>
 
       <section>
@@ -133,6 +144,60 @@ export function openSettings({ settings, setPanel, run, version, onClose }) {
     close();
     run('ai-settings');
   });
+
+  // 语音输入：和聊天分开配，因为常见情况是聊天用一家、语音用另一家。改动即时保存。
+  const voiceSection = $('.voice-section');
+  if (voice) {
+    voiceSection.hidden = false;
+    const baseInput = $('.voice-base');
+    const modelInput = $('.voice-model');
+    const keyInput = $('.voice-key');
+    const voiceState = $('.voice-state');
+    const clearVoice = $('.voice-clear');
+    let stored = { hasKey: false, ready: false };
+    const describeVoice = () => {
+      if (stored.hasKey) {
+        voiceState.textContent = '已配置。编辑区右下角会出现麦克风按钮，点一下开始、再点一下结束。';
+      } else if (stored.ready) {
+        voiceState.textContent = '正在借用 AI 设置里的 Key。如果那家没有音频接口（比如 DeepSeek），请在上面单独填一个。';
+      } else {
+        voiceState.textContent = '还没配置。填一个支持音频转写的 Key，编辑区右下角就会出现麦克风按钮。';
+      }
+      clearVoice.hidden = !stored.hasKey;
+      keyInput.placeholder = stored.hasKey ? '已保存，留空不修改' : '';
+    };
+    const paint = (status) => {
+      stored = { ...stored, ...status };
+      baseInput.value = status.baseUrl ?? '';
+      modelInput.value = status.model ?? '';
+      keyInput.value = '';
+      describeVoice();
+    };
+    voice.status().then(paint).catch(() => {});
+    const save = async () => {
+      try {
+        const typed = keyInput.value.trim();
+        paint(await voice.configure({
+          baseUrl: baseInput.value.trim(),
+          model: modelInput.value.trim(),
+          // 空字段表示沿用已存的 Key；只有明确的"清除"才发空串。
+          ...(typed ? { apiKey: typed } : {}),
+        }));
+      } catch (error) {
+        voiceState.textContent = String(error?.message ?? error);
+      }
+    };
+    baseInput.addEventListener('change', save);
+    modelInput.addEventListener('change', save);
+    keyInput.addEventListener('change', save);
+    clearVoice.addEventListener('click', async () => {
+      try {
+        paint(await voice.configure({ apiKey: '' }));
+      } catch (error) {
+        voiceState.textContent = String(error?.message ?? error);
+      }
+    });
+  }
 
   const showVersion = (value) => {
     $('.version').textContent = typeof value === 'string' && value ? value : '—';

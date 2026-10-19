@@ -40,6 +40,15 @@
           hasKey: true,
           completion: true,
         },
+        // Voice: no real microphone in a browser, so start/stop just answer.
+        voice: {
+          baseUrl: 'https://api.siliconflow.cn/v1',
+          model: 'FunAudioLLM/SenseVoiceSmall',
+          hasKey: false,
+          ready: true,
+        },
+        transcript: '这是语音转出来的文字。',
+        voiceFail: '',
       };
       window.__TAURI_INTERNALS__ = {
         metadata: {
@@ -68,6 +77,21 @@
             if (window.__stub.fail) throw window.__stub.fail;
             return 'test-model 可用（回复：ok）';
           }
+          if (cmd === 'voice_status') return window.__stub.voice;
+          if (cmd === 'voice_configure') {
+            const hasKey = 'apiKey' in args ? Boolean(args.apiKey) : window.__stub.voice.hasKey;
+            window.__stub.voice = { ...window.__stub.voice, ...args, hasKey, ready: hasKey || window.__stub.status.hasKey };
+            return window.__stub.voice;
+          }
+          if (cmd === 'voice_start') {
+            if (window.__stub.voiceFail) throw window.__stub.voiceFail;
+            return { ok: true };
+          }
+          if (cmd === 'voice_stop') {
+            if (window.__stub.voiceFail) throw window.__stub.voiceFail;
+            return window.__stub.transcript;
+          }
+          if (cmd === 'voice_cancel') return null;
           return {};
         },
       };

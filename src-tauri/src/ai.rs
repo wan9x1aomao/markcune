@@ -180,7 +180,8 @@ pub fn ai_configure(
 
 // ---------------------------------------------------------------- model calls
 
-fn client() -> &'static reqwest::Client {
+/// Shared by the voice module: one connection pool for every outbound call.
+pub(crate) fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| reqwest::Client::builder().build().unwrap_or_else(|_| reqwest::Client::new()))
 }

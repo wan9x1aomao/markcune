@@ -9,6 +9,7 @@ import { allSkills, installAiActions, slashItems } from './ai-skills.js';
 import { createRichEditor } from './editor.js';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { contextOf, ghostKey } from './ai-ghost.js';
+import { createVoiceInput } from './voice.js';
 
 await ai.refresh();
 
@@ -23,6 +24,12 @@ const editor = await createRichEditor({
 // The app installs these in mountEditor; the harness has to do the same or the UI never exists.
 const aiActions = installAiActions(editor.view);
 const review = installReview(editor.view);
+
+// The microphone button is mounted by main.js in the real app; the harness has to do it itself.
+// Nothing is recorded here: the shell is stubbed, so start/stop just answer.
+const voice = createVoiceInput({ getEditor: () => editor });
+document.body.appendChild(voice.element);
+await voice.refresh();
 
 function findText(needle) {
   let found = null;
@@ -145,6 +152,15 @@ window.__lab = {
     const element = document.querySelector(selector);
     element?.click();
     return !!element;
+  },
+  /** 语音按钮：浏览器里没有真麦克风，start/stop 由桩回答。 */
+  voice: {
+    state: () => voice.state,
+    visible: () => !voice.element.hidden,
+    ready: () => voice.element.dataset.ready,
+    click: () => voice.element.click(),
+    refresh: () => voice.refresh(),
+    label: () => voice.element.textContent.replace(/\s+/g, ' ').trim(),
   },
 };
 

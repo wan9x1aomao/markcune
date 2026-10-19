@@ -725,6 +725,49 @@ try {
   check('菜单', '带勾选的菜单仍留出勾选档', toggleMenu.pad === '28px' && toggleMenu.classes.includes('with-check')
     && toggleMenu.checkedMarked, JSON.stringify(toggleMenu));
 
+  // The window edge is a hard limit — there is no page to scroll — so a menu taller than the window
+  // used to lose its tail. It now scrolls inside the room it has, and the last row stays reachable.
+  const tallMenu = await run(`(async () => {
+    const { showMenu } = await import('/ui.js');
+    const items = Array.from({ length: 60 }, (_, i) => ({ label: '第 ' + (i + 1) + ' 项' }));
+    showMenu(items, { x: 60, y: 60 });
+    const menu = document.querySelector('.popup-menu');
+    const box = menu.getBoundingClientRect();
+    const scrollable = menu.scrollHeight > menu.clientHeight + 1;
+    menu.scrollTop = menu.scrollHeight;
+    const rows = menu.querySelectorAll('.item');
+    const top = menu.getBoundingClientRect().top;
+    const last = rows[rows.length - 1].getBoundingClientRect();
+    const info = {
+      scrollClass: menu.classList.contains('scroll'),
+      fits: box.top >= 0 && box.bottom <= innerHeight + 1,
+      scrollable,
+      lastVisible: last.bottom <= innerHeight + 1 && last.top >= top - 1,
+      height: Math.round(box.height), win: innerHeight,
+    };
+    menu.remove();
+    return info;
+  })()`);
+  check('菜单', '菜单比窗口高时在窗口内滚动，最后一项够得着', tallMenu.scrollClass === true
+    && tallMenu.fits === true && tallMenu.scrollable === true && tallMenu.lastVisible === true,
+    JSON.stringify(tallMenu));
+
+  // Same limit at the other edge: a menu pinned near the bottom opens upwards instead of hanging off.
+  const flipMenu = await run(`(async () => {
+    const { showMenu } = await import('/ui.js');
+    showMenu(Array.from({ length: 10 }, (_, i) => ({ label: '项 ' + i })), { x: 60, y: innerHeight - 20 });
+    const menu = document.querySelector('.popup-menu');
+    const box = menu.getBoundingClientRect();
+    const info = {
+      top: Math.round(box.top), bottom: Math.round(box.bottom), win: innerHeight,
+      origin: menu.style.transformOrigin,
+    };
+    menu.remove();
+    return info;
+  })()`);
+  check('菜单', '靠窗口底部的菜单往上开，不越界', flipMenu.bottom <= flipMenu.win - 8 && flipMenu.top >= 8
+    && flipMenu.origin.includes('bottom'), JSON.stringify(flipMenu));
+
   // The menu is only useful if picking a row actually starts a rewrite with that skill's wording.
   const viaMenuItem = await run(`(async () => {
     await window.__t.status({ mode: 'direct', hasKey: true });

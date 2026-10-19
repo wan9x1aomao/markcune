@@ -62,14 +62,33 @@ export function showMenu(items, anchor, options = {}) {
   }
   document.body.appendChild(menu);
 
+  // The menu is drawn inside the window, so the window edge is a hard limit: whatever falls past it
+  // can never be reached — not by scrolling the page, since there is no page to scroll. Long menus
+  // (the whole app menu, or the skill list with custom instructions) are given the roomier side of
+  // the anchor and scroll inside whatever room that side has.
+  const margin = 8;
+  const gap = 4;
   const rect = anchor instanceof Element ? anchor.getBoundingClientRect() : null;
+  const below = rect ? rect.bottom + gap : anchor.y;
+  const above = rect ? rect.top - gap : anchor.y;
+  const spaceBelow = innerHeight - below - margin;
+  const spaceAbove = above - margin;
+  const natural = menu.offsetHeight;
+  const flip = natural > spaceBelow && spaceAbove > spaceBelow;
+  const room = Math.min(Math.max(120, flip ? spaceAbove : spaceBelow), innerHeight - margin * 2);
+  if (natural > room) {
+    menu.style.maxHeight = `${room}px`;
+    menu.classList.add('scroll');
+  }
+  const height = Math.min(natural, room);
   const x = rect ? rect.right - menu.offsetWidth : anchor.x;
-  const y = rect ? rect.bottom + 4 : anchor.y;
-  menu.style.left = `${Math.max(8, Math.min(x, innerWidth - menu.offsetWidth - 8))}px`;
-  menu.style.top = `${Math.max(8, Math.min(y, innerHeight - menu.offsetHeight - 8))}px`;
+  const y = flip ? above - height : below;
+  menu.style.left = `${Math.max(margin, Math.min(x, innerWidth - menu.offsetWidth - margin))}px`;
+  menu.style.top = `${Math.max(margin, Math.min(y, innerHeight - height - margin))}px`;
   // Grow out of the corner nearest the anchor, or a menu pinned to a caret looks like it slides in
-  // from the wrong side.
-  menu.style.transformOrigin = rect ? 'top right' : anchor.origin ?? 'top left';
+  // from the wrong side. Opening upwards mirrors that corner.
+  const corner = rect ? 'right' : (anchor.origin ?? 'top left').endsWith('right') ? 'right' : 'left';
+  menu.style.transformOrigin = `${flip ? 'bottom' : 'top'} ${corner}`;
 
   const onPointer = (event) => {
     if (!menu.contains(event.target)) close();

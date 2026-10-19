@@ -1420,89 +1420,110 @@ try {
 
   const voiceSetup = await run(`(async () => {
     const { openSettings } = await import('/settings.js');
+    const { openVoiceSettings } = await import('/voice-settings.js');
     const saved = [];
-    const mount = async (status, configure) => {
-      document.querySelector('.settings-overlay')?.remove();
-      openSettings({
-        settings: { sidebar: true, outline: false },
-        setPanel() {},
-        run() {},
-        version: '3.4.2',
-        voice: { status: async () => status, configure, test: async () => 'Key 可用 · FunAudioLLM/SenseVoiceSmall' },
-      });
-      await new Promise((r) => setTimeout(r, 140));
-      return document.querySelector('.settings-overlay');
-    };
-    const record = async (options) => {
-      saved.push(options);
-      return { baseUrl: options.baseUrl, model: options.model, hasKey: Boolean(options.apiKey), ready: true, borrowed: false };
+    const runs = [];
+    const voice = {
+      status: async () => ({
+        baseUrl: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/SenseVoiceSmall',
+        hasKey: false, ready: false, borrowed: false, aiHost: 'api.deepseek.com', sameService: false,
+      }),
+      configure: async (options) => {
+        saved.push(options);
+        return {
+          baseUrl: options.baseUrl, model: options.model,
+          hasKey: Boolean(options.apiKey), ready: Boolean(options.apiKey),
+          borrowed: false, aiHost: 'api.deepseek.com', sameService: false,
+        };
+      },
+      test: async () => 'Key 可用 · FunAudioLLM/SenseVoiceSmall',
     };
     const out = { saved };
-    // ① 同一家服务：AI 的 Key 可以借
-    const same = await mount(
-      { baseUrl: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/SenseVoiceSmall', hasKey: false, ready: true, borrowed: true, aiHost: 'api.siliconflow.cn', sameService: true },
-      record,
-    );
-    out.same = {
-      headings: [...same.querySelectorAll('section:not([hidden]) h3')].map((h) => h.textContent),
-      base: same.querySelector('.voice-base').value,
-      model: same.querySelector('.voice-model').value,
-      state: same.querySelector('.voice-state').textContent,
-      clearHidden: same.querySelector('.voice-clear').hidden,
+    // ① 设置里只留一行摘要 + 入口，表单搬进自己的面板
+    openSettings({ settings: { sidebar: true, outline: false }, setPanel() {}, run: (id) => runs.push(id), version: '3.4.2', voice });
+    await new Promise((r) => setTimeout(r, 160));
+    const overlay = document.querySelector('.settings-overlay');
+    const row = overlay.querySelector('.voice-section');
+    out.row = {
+      headings: [...overlay.querySelectorAll('section:not([hidden]) h3')].map((h) => h.textContent),
+      state: row.querySelector('.voice-state').textContent,
+      inputs: row.querySelectorAll('input').length,
+      button: row.querySelector('.opt-voice')?.textContent,
     };
-    // ② 不同家（这次报错的真实情形）：不能借，要说清必须单独填
-    const other = await mount(
-      { baseUrl: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/SenseVoiceSmall', hasKey: false, ready: false, borrowed: false, aiHost: 'api.deepseek.com', sameService: false },
-      record,
-    );
-    out.other = { state: other.querySelector('.voice-state').textContent };
-    // ③ 填了 Key：立刻保存并显示已配置
-    const before = saved.length;
-    const key = other.querySelector('.voice-key');
-    key.value = 'sk-test';
-    key.dispatchEvent(new Event('change', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 120));
-    out.after = {
-      saved: saved.slice(before),
-      state: other.querySelector('.voice-state').textContent,
-      clearHidden: other.querySelector('.voice-clear').hidden,
+    row.querySelector('.opt-voice').click();
+    await new Promise((r) => setTimeout(r, 140));
+    out.row.runs = runs;
+    out.row.closed = !document.querySelector('.settings-overlay');
+    // ② 语音面板与 AI 面板同版式
+    const openPanel = async (status) => {
+      document.querySelector('.voice-overlay')?.remove();
+      openVoiceSettings({ voice: { ...voice, status: async () => status } });
+      await new Promise((r) => setTimeout(r, 160));
+      return document.querySelector('.voice-overlay .ai-panel');
     };
-    // ④ 只填 Key 不点别处、直接 Esc 关面板：也要存下来
-    const esc = await mount(
-      { baseUrl: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/SenseVoiceSmall', hasKey: false, ready: false, borrowed: false, aiHost: 'api.deepseek.com', sameService: false },
-      record,
-    );
-    esc.querySelector('.voice-key').value = 'sk-esc';
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-    await new Promise((r) => setTimeout(r, 180));
-    out.esc = { savedKey: saved.at(-1)?.apiKey, closed: !document.querySelector('.settings-overlay') };
-    // ⑤ 验证 Key：先把刚填的存下来，再用新 Key 去验（不能验旧值）
-    const verify = await mount(
-      { baseUrl: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/SenseVoiceSmall', hasKey: false, ready: false, borrowed: false, aiHost: 'api.deepseek.com', sameService: false },
-      record,
-    );
+    const panel = await openPanel({ ...(await voice.status()) });
+    const $ = (sel) => panel.querySelector(sel);
+    out.panel = {
+      title: $('h2').textContent,
+      fields: [...panel.querySelectorAll('.ai-row > span')].map((e) => e.textContent),
+      provider: $('.voice-provider').value,
+      base: $('.voice-base').value,
+      model: $('.voice-model').value,
+      hint: $('.voice-hint').hidden ? '' : $('.voice-hint').textContent,
+      actions: [...panel.querySelectorAll('.ai-footer button')].map((b) => b.textContent),
+    };
+    // ③ 换服务商自动填地址与模型
+    $('.voice-provider').value = 'openai';
+    $('.voice-provider').dispatchEvent(new Event('change', { bubbles: true }));
+    out.switch = { base: $('.voice-base').value, model: $('.voice-model').value };
+    // ④ 填 Key 保存：写回并关面板
+    $('.voice-key').value = 'sk-voice';
+    $('.voice-save').click();
+    await new Promise((r) => setTimeout(r, 900));
+    out.save = { last: saved.at(-1), closed: !document.querySelector('.voice-overlay') };
+    // ⑤ 验证 Key：先把刚填的存下来，再用新 Key 去验
+    const verify = await openPanel({ ...(await voice.status()) });
     verify.querySelector('.voice-key').value = 'sk-verify';
     verify.querySelector('.voice-test').click();
-    await new Promise((r) => setTimeout(r, 220));
-    out.verify = { savedKey: saved.at(-1)?.apiKey, state: verify.querySelector('.voice-state').textContent };
-    verify.querySelector('.settings-close').click();
+    await new Promise((r) => setTimeout(r, 260));
+    out.verify = { last: saved.at(-1), result: verify.querySelector('.ai-result').textContent };
+    verify.querySelector('.voice-cancel').click();
+    // ⑥ 取消不写：Esc 关掉刚填的内容不落盘
+    const before = saved.length;
+    const esc = await openPanel({ ...(await voice.status()) });
+    esc.querySelector('.voice-key').value = 'sk-discard';
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 160));
+    out.esc = { extra: saved.length - before, closed: !document.querySelector('.voice-overlay') };
+    // ⑦ 借 Key 与「不同家」的摘要要说清
+    openSettings({ settings: { sidebar: true, outline: false }, setPanel() {}, run() {}, version: '3.4.2',
+      voice: { ...voice, status: async () => ({ ...(await voice.status()), ready: true, borrowed: true, aiHost: 'api.siliconflow.cn', sameService: true }) } });
+    await new Promise((r) => setTimeout(r, 140));
+    out.borrowed = document.querySelector('.settings-overlay .voice-state').textContent;
+    document.querySelector('.settings-overlay').remove();
     return out;
   })()`);
-  check('语音设置', '有独立的语音段，预填硅基流动', voiceSetup.same.headings.includes('语音输入')
-    && voiceSetup.same.base === 'https://api.siliconflow.cn/v1'
-    && voiceSetup.same.model === 'FunAudioLLM/SenseVoiceSmall', JSON.stringify(voiceSetup.same));
-  check('语音设置', '同一家服务时说清是在借 AI 的 Key', voiceSetup.same.state.includes('借用'), voiceSetup.same.state);
-  check('语音设置', '不同家时直说不能通用，要单独填', voiceSetup.other.state.includes('api.deepseek.com')
-    && voiceSetup.other.state.includes('单独填') && !voiceSetup.other.state.includes('借用'),
-    voiceSetup.other.state);
-  check('语音设置', '填了 Key 立刻保存并显示已配置', voiceSetup.after.saved.length === 1
-    && voiceSetup.after.saved[0].apiKey === 'sk-test'
-    && voiceSetup.after.state.includes('已配置') && voiceSetup.after.clearHidden === false,
-    JSON.stringify(voiceSetup.after));
-  check('语音设置', '填完直接 Esc 也不会丢掉刚填的 Key', voiceSetup.esc.savedKey === 'sk-esc'
-    && voiceSetup.esc.closed === true, JSON.stringify(voiceSetup.esc));
-  check('语音设置', '验证 Key 前先存，验的是刚填的那个', voiceSetup.verify.savedKey === 'sk-verify'
-    && voiceSetup.verify.state.includes('可用'), JSON.stringify(voiceSetup.verify));
+  check('语音设置', '设置里只留一行摘要与入口，不再塞表单', voiceSetup.row.headings.includes('语音')
+    && voiceSetup.row.inputs === 0 && voiceSetup.row.button === '语音设置…'
+    && voiceSetup.row.state.includes('未配置'), JSON.stringify(voiceSetup.row));
+  check('语音设置', '点入口打开语音面板并收起设置', voiceSetup.row.runs[0] === 'voice-settings'
+    && voiceSetup.row.closed === true, JSON.stringify(voiceSetup.row));
+  check('语音设置', '与 AI 面板同版式：标题、四行、三个动作', voiceSetup.panel.title === '语音输入'
+    && voiceSetup.panel.fields.join(',') === '服务商,服务地址,模型,API Key'
+    && voiceSetup.panel.actions.join(',') === '验证 Key,取消,保存', JSON.stringify(voiceSetup.panel));
+  check('语音设置', '预填硅基流动，并说明 AI 的 Key 借不过来', voiceSetup.panel.provider === 'siliconflow'
+    && voiceSetup.panel.model === 'FunAudioLLM/SenseVoiceSmall'
+    && voiceSetup.panel.hint.includes('api.deepseek.com'), JSON.stringify(voiceSetup.panel));
+  check('语音设置', '换服务商自动填地址与模型', voiceSetup.switch.base === 'https://api.openai.com/v1'
+    && voiceSetup.switch.model === 'whisper-1', JSON.stringify(voiceSetup.switch));
+  check('语音设置', '保存写回并关面板', voiceSetup.save.last.apiKey === 'sk-voice'
+    && voiceSetup.save.closed === true, JSON.stringify(voiceSetup.save));
+  check('语音设置', '验证 Key 前先存，验的是刚填的那个', voiceSetup.verify.last.apiKey === 'sk-verify'
+    && voiceSetup.verify.result.includes('可用'), JSON.stringify(voiceSetup.verify));
+  check('语音设置', '取消不写，Esc 也不落盘', voiceSetup.esc.extra === 0 && voiceSetup.esc.closed === true,
+    JSON.stringify(voiceSetup.esc));
+  check('语音设置', '同一家服务时摘要说明在借 AI 的 Key', voiceSetup.borrowed.includes('借用'),
+    voiceSetup.borrowed);
 
   // ============================== 语音输入 ==============================
   await fresh();

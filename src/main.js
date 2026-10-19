@@ -17,6 +17,7 @@ import { createSidebar } from './sidebar.js';
 import { createUpdater } from './update.js';
 import { formatKeys, prompt, showMenu, toast } from './ui.js';
 import { createVoiceInput } from './voice.js';
+import { openVoiceSettings } from './voice-settings.js';
 import { createTidyHint, tidyDocument } from './tidy-ui.js';
 import { openSettings } from './settings.js';
 import { initTheme, onThemeChange, primeTheme, themeState, toggleTheme } from './theme.js';
@@ -48,6 +49,13 @@ const els = {
 
 // 语音输入按钮在启动时创建（要先拿到编辑器和 shell 的配置）。
 let voice = null;
+
+// 语音的读写都经外壳：页面既不碰麦克风，也不碰 Key 的存储。设置面板与语音面板共用一份。
+const voiceBridge = {
+  status: () => api.voiceStatus(),
+  configure: (options) => api.voiceConfigure(options),
+  test: () => api.voiceTest(),
+};
 
 const app = {
   settings: { sidebar: true, outline: false },
@@ -890,11 +898,16 @@ const actions = {
       settings: app.settings,
       setPanel,
       run,
-      voice: {
-        status: () => api.voiceStatus(),
-        configure: (options) => api.voiceConfigure(options),
-        test: () => api.voiceTest(),
+      voice: voiceBridge,
+      onClose: () => {
+        voice?.refresh();
+        app.editor?.focus();
       },
+    }),
+  // 语音和 AI 一样，表单在自己的面板里；设置列表只留一行摘要。
+  'voice-settings': () =>
+    openVoiceSettings({
+      voice: voiceBridge,
       onClose: () => {
         voice?.refresh();
         app.editor?.focus();

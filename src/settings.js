@@ -17,7 +17,8 @@ const THEMES = [
 /**
  * Options: settings (live {sidebar, outline}), setPanel(name, visible), run(id),
  * version (optional string — the shell's version is read async otherwise), onClose(),
- * voice (optional { status(), configure() } — the speech-to-text form is hidden without it).
+ * voice (optional { status() } — the summary row is hidden without it; the form is its own
+ * panel, see voice-settings.js).
  * Returns a close function.
  */
 export function openSettings({ settings, setPanel, run, version, onClose, voice }) {
@@ -72,15 +73,13 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice 
       </section>
 
       <section class="voice-section" hidden>
-        <h3>语音输入</h3>
-        <p class="settings-note">录音在这台电脑上完成，只是把音频发到你填的地址转成文字。聊天用的服务如果没有音频接口（比如 DeepSeek），这里要单独填一个。</p>
-        <label class="settings-field"><span>服务地址</span><input class="voice-base" spellcheck="false" /></label>
-        <label class="settings-field"><span>模型</span><input class="voice-model" spellcheck="false" /></label>
-        <label class="settings-field"><span>API Key</span><input class="voice-key" type="password" spellcheck="false" autocomplete="off" /></label>
-        <p class="settings-note voice-state"></p>
-        <div class="voice-actions">
-          <button class="text-button voice-test" type="button">验证 Key</button>
-          <button class="text-button voice-clear" type="button" hidden>清除 Key</button>
+        <h3>语音</h3>
+        <div class="settings-row">
+          <div class="label">
+            <b>语音输入</b>
+            <em class="voice-state">读取中…</em>
+          </div>
+          <button class="text-button opt-voice" type="button">语音设置…</button>
         </div>
       </section>
 
@@ -148,83 +147,28 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice 
     run('ai-settings');
   });
 
-  // 语音输入：和聊天分开配，因为常见情况是聊天用一家、语音用另一家。改动即时保存。
+  // 语音输入：和 AI 一样，这里只给一行摘要，表单在它自己的面板里（见 voice-settings.js）。
+  // 单独一个面板而不是塞进列表：服务商、地址、模型、Key 四样都要能改，挤在设置行里会和 AI 的字段混淆。
   const voiceSection = $('.voice-section');
-  // 关闭面板时补一次保存：输入框只有失焦才触发 change，按 Esc 关掉面板会让刚填的 Key 悄悄丢掉。
-  let flushVoice = () => {};
   if (voice) {
     voiceSection.hidden = false;
-    const baseInput = $('.voice-base');
-    const modelInput = $('.voice-model');
-    const keyInput = $('.voice-key');
     const voiceState = $('.voice-state');
-    const clearVoice = $('.voice-clear');
-    const testButton = $('.voice-test');
-    let stored = { hasKey: false, ready: false };
-    const describeVoice = () => {
-      if (stored.hasKey) {
-        voiceState.textContent = '已配置。编辑区右下角会出现麦克风按钮，点一下开始、再点一下结束。';
-      } else if (stored.borrowed) {
-        voiceState.textContent = '正在借用 AI 设置里的 Key（两家是同一个服务）。想更稳妥的话，可以在上面填一个语音专用的。';
-      } else if (stored.aiHost) {
-        voiceState.textContent = `还没配置。AI 设置里用的是 ${stored.aiHost}，和语音服务不是同一家，Key 不能通用 —— 请在上面单独填一个。`;
+    const describeVoice = (status) => {
+      const host = status.baseUrl ? status.baseUrl.replace(/^https?:\/\//, '').split('/')[0] : '';
+      if (status.hasKey) {
+        voiceState.textContent = `已配置${status.model ? ` · ${status.model}` : ''}${host ? ` · ${host}` : ''}`;
+      } else if (status.borrowed) {
+        voiceState.textContent = `正在借用 AI 设置里的 Key${status.model ? ` · ${status.model}` : ''}`;
       } else {
-        voiceState.textContent = '还没配置。填一个支持音频转写的 Key，编辑区右下角就会出现麦克风按钮。';
-      }
-      clearVoice.hidden = !stored.hasKey;
-      keyInput.placeholder = stored.hasKey ? '已保存，留空不修改' : '';
-    };
-    const paint = (status) => {
-      stored = { ...stored, ...status };
-      baseInput.value = status.baseUrl ?? '';
-      modelInput.value = status.model ?? '';
-      keyInput.value = '';
-      describeVoice();
-    };
-    voice.status().then(paint).catch(() => {});
-    const save = async () => {
-      try {
-        const typed = keyInput.value.trim();
-        paint(await voice.configure({
-          baseUrl: baseInput.value.trim(),
-          model: modelInput.value.trim(),
-          // 空字段表示沿用已存的 Key；只有明确的"清除"才发空串。
-          ...(typed ? { apiKey: typed } : {}),
-        }));
-      } catch (error) {
-        voiceState.textContent = String(error?.message ?? error);
+        voiceState.textContent = '未配置。不填 Key 也能照常写文档，只是没有语音输入。';
       }
     };
-    baseInput.addEventListener('change', save);
-    modelInput.addEventListener('change', save);
-    keyInput.addEventListener('change', save);
-    // 面板被 Esc / 点外面关掉时，输入框还没来得及失焦，这里补存一次。
-    flushVoice = () => {
-      const typed = keyInput.value.trim();
-      const moved = baseInput.value.trim() !== (stored.baseUrl ?? '')
-        || modelInput.value.trim() !== (stored.model ?? '');
-      return typed || moved ? save() : undefined;
-    };
-    if (!voice.test) testButton.hidden = true;
-    testButton.addEventListener('click', async () => {
-      testButton.disabled = true;
-      // 先把刚填的 Key 存下来再验 —— 验旧值是最容易误导人的一种"通过"。
-      await save();
-      voiceState.textContent = '正在验证…';
-      try {
-        voiceState.textContent = await voice.test();
-      } catch (error) {
-        voiceState.textContent = String(error?.message ?? error);
-      } finally {
-        testButton.disabled = false;
-      }
+    voice.status().then(describeVoice).catch(() => {
+      voiceState.textContent = '';
     });
-    clearVoice.addEventListener('click', async () => {
-      try {
-        paint(await voice.configure({ apiKey: '' }));
-      } catch (error) {
-        voiceState.textContent = String(error?.message ?? error);
-      }
+    $('.opt-voice').addEventListener('click', () => {
+      close();
+      run('voice-settings');
     });
   }
 
@@ -259,8 +203,7 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice 
     stopTheme();
     overlay.remove();
     document.removeEventListener('keydown', onKey, true);
-    // 等保存落盘再回调，否则语音按钮会按旧的"未配置"状态算一次显隐，得重开面板才出来。
-    Promise.resolve(flushVoice()).then(() => onClose?.());
+    onClose?.();
   }
   return close;
 }

@@ -21,6 +21,7 @@ export const COMMANDS = [
   { id: 'settings', title: '设置…', keys: 'Mod+,' },
   { id: 'theme-toggle', title: '切换浅色 / 深色', keys: 'Mod+Shift+D' },
   { id: 'ai-settings', title: 'AI 设置…' },
+  { id: 'voice-settings', title: '语音设置…' },
   { id: 'find', title: '查找…', keys: 'Mod+F' },
   { id: 'replace', title: '替换…', keys: isMac ? 'Mod+Alt+F' : 'Ctrl+H' },
   { id: 'bold', title: '加粗', keys: 'Mod+B' },

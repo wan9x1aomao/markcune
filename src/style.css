@@ -2003,8 +2003,7 @@ body.ai-pending .ai-pick {
 .ai-footer .ai-save:hover {
   background: var(--accent-text);
 }
-.ai-footer .ai-save:disabled,
-.ai-footer .ai-test:disabled {
+.ai-footer button:disabled {
   opacity: 0.6;
 }
 .ai-result {
@@ -2436,46 +2435,13 @@ body.ai-pending .ai-pick {
   }
 }
 
-/* 设置面板：说明文字与带输入框的一行。 */
-.settings-note {
-  margin: 4px 0 0;
-  color: var(--text-faint);
-  font-size: 11.5px;
-  line-height: 1.6;
-}
-.settings-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 10px;
-}
-.settings-field > span {
-  color: var(--text-faint);
-  font-size: 11.5px;
-}
-.settings-field input {
-  height: 31px;
-  padding: 0 9px;
-  border: none;
-  border-radius: 8px;
+/* 语音面板：只在有额外说明时出现（借 Key / 不同家）。 */
+.voice-hint {
+  margin: -2px 0 12px;
+  padding: 7px 9px;
+  border-radius: 7px;
   background: var(--app-bg);
-  box-shadow: 0 0 0 1px var(--line);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 12.5px;
-}
-.settings-field input:focus {
-  outline: none;
-  box-shadow: 0 0 0 1px var(--accent);
-}
-
-/* 语音设置的两个动作并排：验证和清除，都不该被误当成主按钮。 */
-.voice-actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 8px;
-}
-.voice-actions .text-button[disabled] {
-  opacity: 0.5;
-  pointer-events: none;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.55;
 }

@@ -13,8 +13,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 
+use percent_encoding::percent_decode_str;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
+use tauri::ipc::{InvokeBody, Request};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window, WindowEvent, Wry};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult};
@@ -223,6 +225,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         &item("reveal", if mac { "在访达中显示" } else { "在资源管理器中显示" }, None)?,
         &separator()?,
         &item("export-html", "导出为网页…", None)?,
+        &item("export-word", "导出为 Word…", None)?,
         &item("export-pdf", "导出为 PDF…", None)?,
         &separator()?,
         &item("close", "关闭窗口", Some("CmdOrCtrl+W"))?,
@@ -453,6 +456,33 @@ async fn export_html(window: WebviewWindow, html: String, name: String) -> Resul
     let Some(target) = dialog.blocking_save_file() else { return Ok(false) };
     let target = target.into_path().map_err(|_| "无法使用所选位置".to_string())?;
     files::atomic_write(&target, html.as_bytes())?;
+    Ok(true)
+}
+
+/// Saves an exported .docx. The bytes arrive as the request body: a multi-megabyte document as a
+/// JSON array of numbers would be slower to encode than to write.
+#[tauri::command]
+async fn export_docx(window: WebviewWindow, request: Request<'_>) -> Result<bool, String> {
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err("文档数据无效".into());
+    };
+    let name = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| percent_decode_str(value).decode_utf8_lossy().into_owned())
+        .unwrap_or_else(|| "未命名.docx".into());
+    let directory = with_win(window.app_handle(), window.label(), |w| {
+        w.doc.as_ref().and_then(|d| d.parent().map(Path::to_path_buf)).or(w.root.clone())
+    })
+    .flatten();
+    let mut dialog = window.dialog().file().add_filter("Word 文档", &["docx"]).set_parent(&window).set_file_name(name);
+    if let Some(dir) = directory {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(target) = dialog.blocking_save_file() else { return Ok(false) };
+    let target = target.into_path().map_err(|_| "无法使用所选位置".to_string())?;
+    files::atomic_write(&target, bytes)?;
     Ok(true)
 }
 
@@ -802,6 +832,7 @@ fn main() {
             reveal,
             print_page,
             export_html,
+            export_docx,
             remember_position,
             set_setting,
             ai::ai_available,

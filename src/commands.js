@@ -15,6 +15,7 @@ export const COMMANDS = [
   { id: 'rename', title: '重命名…' },
   { id: 'reveal', title: isMac ? '在访达中显示' : '在资源管理器中显示' },
   { id: 'export-html', title: '导出为网页…' },
+  { id: 'export-word', title: '导出为 Word…' },
   { id: 'export-pdf', title: '导出为 PDF…' },
   { id: 'tidy', title: '一键整理格式', keys: 'Mod+Alt+L' },
   { id: 'ai-settings', title: 'AI 设置…' },

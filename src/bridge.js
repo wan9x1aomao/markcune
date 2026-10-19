@@ -38,6 +38,7 @@ export const api = {
   reveal: (path) => invoke('reveal', { path }),
   print: () => invoke('print_page'),
   exportHtml: (html, name) => invoke('export_html', { html, name }),
+  exportDocx: (bytes, name) => invoke('export_docx', bytes, { headers: { 'x-file-name': encodeURIComponent(name) } }),
   rememberPosition: (path, position) => invoke('remember_position', { path, position }),
   setSetting: (key, value) => invoke('set_setting', { key, value }),
   aiAvailable: () => invoke('ai_available'),

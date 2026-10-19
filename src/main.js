@@ -806,6 +806,34 @@ async function exportHtml() {
   }
 }
 
+/** The exported .docx, built from the same document walk as the HTML export. */
+async function buildExportDocx() {
+  const doc = await exportDocument();
+  const { buildDocx } = await import('./docx.js');
+  return buildDocx(doc, {
+    title: exportTitle(),
+    image: async (src) => {
+      const url = await resolveImage(src);
+      return (await embedImage(url)) ?? url;
+    },
+  });
+}
+
+async function exportWord() {
+  let bytes;
+  try {
+    bytes = await buildExportDocx();
+  } catch (error) {
+    toast(`导出失败：${error}`);
+    return;
+  }
+  try {
+    if (await api.exportDocx(bytes, `${exportTitle()}.docx`)) toast('已导出为 Word');
+  } catch (error) {
+    toast(`导出失败：${error}`);
+  }
+}
+
 /** Fills the print-only container with the fully rendered document. */
 async function preparePrintDocument() {
   const doc = await exportDocument();
@@ -843,6 +871,7 @@ const actions = {
   rename: renameCurrent,
   reveal: () => (app.doc.path || app.root) && api.reveal(app.doc.path ?? app.root),
   'export-html': exportHtml,
+  'export-word': exportWord,
   'export-pdf': exportPdf,
   tidy: () => tidyHint.run(),
   'ai-settings': () => openAiSettings(),
@@ -1098,4 +1127,4 @@ setTimeout(() => updater.check(true), 5000);
 // Lets tests/scenarios.sh drive the editor through ProseMirror's own input handling.
 window.__mdpadDebug = app;
 // Lets tests check the export output without a save dialog.
-window.__mdpadExport = { html: buildExportHtml, print: preparePrintDocument };
+window.__mdpadExport = { html: buildExportHtml, print: preparePrintDocument, docx: buildExportDocx };

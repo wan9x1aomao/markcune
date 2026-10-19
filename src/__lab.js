@@ -119,6 +119,17 @@ window.__lab = {
     return doc.childCount - 1;
   },
   ghostNow: () => editor.ai?.now(),
+  /** Builds the Word export and hands it back as base64, so a test can unzip and read it. */
+  docx: async () => {
+    const { buildDocx } = await import('./docx.js');
+    const bytes = await buildDocx(editor.view.state.doc, {
+      title: '测试',
+      image: async (src) => src,
+    });
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return { size: bytes.length, base64: btoa(binary) };
+  },
   ctx: () => {
     const c = contextOf(editor.view);
     return { enabled: c.enabled, empty: c.empty, atEnd: c.atEnd, paragraph: c.paragraph, composing: c.isComposing, cooldown: c.cooldown, chars: c.chars, pos: c.pos, version: c.version };

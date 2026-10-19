@@ -363,26 +363,77 @@ function showBar(view, proposal) {
 
 // ---------------------------------------------------------------- ranges
 
-/**
- * The top-level blocks a selection touches, each with the part of it that is selected.
- * Returns null when one of them is not prose: a code block is a text block to ProseMirror, but
- * rewriting code as prose is never what the user meant, and tables and lists have their own shape.
- */
+/** The text blocks a rewrite may touch. Anything else is refused, with a reason worth reading. */
 const PROSE = new Set(['paragraph', 'heading']);
 
-export function blocksIn(doc, from, to) {
+/**
+ * Why a block cannot be rewritten, in the user's words. A code block is a text block to
+ * ProseMirror, but rewriting code as prose is never what the user meant; the rest carry no
+ * sentences at all, so the only honest answer is to say which one got in the way.
+ */
+const NOT_PROSE = {
+  code_block: '代码块不参与改写',
+  table: '表格里没有可以改写的段落',
+  hr: '选区跨过了分隔线，只选文字再试',
+  image: '选区里有图片，只选文字再试',
+  'image-block': '选区里有图片，只选文字再试',
+  html: '选区里有原始 HTML，只选文字再试',
+  math_block: '选区里有公式块，只选文字再试',
+  math_inline: '选区里有公式，只选文字再试',
+};
+
+const FALLBACK = '这里没有可以改写的文字';
+
+/**
+ * The text blocks a selection touches, each with the part of it that is selected.
+ *
+ * Walks *into* containers: a list item, a quote and a table cell all hold ordinary paragraphs, and
+ * refusing them made 「只选了一段」 fail for the most common shape of all — a bulleted outline. What
+ * is still refused is a text block that is not a paragraph (`code_block`) and any block that holds
+ * no sentences at all.
+ *
+ * `nested` marks a block that is not a direct child of the document; the caller needs to know
+ * because such a block cannot be replaced as a whole without destroying the container around it.
+ */
+export function scanBlocks(doc, from, to) {
   const hits = [];
-  let pos = 0;
-  for (let i = 0; i < doc.childCount; i++) {
-    const node = doc.child(i);
-    const end = pos + node.nodeSize;
-    if (end > from && pos < to) {
-      if (!node.isTextblock || !PROSE.has(node.type.name)) return null;
-      hits.push({ pos, node, from: Math.max(from, pos + 1), to: Math.min(to, end - 1) });
-    }
-    pos = end;
-  }
-  return hits;
+  let reason = '';
+
+  const walk = (parent, base, depth) => {
+    parent.forEach((child, offset) => {
+      const start = base + offset;
+      const end = start + child.nodeSize;
+      if (end <= from || start >= to) return;
+      if (child.isTextblock) {
+        if (!PROSE.has(child.type.name)) {
+          reason ||= NOT_PROSE[child.type.name] ?? FALLBACK;
+          return;
+        }
+        hits.push({
+          pos: start,
+          node: child,
+          nested: depth > 0,
+          from: Math.max(from, start + 1),
+          to: Math.min(to, end - 1),
+        });
+        return;
+      }
+      if (child.isLeaf) {
+        reason ||= NOT_PROSE[child.type.name] ?? FALLBACK;
+        return;
+      }
+      walk(child, start + 1, depth + 1);
+    });
+  };
+
+  walk(doc, 0, 0);
+  return { hits, reason };
+}
+
+/** Same walk, but only the blocks — null when the selection touches anything unrewritable. */
+export function blocksIn(doc, from, to) {
+  const { hits, reason } = scanBlocks(doc, from, to);
+  return reason ? null : hits;
 }
 
 function wantsBlock(text, source, atEnd) {
@@ -399,10 +450,21 @@ function atBlockEnd(view, pos) {
 // ---------------------------------------------------------------- asking
 
 async function run(view, { from, to, source, instruction, label, split }) {
-  const hits = blocksIn(view.state.doc, from, to);
-  if (!hits) {
-    toast('列表、表格和代码块里一次只能改一段');
+  const { hits, reason } = scanBlocks(view.state.doc, from, to);
+  if (reason) {
+    toast(reason);
     return;
+  }
+  if (!hits.length) {
+    toast(FALLBACK);
+    return;
+  }
+  // List items, quotes and table cells cannot be replaced as one paragraph without destroying the
+  // container, so a selection spanning several of them gets one request per block instead — the
+  // same thing 「逐段改写」 does, just picked for the user rather than by them.
+  if (hits.length > 1 && hits.some((hit) => hit.nested)) {
+    hideBar();
+    return proposeEach(view, instruction, label, { from, to });
   }
   const multi = hits.length > 1;
   showBusy(view, from, multi ? '正在改写整段…' : '正在改写…');
@@ -473,7 +535,8 @@ export function proposeRange(view, from, to, instruction, label) {
     return;
   }
   if (!blocksIn(view.state.doc, from, to)) {
-    toast('列表、表格和代码块里一次只能改一段');
+    const { reason } = scanBlocks(view.state.doc, from, to);
+    toast(reason || FALLBACK);
     return;
   }
   run(view, { from, to, source, instruction, label, split: false });
@@ -529,15 +592,19 @@ export function proposePrevious(view, instruction, label) {
  * One request per paragraph, then a review list. Used for 「逐段改写」: a long section is easier to
  * judge paragraph by paragraph than as one wall of new text.
  */
-export async function proposeEach(view, instruction, label) {
-  const { from, to } = view.state.selection;
+export async function proposeEach(view, instruction, label, range) {
+  const { from, to } = range ?? view.state.selection;
   if (from === to) {
     toast('先选中要改的文字');
     return;
   }
-  const hits = blocksIn(view.state.doc, from, to);
-  if (!hits) {
-    toast('列表、表格和代码块里一次只能改一段');
+  const { hits, reason } = scanBlocks(view.state.doc, from, to);
+  if (reason) {
+    toast(reason);
+    return;
+  }
+  if (!hits.length) {
+    toast(FALLBACK);
     return;
   }
   if (hits.length < 2) {

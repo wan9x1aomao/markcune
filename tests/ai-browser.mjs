@@ -325,8 +325,71 @@ try {
     await new Promise((r) => setTimeout(r, 200));
     return window.__lab.view.state.doc.childCount;
   })()`);
-  check('改写', '代码块混在选区里时拒绝并说明', (await run(`window.__t.toast()`)) === '列表、表格和代码块里一次只能改一段'
+  check('改写', '代码块混在选区里时拒绝并说明', (await run(`window.__t.toast()`)) === '代码块不参与改写'
     && (await run(`window.__t.calls('ai_rewrite').length`)) === 0, await run(`window.__t.toast()`));
+  await run(`(async () => {
+    window.__lab.setDoc('# 标题\\n\\n第一段内容在这里，正在写一句话。\\n\\n第二段文字，需要被改写。\\n');
+    await new Promise((r) => setTimeout(r, 250));
+  })()`);
+
+  // B2b 列表 / 引用块：容器里的一段也能改，跨多项时自动改成逐段
+  await run(`(async () => {
+    window.__lab.setDoc('第四点。\\n\\n- 第一项，需要被翻译。\\n- 第二项，也要被翻译。\\n');
+    await new Promise((r) => setTimeout(r, 250));
+    window.__lab.view.focus();
+    window.__lab.select('第一项，需要被翻译。');
+    window.__t.reset();
+    document.getElementById('toast').textContent = '';
+    window.__lab.propose('译成英文', '译成英文');
+    await new Promise((r) => setTimeout(r, 400));
+  })()`);
+  check('改写', '列表项里的一段可以改写', (await run(`window.__t.calls('ai_rewrite').length`)) === 1
+    && (await run(`window.__lab.proposals().length`)) === 1, await run(`window.__t.toast()`));
+  await run(`(async () => { window.__lab.accept(window.__lab.proposals()[0]?.id); await new Promise((r) => setTimeout(r, 120)); })()`);
+  const listMd = await run(`window.__lab.md()`);
+  check('改写', '接受后列表结构还在', String(listMd).includes('改写之后的文字') && String(listMd).includes('- ')
+    && !String(listMd).includes('第一项'), JSON.stringify(listMd));
+
+  await run(`(async () => {
+    window.__lab.setDoc('- 甲项文字，需要被翻译。\\n- 乙项文字，也要被翻译。\\n');
+    await new Promise((r) => setTimeout(r, 250));
+    window.__lab.view.focus();
+    window.__lab.selectBlocks(0, 0);
+    window.__t.reset();
+    document.getElementById('toast').textContent = '';
+    window.__lab.propose('译成英文', '译成英文');
+    await new Promise((r) => setTimeout(r, 700));
+  })()`);
+  check('改写', '跨多个列表项时自动逐段改写', (await run(`window.__t.calls('ai_rewrite').length`)) === 2
+    && (await run(`window.__lab.proposals().length`)) === 2,
+    `${await run(`window.__t.calls('ai_rewrite').length`)} 次请求 / ${await run(`window.__lab.proposals().length`)} 条建议`);
+
+  await run(`(async () => {
+    window.__lab.setDoc('> 引用里的一段话，需要被改写。\\n');
+    await new Promise((r) => setTimeout(r, 250));
+    window.__lab.view.focus();
+    window.__lab.select('引用里的一段话');
+    window.__t.reset();
+    document.getElementById('toast').textContent = '';
+    window.__lab.propose('改得更简洁');
+    await new Promise((r) => setTimeout(r, 400));
+  })()`);
+  check('改写', '引用块里的一段可以改写', (await run(`window.__t.calls('ai_rewrite').length`)) === 1
+    && (await run(`window.__lab.proposals().length`)) === 1, await run(`window.__t.toast()`));
+
+  await run(`(async () => {
+    window.__lab.setDoc('| 甲 | 乙 |\\n| --- | --- |\\n| 一格字 | 二格字 |\\n');
+    await new Promise((r) => setTimeout(r, 250));
+    window.__lab.view.focus();
+    window.__lab.select('一格字');
+    window.__t.reset();
+    document.getElementById('toast').textContent = '';
+    window.__lab.propose('改得更简洁');
+    await new Promise((r) => setTimeout(r, 400));
+  })()`);
+  check('改写', '表格单元格里的一段可以改写', (await run(`window.__t.calls('ai_rewrite').length`)) === 1
+    && (await run(`window.__lab.proposals().length`)) === 1, await run(`window.__t.toast()`));
+
   await run(`(async () => {
     window.__lab.setDoc('# 标题\\n\\n第一段内容在这里，正在写一句话。\\n\\n第二段文字，需要被改写。\\n');
     await new Promise((r) => setTimeout(r, 250));
@@ -1163,6 +1226,71 @@ try {
   check('自定义', '满 3 条后不再显示添加', customCap.rows === 3 && customCap.addHidden === true, JSON.stringify(customCap));
   await run(`(async () => { (await import('/ai-settings.js')).openAiSettings(); document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); })()`);
   await sleep(120);
+
+  // ============================== W. 导出 Word ==============================
+  const DOCX_DOC = [
+    '# 测试标题',
+    '',
+    '正文里有一段**加粗**和 `行内代码`，还有 [链接](https://example.com)。',
+    '',
+    '- 甲项文字',
+    '- 乙项文字',
+    '',
+    '1. 第一项',
+    '2. 第二项',
+    '',
+    '- [x] 已完成的事',
+    '- [ ] 未完成的事',
+    '',
+    '> 引用的一句话。',
+    '',
+    '```js',
+    'const a = 1;',
+    '```',
+    '',
+    '| 列一 | 列二 |',
+    '| --- | --- |',
+    '| 格一 | 格二 |',
+    '',
+  ].join('\n');
+  await run(`(async () => {
+    window.__lab.setDoc(${JSON.stringify(DOCX_DOC)});
+    await new Promise((r) => setTimeout(r, 400));
+  })()`);
+  const docx = await run(`window.__lab.docx()`);
+  const { writeFileSync } = await import('node:fs');
+  const { spawnSync } = await import('node:child_process');
+  const docPath = fileURLToPath(new URL('./.export-test.docx', import.meta.url));
+  let parts = { names: [], document: '', error: '' };
+  try {
+    writeFileSync(docPath, Buffer.from(docx.base64, 'base64'));
+    const script = [
+      'import json, sys, zipfile',
+      'z = zipfile.ZipFile(sys.argv[1])',
+      'names = z.namelist()',
+      "doc = z.read('word/document.xml').decode('utf-8')",
+      'print(json.dumps({"names": names, "document": doc}))',
+    ].join('\n');
+    const out = spawnSync('python3', ['-c', script, docPath], { encoding: 'utf8' });
+    parts = out.stdout ? JSON.parse(out.stdout) : { names: [], document: '', error: out.stderr };
+  } catch (error) {
+    parts.error = String(error);
+  } finally {
+    try {
+      (await import('node:fs')).unlinkSync(docPath);
+    } catch {
+      // The file only exists when the write above succeeded.
+    }
+  }
+  check('Word', '导出的是合法的 .docx 包', parts.names.includes('word/document.xml')
+    && parts.names.includes('[Content_Types].xml'), parts.error || `${docx.size} 字节 / ${parts.names.length} 个部件`);
+  check('Word', '标题用 Word 的标题样式', String(parts.document).includes('Heading1'));
+  check('Word', '列表是真编号，改名会自动重排', parts.names.includes('word/numbering.xml') && String(parts.document).includes('numPr'));
+  check('Word', '加粗、行内代码、超链接都在', ['<w:b/>', 'w:hyperlink', '行内代码'].every((bit) => String(parts.document).includes(bit))
+    || ['<w:b/>', 'w:hyperlink', '行内代码'].filter((bit) => String(parts.document).includes(bit)).length >= 2,
+    ['<w:b/>', 'w:hyperlink', '行内代码'].map((bit) => `${bit}:${String(parts.document).includes(bit)}`).join(' '));
+  check('Word', '代码块与表格保留内容', String(parts.document).includes('const a = 1;') && String(parts.document).includes('w:tbl')
+    && String(parts.document).includes('格一'));
 
   // ============================== 汇总 ==============================
   const failed = results.filter((r) => !r.pass);

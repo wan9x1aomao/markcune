@@ -5,15 +5,23 @@ macOS icon grid the system's own icons use — see BODY below.
 
 整套图标这样重做，顺序别换：
 
-    python3 scripts/icon.py                 # 写 app-icon.png（圆角、带透明）与 app-icon-mac.png（满版不透明）
+    python3 scripts/icon.py                 # 写 app-icon.png（圆角、带透明）、app-icon-mac.png（满版不透明）、
+                                            #    app-icon-win.png（贴满画布的圆角版）
     npx tauri icon src-tauri/app-icon.png   # 生成全套（Windows .ico、小尺寸 png、icns）
     python3 scripts/icon.py --icns          # 用满版图重建 macOS 的 icon.icns（覆盖上一步）
+    python3 scripts/icon.py --ico           # 用贴满画布的图重建 Windows 的 icon.ico（覆盖上一步）
     rm -rf src-tauri/icons/android src-tauri/icons/ios src-tauri/icons/64x64.png \\
            src-tauri/icons/StoreLogo.png src-tauri/icons/Square*.png
 
-第三条是因为 `tauri icon` 会顺带生成 iOS / Android / Windows Store 的一整套，
-而本项目只在 tauri.conf.json 里用到 6 个文件。之后再手动把
-icons/128x128@2x.png 覆盖到 mdpad-site/icon.png、icons/32x32.png 覆盖到 favicon.png。
+后两条必须在 `tauri icon` 之后跑，因为那一步会拿 app-icon.png（带 12.5% 透明留白）重刷 icns 与 ico。
+它还会顺带生成 iOS / Android / Windows Store 的一整套，而本项目只在 tauri.conf.json 里用到 6 个文件。
+之后再手动把 icons/128x128@2x.png 覆盖到 mdpad-site/icon.png、icons/32x32.png 覆盖到 favicon.png。
+
+⚠️ 为什么 Windows 也要单独一份（2026-10-19）
+Windows 不会像 macOS 那样裁掉透明边，托盘、资源管理器、开始菜单都是**原样**画：
+带 12.5% 留白的图标，在旁边的 Chrome、VS Code（都是贴满画布）中间明显小一圈，
+看起来就像"图标没换"。所以给 Windows 一份贴满画布、只保留圆角的图，
+16 到 256 六个尺寸齐全（含 20/40/96/128 这些高 DPI 才用得到的），全部 32bpp。
 
 ⚠️ 为什么 macOS 要单独一份满版不透明图（2026-10-17 实测，别再走弯路）
 macOS 26 里改「留白多少」根本没用：拿 NSWorkspace.icon(forFile:) 渲染验证过，
@@ -23,9 +31,11 @@ macOS 26 里改「留白多少」根本没用：拿 NSWorkspace.icon(forFile:) �
 （实测 208,208,208）再把图案缩小放上去 —— 这才是「没填满」的真身；
 把画布填成完全不透明，图案就直接铺满整个圆角方块，与系统自带图标齐平。
 """
+import struct
 import subprocess
 import sys
 import tempfile
+from io import BytesIO
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageChops
 
@@ -131,6 +141,14 @@ canvas.putalpha(ImageChops.multiply(canvas.getchannel('A'), grid))
 
 canvas.resize((1024, 1024), Image.LANCZOS).save('src-tauri/app-icon.png')
 
+# Windows 专用：同一幅构图，贴满画布但保留圆角 —— Windows 不裁透明边，留白就是实打实的小一圈。
+# 圆角按同一比例放大，和系统里其它应用的圆角方块看起来一致。
+win_side = 1024
+win = icon.crop((PAD, PAD, N - PAD, N - PAD)).resize((win_side, win_side), Image.LANCZOS)
+win_mask = mask_rrect((0, 0, win_side, win_side), round(R / (DESIGN * S) * win_side))
+win.putalpha(ImageChops.multiply(win.getchannel('A'), win_mask))
+win.save('src-tauri/app-icon-win.png')
+
 # macOS 专用：同一幅构图，但铺满画布且**没有任何透明像素**（见文件头的实测说明）。
 # 铺满靠的是把方块直接拉到满版、垫一层同色渐变接住圆角处的空隙，系统之后自己会切圆角。
 bleed = icon.crop((PAD, PAD, N - PAD, N - PAD)).resize((N, N), Image.LANCZOS)
@@ -141,6 +159,7 @@ backdrop.resize((1024, 1024), Image.LANCZOS).save('src-tauri/app-icon-mac.png')
 
 print(f'wrote src-tauri/app-icon.png — 图形占画布 {BODY / 1024 * 100:.1f}%，圆角 {round(R * GROW / S)}/1024')
 print('wrote src-tauri/app-icon-mac.png — 满版不透明（macOS 用）')
+print(f'wrote src-tauri/app-icon-win.png — 贴满画布、保留圆角（Windows 用，圆角 {round(R / (DESIGN * S) * 1024)}/1024）')
 
 
 def build_icns(source: str, target: str) -> None:
@@ -161,3 +180,54 @@ if '--icns' in sys.argv:
     # 这一步必须在 `npx tauri icon` 之后跑，否则会被它生成的 icns 覆盖。
     build_icns('src-tauri/app-icon-mac.png', 'src-tauri/icons/icon.icns')
     print('rebuilt src-tauri/icons/icon.icns from app-icon-mac.png (满版不透明)')
+
+
+def _bmp_frame(image: Image.Image, size: int) -> bytes:
+    """One 32bpp icon frame in the classic DIB form: BITMAPINFOHEADER + bottom-up BGRA + AND mask.
+
+    Small frames are written this way rather than as PNG: the shell only grew PNG support at
+    256x256, and older menu/taskbar paths still read the DIB form.
+    """
+    frame = image.resize((size, size), Image.LANCZOS)
+    header = struct.pack('<IiiHHIIiiII', 40, size, size * 2, 1, 32, 0, size * size * 4, 0, 0, 0, 0)
+    rows = []
+    for y in range(size - 1, -1, -1):
+        row = bytearray()
+        for x in range(size):
+            r, g, b, a = frame.getpixel((x, y))
+            row += bytes((b, g, r, a))
+        rows.append(bytes(row))
+    # 1bpp AND mask: every pixel opaque, rows padded to 4 bytes.
+    mask_row = bytes(((size + 31) // 32) * 4)
+    return header + b''.join(rows) + mask_row * size
+
+
+def build_ico(source: str, target: str) -> None:
+    """Rebuilds the Windows icon from the full-bleed artwork, with every size Explorer asks for.
+
+    `tauri icon` writes 16/24/32/48/64/256 from the padded artwork; Windows never trims that padding,
+    so the same icon reads smaller than its neighbours in the taskbar and in Explorer. The extra
+    20/40/96/128 frames are the ones Windows asks for at 125% / 150% / 200% scaling.
+    """
+    image = Image.open(source).convert('RGBA')
+    sizes = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
+    frames = []
+    for size in sizes:
+        if size == 256:
+            buffer = BytesIO()
+            image.resize((size, size), Image.LANCZOS).save(buffer, format='PNG')
+            frames.append(buffer.getvalue())
+        else:
+            frames.append(_bmp_frame(image, size))
+    header = struct.pack('<HHH', 0, 1, len(frames))
+    offset = 6 + 16 * len(frames)
+    entries = b''
+    for size, data in zip(sizes, frames):
+        entries += struct.pack('<BBBBHHII', size % 256, size % 256, 0, 0, 1, 32, len(data), offset)
+        offset += len(data)
+    Path(target).write_bytes(header + entries + b''.join(frames))
+
+
+if '--ico' in sys.argv:
+    build_ico('src-tauri/app-icon-win.png', 'src-tauri/icons/icon.ico')
+    print('rebuilt src-tauri/icons/icon.ico from app-icon-win.png (贴满画布，16–256 共 10 个尺寸)')

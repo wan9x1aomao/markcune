@@ -3,6 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <title>MDPad</title>
+    <script>
+      // First paint only: mirrors the rule in src/theme.js, early enough that a dark-mode user never
+      // sees a white flash while the module graph and the shell's settings are still loading.
+      (() => {
+        let saved = null;
+        try {
+          saved = localStorage.getItem('mdpad-theme');
+        } catch {}
+        const dark = saved === 'dark' || (saved !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+      })();
+    </script>
   </head>
   <body>
     <main id="workspace">
@@ -31,6 +44,7 @@
           </div>
           <div class="actions" data-tauri-drag-region>
             <button id="exit-focus" class="pill-button">退出专注</button>
+            <button id="toggle-theme" class="round-button" title="外观"></button>
             <button id="toggle-outline" class="round-button" title="大纲"></button>
             <button id="open-more" class="round-button" title="更多"></button>
             <div id="window-controls" hidden>

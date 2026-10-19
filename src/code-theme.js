@@ -52,6 +52,29 @@ const GROUPS = [
   [[t.invalid, t.deleted], 'invalid'],
 ];
 
+/**
+ * The editor takes its colours from CSS variables (declared in style.css, one set per theme), so a
+ * theme switch recolours code blocks that are already open. CodeMirror bakes its theme in at
+ * creation time, so literal colours would leave every existing block in the old theme until the
+ * document was reopened.
+ */
+const VARS = {
+  text: '--cm-text',
+  comment: '--cm-comment',
+  keyword: '--cm-keyword',
+  string: '--cm-string',
+  number: '--cm-number',
+  function: '--cm-function',
+  type: '--cm-type',
+  property: '--cm-property',
+  tag: '--cm-tag',
+  heading: '--cm-heading',
+  invalid: '--cm-invalid',
+  selection: '--cm-selection',
+  caret: '--cm-caret',
+};
+const LIVE = Object.fromEntries(Object.entries(VARS).map(([key, name]) => [key, `var(${name})`]));
+
 function editorTheme(palette, dark) {
   return EditorView.theme(
     {
@@ -71,13 +94,15 @@ function editorTheme(palette, dark) {
   );
 }
 
-/** CodeMirror extensions for the code blocks in the rich editor. */
-export function codeTheme(dark) {
-  const palette = PALETTES[dark ? 'dark' : 'light'];
+/** CodeMirror extensions for the code blocks in the rich editor. Colours follow the CSS variables. */
+export function codeTheme() {
   const style = HighlightStyle.define(
-    GROUPS.flatMap(([tags, key, extra]) => tags.map((tag) => ({ tag, color: palette[key], ...extra }))),
+    GROUPS.flatMap(([tags, key, extra]) => tags.map((tag) => ({ tag, color: LIVE[key], ...extra }))),
   );
-  return [editorTheme(palette, dark), syntaxHighlighting(style)];
+  // The `dark` flag only picks CodeMirror's own light/dark defaults (tooltips, panels); every colour
+  // we care about comes from the variables above.
+  const dark = document.documentElement.dataset.theme === 'dark';
+  return [editorTheme(LIVE, dark), syntaxHighlighting(style)];
 }
 
 /** Highlighter for static (export) highlighting: same groups as the editor, as `tok-<group>` classes. */

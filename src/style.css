@@ -42,39 +42,107 @@
   --page-w: 940px;
   --topbar-h: 44px;
   --traffic-lights: 0px;
-  color-scheme: light dark;
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --app-bg: #16171a;
-    --surface: #212328;
-    --panel-top: #1f2431;
-    --panel-bottom: #1c1d22;
-    --text: #e8eaee;
-    --text-muted: #a5abb8;
-    --text-faint: #6c7280;
-    --line: rgba(255, 255, 255, 0.08);
-    --line-strong: rgba(255, 255, 255, 0.14);
-    --hover: rgba(255, 255, 255, 0.055);
-    --active: rgba(255, 255, 255, 0.09);
-    --accent: #8fa8ff;
-    --accent-text: #a9bcff;
-    --accent-soft: rgba(143, 168, 255, 0.16);
-    --success: #3ec27f;
-    --danger: #ff6b5e;
-    --warning-bg: #3a3220;
-    --warning-line: #6b5a2a;
-    --code-bg: #1d1f24;
-    --code-head: #202227;
-    --inline-code: #ff8fb8;
-    --inline-code-bg: rgba(255, 255, 255, 0.07);
-    --find: rgba(255, 200, 0, 0.25);
-    --find-current: rgba(255, 160, 0, 0.5);
-    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.35);
-    --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 14px rgba(0, 0, 0, 0.3);
-    --shadow-pop: 0 2px 6px rgba(0, 0, 0, 0.35), 0 18px 48px rgba(0, 0, 0, 0.5);
-  }
+/* Dark theme. Selected by <html data-theme="dark">, which src/theme.js resolves from the setting
+   (follow-system included) — so a manual switch needs no reload and no per-component code. */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --app-bg: #16171a;
+  --surface: #212328;
+  --panel-top: #1f2431;
+  --panel-bottom: #1c1d22;
+  --text: #e8eaee;
+  --text-muted: #a5abb8;
+  --text-faint: #6c7280;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --hover: rgba(255, 255, 255, 0.055);
+  --active: rgba(255, 255, 255, 0.09);
+  --accent: #8fa8ff;
+  --accent-text: #a9bcff;
+  --accent-soft: rgba(143, 168, 255, 0.16);
+  --success: #3ec27f;
+  --danger: #ff6b5e;
+  --warning-bg: #3a3220;
+  --warning-line: #6b5a2a;
+  --code-bg: #1d1f24;
+  --code-head: #202227;
+  --inline-code: #ff8fb8;
+  --inline-code-bg: rgba(255, 255, 255, 0.07);
+  --find: rgba(255, 200, 0, 0.25);
+  --find-current: rgba(255, 160, 0, 0.5);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.35);
+  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 14px rgba(0, 0, 0, 0.3);
+  --shadow-pop: 0 2px 6px rgba(0, 0, 0, 0.35), 0 18px 48px rgba(0, 0, 0, 0.5);
+}
+
+/* Code colours, shared by code blocks and source mode. They are variables so a theme switch
+   recolours open editors in place — CodeMirror bakes its theme in when it is created. */
+:root {
+  --cm-text: #24292f;
+  --cm-comment: #6e7781;
+  --cm-keyword: #cf222e;
+  --cm-string: #0a3069;
+  --cm-number: #0550ae;
+  --cm-function: #8250df;
+  --cm-type: #953800;
+  --cm-property: #0550ae;
+  --cm-tag: #116329;
+  --cm-heading: #0550ae;
+  --cm-invalid: #82071e;
+  --cm-selection: rgba(59, 108, 246, 0.18);
+  --cm-caret: #3b6cf6;
+  --cm-monospace: #c2410c;
+}
+:root[data-theme='dark'] {
+  --cm-text: #e6edf3;
+  --cm-comment: #8b949e;
+  --cm-keyword: #ff7b72;
+  --cm-string: #a5d6ff;
+  --cm-number: #79c0ff;
+  --cm-function: #d2a8ff;
+  --cm-type: #ffa657;
+  --cm-property: #79c0ff;
+  --cm-tag: #7ee787;
+  --cm-heading: #79c0ff;
+  --cm-invalid: #ffa198;
+  --cm-selection: rgba(143, 168, 255, 0.24);
+  --cm-caret: #8fa8ff;
+  --cm-monospace: #ffa657;
+}
+
+/* Crepe's frame-dark theme, copied from @milkdown/crepe/theme/frame-dark.css (MIT).
+   It ships as a bare `.milkdown { … }` block, so importing it would win over every theme; scoping
+   the same variables here keeps the editor in step with the switch instead of pinning it. */
+:root[data-theme='dark'] .milkdown {
+  --crepe-color-background: #1a1a1a;
+  --crepe-color-on-background: #e6e6e6;
+  --crepe-color-surface: #121212;
+  --crepe-color-surface-low: #1c1c1c;
+  --crepe-color-on-surface: #d1d1d1;
+  --crepe-color-on-surface-variant: #a9a9a9;
+  --crepe-color-outline: #757575;
+  --crepe-color-primary: #b5b5b5;
+  --crepe-color-secondary: #4d4d4d;
+  --crepe-color-on-secondary: #d6d6d6;
+  --crepe-color-inverse: #e5e5e5;
+  --crepe-color-on-inverse: #2a2a2a;
+  --crepe-color-inline-code: #ff6666;
+  --crepe-color-error: #ff6666;
+  --crepe-color-hover: #232323;
+  --crepe-color-selected: #2f2f2f;
+  --crepe-color-inline-area: #2b2b2b;
+  --crepe-shadow-1:
+    0px 1px 2px 0px rgba(255, 255, 255, 0.3),
+    0px 1px 3px 1px rgba(255, 255, 255, 0.15);
+  --crepe-shadow-2:
+    0px 1px 2px 0px rgba(255, 255, 255, 0.3),
+    0px 2px 6px 2px rgba(255, 255, 255, 0.15);
 }
 
 html.macos {
@@ -1652,10 +1720,8 @@ h3 .md-marker {
 }
 
 /* The dark theme's accent is light, so the button label turns dark for contrast. */
-@media (prefers-color-scheme: dark) {
-  #tidy-hint {
-    color: #0f1426;
-  }
+:root[data-theme='dark'] #tidy-hint {
+  color: #0f1426;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1911,10 +1977,8 @@ body.ai-pending .ai-pick {
   font-size: 11.5px;
   line-height: 1.55;
 }
-@media (prefers-color-scheme: dark) {
-  .ai-privacy {
-    color: #e6cf95;
-  }
+:root[data-theme='dark'] .ai-privacy {
+  color: #e6cf95;
 }
 .ai-footer {
   display: flex;
@@ -2193,9 +2257,101 @@ body.ai-pending .ai-pick {
 .ai-custom-drop:hover {
   color: var(--danger);
 }
-@media (prefers-color-scheme: dark) {
-  .ai-review-all {
-    color: #0f1426;
-  }
+:root[data-theme='dark'] .ai-review-all {
+  color: #0f1426;
 }
 
+
+/* Settings: one panel for anything that is a preference rather than an action. */
+
+.settings-panel {
+  width: min(560px, 92vw);
+  max-height: min(86vh, 780px);
+  overflow: auto;
+  padding: 18px 24px 6px;
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-pop);
+  animation: pop-in var(--t-med) var(--ease);
+  font-size: 13px;
+  color: var(--text);
+}
+.settings-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+}
+.settings-panel h2 {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 600;
+}
+.settings-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--text-faint);
+  font-size: 17px;
+  line-height: 1;
+}
+.settings-close:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.settings-panel section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.settings-panel h3 {
+  margin: 0 0 6px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 38px;
+  padding: 5px 0;
+}
+.settings-row .label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-row .label b {
+  font-weight: 500;
+}
+.settings-row .label em {
+  font-style: normal;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.settings-row > em {
+  font-style: normal;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+.settings-row .buttons {
+  display: flex;
+  gap: 8px;
+}
+.settings-row.pick {
+  cursor: pointer;
+}
+.settings-row.pick input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+/* Three equal columns, so the thumb lands on the chosen side. */
+.theme-choice button {
+  min-width: 72px;
+}

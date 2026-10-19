@@ -8,6 +8,8 @@ import { Decoration, EditorView, drawSelection, keymap } from '@codemirror/view'
 import { tags } from '@lezer/highlight';
 import { countMarkdownWords } from './count.js';
 
+// Syntax colours come from the same variables as code blocks (style.css), so switching the theme
+// recolours the open document instead of needing a reload.
 const style = HighlightStyle.define([
   { tag: tags.heading1, fontSize: '1.45em', fontWeight: '700' },
   { tag: tags.heading2, fontSize: '1.3em', fontWeight: '700' },
@@ -18,13 +20,13 @@ const style = HighlightStyle.define([
   { tag: tags.strikethrough, textDecoration: 'line-through' },
   { tag: [tags.link, tags.url], color: 'var(--accent)' },
   { tag: tags.quote, color: 'var(--text-muted)' },
-  { tag: tags.monospace, color: '#c2410c' },
+  { tag: tags.monospace, color: 'var(--cm-monospace)' },
   { tag: [tags.processingInstruction, tags.meta, tags.contentSeparator, tags.labelName], color: 'var(--text-faint)' },
-  { tag: [tags.keyword, tags.operatorKeyword], color: '#8250df' },
-  { tag: [tags.string, tags.special(tags.string)], color: '#0a7f4f' },
+  { tag: [tags.keyword, tags.operatorKeyword], color: 'var(--cm-function)' },
+  { tag: [tags.string, tags.special(tags.string)], color: 'var(--cm-tag)' },
   { tag: tags.comment, color: 'var(--text-faint)', fontStyle: 'italic' },
-  { tag: [tags.number, tags.bool, tags.null], color: '#b35900' },
-  { tag: [tags.function(tags.variableName), tags.typeName, tags.className], color: '#2f6fde' },
+  { tag: [tags.number, tags.bool, tags.null], color: 'var(--cm-type)' },
+  { tag: [tags.function(tags.variableName), tags.typeName, tags.className], color: 'var(--cm-number)' },
 ]);
 
 const WRAPPERS = { bold: '**', italic: '*', strikethrough: '~~', 'inline-code': '`' };

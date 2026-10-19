@@ -1335,6 +1335,89 @@ try {
   check('Word', '代码块与表格保留内容', String(parts.document).includes('const a = 1;') && String(parts.document).includes('w:tbl')
     && String(parts.document).includes('格一'));
 
+  // ============================== X. 外观与设置 ==============================
+  // Theme colours are chosen in CSS from <html data-theme>, so switching must never need a reload or
+  // an editor remount. The panel is driven with fakes: it takes its dependencies as arguments, so
+  // nothing here has to stand in for the whole app.
+  await fresh();
+
+  const themeEngine = await run(`(async () => {
+    const theme = await import('/theme.js');
+    const root = document.documentElement;
+    const bg = () => getComputedStyle(root).getPropertyValue('--app-bg').trim();
+    const lightBg = bg();
+    theme.setTheme('dark');
+    const dark = {
+      attr: root.dataset.theme,
+      colorScheme: root.style.colorScheme,
+      bg: bg(),
+      stored: window.__stub.calls.filter((c) => c[0] === 'set_setting').pop()?.[1] ?? null,
+      mirror: localStorage.getItem('mdpad-theme'),
+      // The editor's code colours are variables too, so an open editor follows along.
+      codeVar: getComputedStyle(root).getPropertyValue('--cm-keyword').trim(),
+    };
+    theme.setTheme('light');
+    const back = { attr: root.dataset.theme, bg: bg() };
+    theme.setTheme('system');
+    return { dark, back, lightBg, systemDark: theme.resolveTheme('system', true), systemLight: theme.resolveTheme('system', false) };
+  })()`);
+  check('外观', '切到深色：属性、原生配色、底色一起变', themeEngine.dark.attr === 'dark'
+    && themeEngine.dark.colorScheme === 'dark' && themeEngine.dark.bg !== themeEngine.lightBg,
+    JSON.stringify(themeEngine.dark));
+  check('外观', '主题写进设置，也镜像一份给首屏', themeEngine.dark.stored?.key === 'theme'
+    && themeEngine.dark.stored?.value === 'dark' && themeEngine.dark.mirror === 'dark',
+    JSON.stringify(themeEngine.dark.stored));
+  check('外观', '代码块颜色跟着走同一套变量', themeEngine.dark.codeVar === '#ff7b72', themeEngine.dark.codeVar);
+  check('外观', '切回浅色不残留', themeEngine.back.attr === 'light' && themeEngine.back.bg === themeEngine.lightBg,
+    JSON.stringify(themeEngine.back));
+  check('外观', '跟随系统按系统偏好解析', themeEngine.systemDark === 'dark' && themeEngine.systemLight === 'light',
+    `${themeEngine.systemDark}/${themeEngine.systemLight}`);
+
+  const panel = await run(`(async () => {
+    const { openSettings } = await import('/settings.js');
+    const calls = [];
+    const close = openSettings({
+      settings: { sidebar: true, outline: false },
+      setPanel: (name, value) => calls.push(['panel', name, value]),
+      run: (id) => calls.push(['run', id]),
+      version: '3.4.1',
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    const overlay = document.querySelector('.settings-overlay');
+    const themes = [...overlay.querySelectorAll('.theme-choice button')].map((b) => ({ label: b.textContent, on: b.classList.contains('on') }));
+    const thumbBefore = overlay.querySelector('.theme-choice .thumb').style.transform;
+    overlay.querySelector('.theme-choice button[data-theme="dark"]').click();
+    const afterPick = {
+      attr: document.documentElement.dataset.theme,
+      thumb: overlay.querySelector('.theme-choice .thumb').style.transform,
+      on: [...overlay.querySelectorAll('.theme-choice button.on')].map((b) => b.dataset.theme),
+    };
+    const outline = overlay.querySelector('.opt-outline');
+    outline.checked = true;
+    outline.dispatchEvent(new Event('change', { bubbles: true }));
+    const info = {
+      headings: [...overlay.querySelectorAll('section h3')].map((h) => h.textContent),
+      themes, thumbBefore, afterPick,
+      ai: overlay.querySelector('.ai-state').textContent,
+      version: overlay.querySelector('.version').textContent,
+      calls,
+    };
+    overlay.querySelector('.settings-close').click();
+    return { ...info, closed: !document.querySelector('.settings-overlay') };
+  })()`);
+  check('设置', '四段内容：外观 / 界面 / 写作 / 关于', JSON.stringify(panel.headings) === '["外观","界面","写作","关于"]',
+    JSON.stringify(panel.headings));
+  check('设置', '主题三选一，初始停在跟随系统', panel.themes.map((t) => t.label).join('/') === '跟随系统/浅色/深色'
+    && panel.themes[0].on === true, JSON.stringify(panel.themes));
+  check('设置', '面板里点深色立刻生效，滑块跟上', panel.afterPick.attr === 'dark'
+    && panel.afterPick.on.join() === 'dark' && panel.afterPick.thumb === 'translateX(200%)',
+    JSON.stringify(panel.afterPick));
+  check('设置', '面板开关走应用自己的面板开关', panel.calls.some((c) => c[0] === 'panel' && c[1] === 'outline' && c[2] === true),
+    JSON.stringify(panel.calls));
+  check('设置', 'AI 一行说明当前状态，不重复表单', panel.ai.includes('已配置') && panel.ai.includes('test-model'), panel.ai);
+  check('设置', '关于里读得到版本号', panel.version === '3.4.1', panel.version);
+  check('设置', '关闭按钮收掉面板', panel.closed === true);
+
   // ============================== 汇总 ==============================
   const failed = results.filter((r) => !r.pass);
   console.log(`\n${results.length - failed.length}/${results.length} 通过`);

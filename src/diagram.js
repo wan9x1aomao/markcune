@@ -4,9 +4,10 @@ import mermaid from 'mermaid';
 let current = null;
 let counter = 0;
 
-/** `theme`: 'auto' follows the system; exports pass 'light' so diagrams match the white page. */
+/** `theme`: 'auto' follows the app's theme; exports pass 'light' so diagrams match the white page. */
 export async function renderMermaid(code, theme = 'auto') {
-  const dark = theme === 'auto' ? window.matchMedia('(prefers-color-scheme: dark)').matches : theme === 'dark';
+  const appDark = document.documentElement.dataset.theme === 'dark';
+  const dark = theme === 'auto' ? appDark : theme === 'dark';
   const wanted = dark ? 'dark' : 'default';
   if (current !== wanted) {
     mermaid.initialize({ startOnLoad: false, theme: wanted, securityLevel: 'strict', suppressErrorRendering: true });

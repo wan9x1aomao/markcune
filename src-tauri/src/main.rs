@@ -200,6 +200,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     #[cfg(target_os = "macos")]
     menu.append(&Submenu::with_items(app, "MDPad", true, &[
         &PredefinedMenuItem::about(app, Some("关于 MDPad"), None)?,
+        &item("settings", "设置…", Some("CmdOrCtrl+,"))?,
+        &separator()?,
         &item("check-update", "检查更新…", None)?,
         &item("changelog", "更新日志", None)?,
         &separator()?,
@@ -273,6 +275,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         &separator()?,
         &item("toggle-sidebar", "文件列表", Some("CmdOrCtrl+Shift+L"))?,
         &item("toggle-outline", "大纲", Some("CmdOrCtrl+Shift+T"))?,
+        &item("theme-toggle", "浅色 / 深色", Some("CmdOrCtrl+Shift+D"))?,
         &item("command-palette", "命令面板…", Some("CmdOrCtrl+K"))?,
         &separator()?,
         &item("zoom-reset", "实际大小", Some("CmdOrCtrl+0"))?,

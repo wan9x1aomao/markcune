@@ -40,9 +40,6 @@ import {
   syncListOrder,
 } from './plugins.js';
 
-const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-if (dark) await import('@milkdown/crepe/theme/frame-dark.css');
-
 const LANGUAGE_NAMES = { latex: '公式', mermaid: '流程图', text: '纯文本', plaintext: '纯文本', '': '纯文本' };
 /**
  * Canonical name for a fence language: exact name, then alias, then file extension ("py" → Python).
@@ -319,7 +316,7 @@ export async function createRichEditor(options) {
         linkLabel: '链接',
       },
       [Crepe.Feature.CodeMirror]: {
-        theme: codeTheme(dark),
+        theme: codeTheme(),
         languages: CODE_LANGUAGES,
         searchPlaceholder: '搜索语言',
         noResultText: '没有匹配的语言',

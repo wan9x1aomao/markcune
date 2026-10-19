@@ -23,4 +23,7 @@ export const icons = {
   pen: svg('<path d="M12 20h8"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
   clock: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
   download: svg('<path d="M12 3.5v11"/><path d="m7.5 10 4.5 4.5L16.5 10"/><path d="M5 20h14"/>'),
+  // Appearance: a sun means "switch to light", a moon means "switch to dark".
+  sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.5 1.5M17.1 17.1l1.5 1.5M18.6 5.4l-1.5 1.5M6.9 17.1l-1.5 1.5"/>'),
+  moon: svg('<path d="M20 14.6A8.3 8.3 0 0 1 9.4 4a8.6 8.6 0 1 0 10.6 10.6z"/>'),
 };

@@ -17,6 +17,12 @@ import { createSidebar } from './sidebar.js';
 import { createUpdater } from './update.js';
 import { formatKeys, prompt, showMenu, toast } from './ui.js';
 import { createTidyHint, tidyDocument } from './tidy-ui.js';
+import { openSettings } from './settings.js';
+import { initTheme, onThemeChange, primeTheme, themeState, toggleTheme } from './theme.js';
+
+// Before anything is painted: the shell answers asynchronously, and a dark-mode user should not see
+// the light theme flash by while window_init is in flight.
+primeTheme();
 
 const AUTOSAVE_DELAY = 1000;
 const CHANGELOG_URL = 'https://mdpad.app.workbuddy.host/#changelog';
@@ -875,6 +881,8 @@ const actions = {
   'export-pdf': exportPdf,
   tidy: () => tidyHint.run(),
   'ai-settings': () => openAiSettings(),
+  settings: () => openSettings({ settings: app.settings, setPanel, run, onClose: () => app.editor?.focus() }),
+  'theme-toggle': toggleTheme,
   find: () => findbar.show(false),
   replace: () => findbar.show(true),
   'find-next': () => findbar.go(1),
@@ -949,24 +957,20 @@ function showMore(anchor) {
       item('find'),
       item('replace'),
       item('tidy'),
-      item('ai-settings'),
       'separator',
       item('toggle-source', app.mode === 'source' && !app.split),
       item('toggle-split', app.split),
       item('toggle-focus', app.focus),
       'separator',
-      item('toggle-sidebar', app.settings.sidebar),
-      item('toggle-outline', app.settings.outline),
-      'separator',
-      { label: '命令面板…', hint: formatKeys('Mod+K'), run: () => run('command-palette') },
-      'separator',
       item('export-html'),
+      item('export-word'),
       item('export-pdf'),
       'separator',
       item('reveal'),
       'separator',
-      item('check-update'),
-      item('changelog'),
+      { label: '命令面板…', hint: formatKeys('Mod+K'), run: () => run('command-palette') },
+      // Preferences (theme, panels, AI, updates) live behind one entry instead of crowding this list.
+      item('settings'),
     ],
     anchor,
   );
@@ -1007,6 +1011,20 @@ for (const [id, [icon, title, onClick]] of Object.entries(buttons)) {
   $(id).title = title;
   $(id).addEventListener('click', onClick);
 }
+
+// The appearance button shows what a click would switch to (a sun while the theme is dark), and says
+// whether the colour is following the system. Picking a side is also possible in 设置 › 外观.
+const themeButton = $('toggle-theme');
+themeButton.addEventListener('click', () => toggleTheme());
+function syncThemeButton() {
+  const { setting, resolved } = themeState();
+  const next = resolved === 'dark' ? '浅色' : '深色';
+  themeButton.innerHTML = resolved === 'dark' ? icons.sun : icons.moon;
+  themeButton.title = `外观：${setting === 'system' ? '跟随系统' : resolved === 'dark' ? '深色' : '浅色'} · 点击切到${next}`;
+  themeButton.setAttribute('aria-label', themeButton.title);
+}
+onThemeChange(syncThemeButton);
+syncThemeButton();
 document.querySelector('#empty-state .empty-icon').innerHTML = icons.file;
 $('exit-focus').addEventListener('click', () => setFocus(false));
 els.status.addEventListener('click', () => {
@@ -1101,6 +1119,8 @@ document.documentElement.classList.add(init.platform);
 if (!isMac) installShortcuts({ run, isRichEditor: () => app.editor?.kind === 'rich' });
 if (init.platform === 'windows') setupWindowControls();
 app.settings = { ...app.settings, ...init.settings };
+// The store is the truth; the value mirrored in localStorage only covered the first paint.
+initTheme(init.settings?.theme);
 app.recentFiles = init.recentFiles;
 // Ask the shell once, before any editor mounts, whether AI is configured.
 await ai.refresh();

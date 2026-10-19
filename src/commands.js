@@ -18,6 +18,8 @@ export const COMMANDS = [
   { id: 'export-word', title: '导出为 Word…' },
   { id: 'export-pdf', title: '导出为 PDF…' },
   { id: 'tidy', title: '一键整理格式', keys: 'Mod+Alt+L' },
+  { id: 'settings', title: '设置…', keys: 'Mod+,' },
+  { id: 'theme-toggle', title: '切换浅色 / 深色', keys: 'Mod+Shift+D' },
   { id: 'ai-settings', title: 'AI 设置…' },
   { id: 'find', title: '查找…', keys: 'Mod+F' },
   { id: 'replace', title: '替换…', keys: isMac ? 'Mod+Alt+F' : 'Ctrl+H' },

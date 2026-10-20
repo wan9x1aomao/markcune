@@ -20,7 +20,7 @@ import { createVoiceInput } from './voice.js';
 import { openVoiceSettings } from './voice-settings.js';
 import { createTidyHint, tidyDocument } from './tidy-ui.js';
 import { openSettings } from './settings.js';
-import { initTheme, onThemeChange, primeTheme, themeState, toggleTheme } from './theme.js';
+import { initTheme, primeTheme, toggleTheme } from './theme.js';
 
 // Before anything is painted: the shell answers asynchronously, and a dark-mode user should not see
 // the light theme flash by while window_init is in flight.
@@ -724,14 +724,10 @@ function renderEmpty() {
     button.addEventListener('click', run);
     return button;
   };
+  // Two entries only: typing straight into the editor is the third way in and needs no button.
   $('empty-actions').replaceChildren(
-    row('pen', '开始写作', '', () => {
-      setEmpty(false);
-      app.editor?.focus();
-    }),
-    row('file', '打开文件…', formatKeys('Mod+O'), () => run('open-file')),
     row('folder', '打开文件夹…', formatKeys('Mod+Shift+O'), () => run('open-folder')),
-    row('download', '从链接打开…', '', () => run('open-from-url')),
+    row('download', '从链接打开…', 'GitHub · X', () => run('open-from-url')),
   );
   const recent = app.recentFiles.slice(0, 5);
   $('empty-recent-label').hidden = !recent.length;
@@ -1049,19 +1045,8 @@ for (const [id, [icon, title, onClick]] of Object.entries(buttons)) {
   $(id).addEventListener('click', onClick);
 }
 
-// The appearance button shows what a click would switch to (a sun while the theme is dark), and says
-// whether the colour is following the system. Picking a side is also possible in 设置 › 外观.
-const themeButton = $('toggle-theme');
-themeButton.addEventListener('click', () => toggleTheme());
-function syncThemeButton() {
-  const { setting, resolved } = themeState();
-  const next = resolved === 'dark' ? '浅色' : '深色';
-  themeButton.innerHTML = resolved === 'dark' ? icons.sun : icons.moon;
-  themeButton.title = `外观：${setting === 'system' ? '跟随系统' : resolved === 'dark' ? '深色' : '浅色'} · 点击切到${next}`;
-  themeButton.setAttribute('aria-label', themeButton.title);
-}
-onThemeChange(syncThemeButton);
-syncThemeButton();
+// Appearance lives in 设置 › 外观 (and the ⌘⇧D shortcut); the toolbar no longer carries a button
+// for it, so the top bar stays down to 大纲 and 更多.
 document.querySelector('#empty-state .empty-icon').innerHTML = icons.file;
 $('exit-focus').addEventListener('click', () => setFocus(false));
 els.status.addEventListener('click', () => {

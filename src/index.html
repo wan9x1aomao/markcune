@@ -38,13 +38,12 @@
           </div>
           <div id="mode-switch" class="segmented" role="tablist">
             <i class="thumb"></i>
-            <button data-mode="rich" role="tab">所见即所得</button>
-            <button data-mode="source" role="tab">源码</button>
-            <button data-mode="split" role="tab">分屏</button>
+            <button data-mode="rich" role="tab" title="编辑：所见即所得，输入 Markdown 立刻排版">编辑</button>
+            <button data-mode="source" role="tab" title="源码：直接编辑 Markdown 原文">源码</button>
+            <button data-mode="split" role="tab" title="分屏：左边源码，右边预览">分屏</button>
           </div>
           <div class="actions" data-tauri-drag-region>
             <button id="exit-focus" class="pill-button">退出专注</button>
-            <button id="toggle-theme" class="round-button" title="外观"></button>
             <button id="toggle-outline" class="round-button" title="大纲"></button>
             <button id="open-more" class="round-button" title="更多"></button>
             <div id="window-controls" hidden>

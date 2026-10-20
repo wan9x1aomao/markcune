@@ -795,6 +795,21 @@ body.empty #editor [data-placeholder]::before {
   opacity: 0;
 }
 
+/* With no document open there is nothing to switch between, so the mode switch steps aside —
+   hidden, not removed, so the top bar keeps its layout and nothing jumps when typing starts. */
+#mode-switch {
+  transition: opacity var(--t-small) var(--ease), visibility 0s;
+}
+body.empty #mode-switch {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--t-small) var(--ease), visibility 0s linear var(--t-small);
+}
+/* Two-character labels: the three cells no longer need 80px each, which keeps the switch compact. */
+#mode-switch button {
+  min-width: 68px;
+}
+
 /* Side panel contents */
 
 .panel-header {

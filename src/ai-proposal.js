@@ -134,9 +134,12 @@ function targetOf(view, list) {
 
 // ---------------------------------------------------------------- rendering
 
-function newTextElement(text, block) {
+function newTextElement(text, block, id) {
   const span = document.createElement('span');
   span.className = block ? 'ai-new ai-new-block' : 'ai-new';
+  // Marks the widget in the DOM so the bar can be placed under the whole replacement, not just the
+  // range it replaces: a longer rewrite wraps over lines the old range knows nothing about.
+  span.dataset.proposal = String(id);
   const lines = block ? text.split('\n') : [text];
   if (lines.length > 1) {
     for (const line of lines) {
@@ -175,7 +178,7 @@ export function proposalDecorations(state) {
     // block decoration would run across the new text as well.
     const at = Math.min(proposal.blocks?.length ? proposal.blocks.at(-1).to : proposal.to, state.doc.content.size);
     decorations.push(
-      Decoration.widget(at, () => newTextElement(proposal.text, proposal.block), {
+      Decoration.widget(at, () => newTextElement(proposal.text, proposal.block, proposal.id), {
         side: 1,
         key: `ai-new-${proposal.id}`,
       }),
@@ -191,6 +194,7 @@ addExtraDecorations((state) => proposalDecorations(state));
 // ---------------------------------------------------------------- the bar
 
 function hideBar() {
+  unfollow?.();
   panelBar?.remove();
   panelBar = null;
   barFor = null;
@@ -238,17 +242,29 @@ function columnOf(view, pos) {
   return view.dom.getBoundingClientRect();
 }
 
+/** The box the replacement occupies on screen: a widget can wrap over lines the replaced range does not cover. */
+function replacementBox(view, proposal) {
+  const span = view.dom.querySelector(`[data-proposal="${proposal.id}"]`);
+  if (!span) return null;
+  const rects = [...span.getClientRects()].filter((rect) => rect.width || rect.height);
+  if (!rects.length) return null;
+  return {
+    top: Math.min(...rects.map((rect) => rect.top)),
+    bottom: Math.max(...rects.map((rect) => rect.bottom)),
+  };
+}
+
 function place(pos) {
   if (!panelBar || !barView) return;
   const view = barView;
   const at = Math.min(pos, view.state.doc.content.size);
+  const proposal = proposals(view).find((p) => p.id === barFor);
   let start;
   let end;
   try {
     end = view.coordsAtPos(at);
     // The bar follows the *start* of the changed text: anchoring on the end pushes it to the right
     // edge of a long paragraph, where it reads as a floating box in the margin.
-    const proposal = proposals(view).find((p) => p.id === barFor);
     start = proposal ? view.coordsAtPos(Math.min(proposal.from, at)) : end;
   } catch {
     return;
@@ -258,27 +274,51 @@ function place(pos) {
   const height = panelBar.offsetHeight || 34;
   panelBar.style.maxWidth = `${Math.round(column.width)}px`;
   const left = Math.max(column.left, Math.min(start.left, column.right - width));
-  // A section replacement is drawn *after* the old text, so the bar has to clear that block too;
-  // anchored on the old range it would sit on top of the first new line.
-  const block = proposals(view).find((p) => p.id === barFor)?.blocks?.length
-    ? view.dom.querySelector('.ai-new-block')
-    : null;
-  const blockBox = block?.getBoundingClientRect();
-  const bottom = blockBox && blockBox.height ? blockBox.bottom : end.bottom;
-  let top = bottom + 8;
-  // No room under the last line: sit above it instead of disappearing.
-  if (top + height > window.innerHeight - 8) top = (blockBox?.top ?? end.top) - height - 8;
-  // Once the anchor leaves the viewport the bar would float over unrelated text.
-  const visible = end.bottom > 0 && end.top < window.innerHeight;
+  // Sit under the whole proposal — the old text *and* its replacement. Anchored on the replaced range
+  // alone, the bar landed in the middle of a longer rewrite and covered the words being compared.
+  const box = proposal ? replacementBox(view, proposal) : null;
+  const first = Math.min(start.top, box?.top ?? start.top);
+  const last = Math.max(end.bottom, box?.bottom ?? end.bottom);
+  const below = last + 8;
+  let top = below;
+  // No room under the last line: sit above the proposal instead of covering it.
+  if (below + height > window.innerHeight - 8) {
+    top = first - height - 8 >= 8 ? first - height - 8 : Math.max(8, window.innerHeight - height - 8);
+  }
+  // Once the proposal leaves the viewport the bar would float over unrelated text.
+  const visible = last > 0 && first < window.innerHeight;
   panelBar.style.display = visible ? '' : 'none';
   panelBar.style.left = `${left}px`;
   panelBar.style.top = `${Math.max(8, top)}px`;
+}
+
+// The bar is fixed to the viewport, so it has to be told when the text under it moves: scrolling the
+// editor leaves a bar in place that then covers whatever was scrolled up behind it.
+let unfollow = null;
+
+function follow() {
+  if (unfollow) return;
+  let frame = 0;
+  const again = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => place(barAt));
+  };
+  // Capture phase, because the editor scrolls inside its own container rather than the window.
+  window.addEventListener('scroll', again, true);
+  window.addEventListener('resize', again);
+  unfollow = () => {
+    cancelAnimationFrame(frame);
+    window.removeEventListener('scroll', again, true);
+    window.removeEventListener('resize', again);
+    unfollow = null;
+  };
 }
 
 function position(view, pos) {
   if (!panelBar) return;
   barView = view;
   barAt = pos;
+  follow();
   // Park it off screen for one frame so the first measurement is the real width.
   panelBar.style.left = '-9999px';
   panelBar.style.top = '-9999px';

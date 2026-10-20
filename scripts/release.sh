@@ -26,6 +26,25 @@ source scripts/release.conf
 "$GH" auth status >/dev/null 2>&1 || { echo "请先登录 GitHub：$GH auth login"; exit 1; }
 [[ -z "$(git status --porcelain)" ]] || { echo "还有未提交的改动，请先提交，保证三个平台打包的是同一份代码"; exit 1; }
 
+# gh 的长连接在代理抖动时会直接断掉（Post "https://api.github.com/graphql": EOF），而 CI 其实跑得好好的。
+# 所以等打包不用 `gh run watch`，改成短轮询：每次只问一次状态，断一次不算失败。
+# 返回 0 成功、1 失败、2 超时。
+wait_for_run() {
+  local id=$1 deadline=$((SECONDS + 2700)) status conclusion
+  while (( SECONDS < deadline )); do
+    status=""
+    conclusion=""
+    if read -r status conclusion < <("$GH" run view "$id" --json status,conclusion \
+      --jq '"\(.status) \(.conclusion)"' 2>/dev/null); then
+      if [[ "$status" == "completed" ]]; then
+        [[ "$conclusion" == "success" ]] && return 0 || return 1
+      fi
+    fi
+    sleep 20
+  done
+  return 2
+}
+
 # 0. 单元测试：和 Windows / Linux 的 CI 走同一个 npm test，测试不过就不发布，
 #    这样 macOS 这一侧也不会漏掉一道闸（CI 只覆盖 Windows 和 Linux）。
 echo "运行单元测试…"
@@ -53,11 +72,12 @@ git push -q
 COMMIT=$(git rev-parse HEAD)
 
 # 2. Windows and Linux on GitHub Actions, macOS here, at the same time.
-"$GH" workflow run build.yml --ref "$(git branch --show-current)"
+"$GH" workflow run build.yml --ref "$(git branch --show-current)" \
+  || { echo "触发 Actions 失败，重试一次…"; sleep 3; "$GH" workflow run build.yml --ref "$(git branch --show-current)"; }
 RUN=""
 for _ in $(seq 1 30); do
   RUN=$("$GH" run list --workflow build.yml --limit 5 --json databaseId,headSha \
-    --jq ".[] | select(.headSha == \"$COMMIT\") | .databaseId" | head -1)
+    --jq ".[] | select(.headSha == \"$COMMIT\") | .databaseId" 2>/dev/null | head -1 || true)
   [[ -n "$RUN" ]] && break
   sleep 2
 done
@@ -86,9 +106,26 @@ cp "$BUNDLE/MDPad.app.tar.gz.sig" "$OUT/$MAC.tar.gz.sig"
 scripts/make-dmg.sh "$BUNDLE/MDPad.app" "$OUT/$MAC.dmg"
 
 echo "等待 Windows / Linux 打包完成…"
-"$GH" run watch "$RUN" --exit-status --interval 30 >/dev/null || {
-  echo "GitHub Actions 打包失败，详情：$("$GH" run view "$RUN" --json url --jq .url)"; exit 1; }
-"$GH" release download "v$VERSION" -D "$OUT" --clobber
+if wait_for_run "$RUN"; then
+  :
+else
+  code=$?
+  [[ $code == 1 ]] && echo "GitHub Actions 打包失败" || echo "等了 45 分钟仍未结束"
+  echo "详情：$("$GH" run view "$RUN" --json url --jq .url 2>/dev/null || echo "run $RUN")"
+  exit 1
+fi
+
+# Same proxy: a dropped connection mid-download is worth three tries, not a lost release.
+downloaded=""
+for attempt in 1 2 3; do
+  if "$GH" release download "v$VERSION" -D "$OUT" --clobber; then
+    downloaded=1
+    break
+  fi
+  echo "下载 CI 产物中断（第 $attempt 次），5 秒后重试…"
+  sleep 5
+done
+[[ -n "$downloaded" ]] || { echo "没能下载 CI 产物，可手动执行：$GH release download v$VERSION -D $OUT --clobber"; exit 1; }
 
 WIN="MDPad-${VERSION}-windows-x64-setup.exe"
 LINUX="MDPad-${VERSION}-linux-x86_64.AppImage"

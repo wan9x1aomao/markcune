@@ -832,6 +832,27 @@ try {
   check('浮层', '提议期间格式浮条与 AI 浮标都让位', longCase.pending === true
     && longCase.toolbar === 'none' && longCase.pick === 'none', JSON.stringify(longCase));
 
+  // An inline rewrite that wraps over several lines. Anchored on the replaced range alone, the bar sat
+  // in the middle of the longer new text and covered the very words the user was comparing.
+  const inlineCase = await run(`(async () => {
+    window.__stub.rewrite = '用户获取信息与做出购买决策的入口正在迁移，直接向 AI 提问就能得到一个综合答案。';
+    await window.__t.settle();
+    window.__lab.setDoc('# 标题\\n\\n原来的那句话在这里。\\n');
+    await new Promise((r) => setTimeout(r, 200));
+    window.__lab.select('原来的那句话在这里。');
+    window.__t.reset();
+    window.__lab.propose('写长一点', '扩写');
+    await new Promise((r) => setTimeout(r, 500));
+    const bar = document.querySelector('.ai-bar').getBoundingClientRect();
+    const nu = document.querySelector('.ai-new').getBoundingClientRect();
+    return {
+      block: document.querySelector('.ai-new').classList.contains('ai-new-block'),
+      overlap: bar.top < nu.bottom - 1 && bar.bottom > nu.top + 1 && bar.left < nu.right && bar.right > nu.left,
+      bar: Math.round(bar.top), newTop: Math.round(nu.top), newBottom: Math.round(nu.bottom),
+    };
+  })()`);
+  check('浮层', '行内改写变长后工具条不压住新文本', inlineCase.overlap === false, JSON.stringify(inlineCase));
+
   // A proposal that starts at the right end of a long line is where a window-wide clamp shows up: the
   // bar would be pushed to the window edge, over the side panel.
   const edgeCase = await run(`(async () => {

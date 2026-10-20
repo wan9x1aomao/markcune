@@ -550,7 +550,7 @@ async function openFileDialog() {
 // folder, so the sidebar is pointed at the book instead of the single file inside it.
 async function openFromUrl() {
   const url = await prompt({
-    title: '粘贴链接：GitHub 上的书，或一个 Markdown 文件的地址',
+    title: '粘贴链接：GitHub 上的书、一个 Markdown 文件，或 X 上的帖子',
     value: '',
     okLabel: '下载并打开',
   });

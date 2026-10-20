@@ -34,4 +34,11 @@ assert.equal(
 // A payload from a build that predates the field must read as a sentence, not as "undefined".
 assert.equal(downloadNotice({ kind: 'book', title: 'x', files: 3 }), '已下载《x》，共 3 个文件');
 
+// 帖子：图片是逐张下的，少几张要说出来 —— 否则读者会以为原文就没有图。
+assert.equal(downloadNotice({ kind: 'tweet', title: '一篇长文', files: 1, skipped: 0 }), '已下载《一篇长文》');
+assert.equal(
+  downloadNotice({ kind: 'tweet', title: '一篇长文', files: 1, skipped: 3 }),
+  '已下载《一篇长文》，另有 3 张图片没能下载',
+);
+
 console.log('notices ok');

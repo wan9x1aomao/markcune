@@ -16,6 +16,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use crate::files::{atomic_write, is_document};
+use crate::tweet;
 
 /// Caps so a hostile or careless link cannot eat the machine's memory or disk.
 const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
@@ -23,6 +24,9 @@ const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_UNPACKED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_ENTRIES: usize = 20_000;
 const TIMEOUT: Duration = Duration::from_secs(180);
+/// 一篇文章里的单张图 / 全部图。原图动辄几 MB，单独设上限，免得一张图就把整次下载拖垮。
+const MAX_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_IMAGES_TOTAL: u64 = 96 * 1024 * 1024;
 
 /// What a pasted link points at.
 #[derive(Debug, PartialEq)]
@@ -31,7 +35,11 @@ pub enum Target {
     File { url: String, folder: String, path: PathBuf },
     /// A whole repository, which arrives as a zip archive.
     Repo { owner: String, repo: String, branch: Option<String> },
+    /// One post on X. The page itself is JavaScript-rendered and the long-form body sits behind a
+    /// login, so this one is fetched through a mirror service and converted to Markdown locally.
+    Post { handle: String, id: String },
 }
+
 
 // ---------------------------------------------------------------------------------------------
 // Reading the link
@@ -73,6 +81,12 @@ pub fn classify(input: &str) -> Result<Target, String> {
             })
         }
         _ if host.ends_with(".github.io") => classify_pages(&host, &segments),
+        // X（Twitter）：`<user>/status/<id>`。普通推文和「长文」都是这一个形状，
+        // 差别只在镜像服务返回的 JSON 里有没有 article。
+        "x.com" | "www.x.com" | "mobile.x.com" | "twitter.com" | "www.twitter.com" | "mobile.twitter.com" => {
+            classify_post(&segments)
+        }
+
         _ => {
             // Any other host: treat it as a direct link to a file.
             let last = segments.last().ok_or("这个链接没有指向具体的文件")?;
@@ -97,6 +111,36 @@ fn classify_pages(host: &str, segments: &[String]) -> Result<Target, String> {
         return Err("链接里的仓库名不合法".into());
     }
     Ok(Target::Repo { owner: owner.to_string(), repo, branch: None })
+}
+
+/// X 的帖子地址：`<user>/status/<id>`，以及不带用户名的 `i/status/<id>`、`i/web/status/<id>`。
+///
+/// 长文（`i/article/<id>`）也出现在分享链接里，但它只能从帖子地址取到，所以这里明确指路，
+/// 而不是让它掉进「其他域名当直链文件」那条路，最后报「返回的是网页」。
+fn classify_post(segments: &[String]) -> Result<Target, String> {
+    let parts: Vec<&str> = segments.iter().map(String::as_str).collect();
+    let (handle, id) = match parts.as_slice() {
+        [handle, "status", id, ..] => (*handle, *id),
+        ["i", "web", "status", id, ..] => ("i", *id),
+        ["i", "article", ..] => {
+            return Err("这是 X 长文的地址，只能通过带 /status/ 的帖子链接打开——在帖子上点「分享 → 复制链接」".into())
+        }
+        _ => return Err("这个 X 链接不是一条帖子，请用「分享 → 复制链接」得到的地址".into()),
+    };
+    if !valid_handle(handle) {
+        return Err("链接里的用户名不合法".into());
+    }
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
+        return Err("链接里没有帖子编号".into());
+    }
+    Ok(Target::Post { handle: handle.to_string(), id: id.to_string() })
+}
+
+/// X 的用户名：字母数字加下划线，最长 15；`i` 是「不带用户名的地址」用的占位。
+fn valid_handle(handle: &str) -> bool {
+    !handle.is_empty()
+        && handle.len() <= 15
+        && handle.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn classify_github(segments: &[String]) -> Result<Target, String> {
@@ -542,6 +586,116 @@ pub async fn open_from_url(app: AppHandle, url: String) -> Result<Fetched, Strin
                 replaced: unpacked.replaced,
             })
         }
+        Target::Post { handle, id } => post_to_library(&client, &library, &handle, &id).await,
+    }
+}
+
+/// 一条帖子落到书库：`<书库>/x.com/<用户名>-<帖子号>/`，图片进同级的 `images/`。
+async fn post_to_library(
+    client: &reqwest::Client,
+    library: &Path,
+    handle: &str,
+    id: &str,
+) -> Result<Fetched, String> {
+    let post = fetch_post(client, handle, id).await?;
+    let root = library.join("x.com").join(safe_name(&format!("{handle}-{id}"))?);
+    std::fs::create_dir_all(&root).map_err(|error| format!("无法创建目录：{error}"))?;
+    let images_dir = root.join("images");
+    let (saved, failed) = save_images(client, &post.images, &images_dir).await;
+    let text = tweet::document(&post, &|index| match saved.get(index).and_then(Option::as_ref) {
+        Some(name) => format!("images/{name}"),
+        // 图没下下来就把远程地址留着：能上外网的人照样看得见，正文也不会因此失败。
+        None => post.images.get(index).cloned().unwrap_or_default(),
+    });
+    let dest = root.join(post_file_name(&post.title, id));
+    atomic_write(&dest, text.as_bytes())?;
+    Ok(Fetched { path: dest, root, kind: "tweet", title: post.title, files: 1, skipped: failed, replaced: false })
+}
+
+/// 向镜像服务要一条帖子，并转成 Markdown。
+async fn fetch_post(client: &reqwest::Client, handle: &str, id: &str) -> Result<tweet::Post, String> {
+    let url = format!("https://api.fxtwitter.com/{handle}/status/{id}");
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|error| format!("{}——X 的内容要走境外网络，请确认这台机器能访问外网", friendly(&error)))?;
+    let status = response.status();
+    let body = response.text().await.map_err(|error| format!("读取帖子内容失败：{error}"))?;
+    if !status.is_success() {
+        return Err(match status.as_u16() {
+            404 => "这条帖子不存在，可能已被删除，或者账号是受保护的".to_string(),
+            401 | 403 => "这条帖子需要登录才能看，镜像服务拿不到".to_string(),
+            429 => "镜像服务被请求得太频繁，过一会儿再试".to_string(),
+            code => format!("镜像服务返回 HTTP {code}"),
+        });
+    }
+    tweet::parse(&body)
+}
+
+/// 逐张下载正文里的图片，返回（成功落盘的文件名, 失败的张数）。
+async fn save_images(
+    client: &reqwest::Client,
+    urls: &[String],
+    dir: &Path,
+) -> (Vec<Option<String>>, usize) {
+    let mut saved: Vec<Option<String>> = vec![None; urls.len()];
+    let mut failed = 0usize;
+    let mut total = 0u64;
+    for (index, url) in urls.iter().enumerate() {
+        if total >= MAX_IMAGES_TOTAL {
+            failed += 1;
+            continue;
+        }
+        match download(client, url, MAX_IMAGE_BYTES).await {
+            Ok(bytes) if !bytes.is_empty() => {
+                total += bytes.len() as u64;
+                if std::fs::create_dir_all(dir).is_err() {
+                    failed += 1;
+                    continue;
+                }
+                let name = format!("{}{}", index + 1, image_extension(url));
+                match atomic_write(&dir.join(&name), &bytes) {
+                    Ok(()) => saved[index] = Some(name),
+                    Err(_) => failed += 1,
+                }
+            }
+            _ => failed += 1,
+        }
+    }
+    (saved, failed)
+}
+
+/// 图片后缀，只认常见几种；X 的图片地址形如 `…/abc.jpg`，也可能带 `?name=large`。
+fn image_extension(url: &str) -> &'static str {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let ext = path.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => ".png",
+        "webp" => ".webp",
+        "gif" => ".gif",
+        _ => ".jpg",
+    }
+}
+
+/// 帖子存成什么文件名：标题里的 `/:*?"<>|` 三平台都不能留，超长要截断。
+fn post_file_name(title: &str, id: &str) -> String {
+    let mut name = String::new();
+    for ch in title.chars() {
+        if name.chars().count() >= 60 {
+            break;
+        }
+        let bad = ch.is_control() || matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|');
+        name.push(if bad { ' ' } else { ch });
+    }
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let name = name.trim_matches(|c: char| c == '.' || c.is_whitespace()).to_string();
+    let candidate = format!("{name}.md");
+    // Windows 保留名（`con.md` 之类）和超长名都退回到编号。
+    if name.is_empty() || !name_fits(&candidate, true) {
+        format!("{id}.md")
+    } else {
+        candidate
     }
 }
 
@@ -605,6 +759,101 @@ mod tests {
             Target::Repo { owner, repo, branch } => (owner, repo, branch),
             other => panic!("expected a repository, got {other:?}"),
         }
+    }
+
+    fn post(target: Target) -> (String, String) {
+        match target {
+            Target::Post { handle, id } => (handle, id),
+            other => panic!("expected a post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_x_link_is_read_as_a_post() {
+        // 带不带 `?s=20`、带不带 `/photo/1`，落到的都是同一条帖子。
+        for input in [
+            "https://x.com/zureA255062/status/2111642497927798995",
+            "https://twitter.com/zureA255062/status/2111642497927798995?s=20",
+            "https://mobile.x.com/zureA255062/status/2111642497927798995/photo/1",
+            "https://www.x.com/zureA255062/status/2111642497927798995",
+        ] {
+            assert_eq!(
+                post(classify(input).unwrap()),
+                ("zureA255062".to_string(), "2111642497927798995".to_string()),
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_x_link_without_a_user_name_still_lands_on_the_post() {
+        assert_eq!(
+            post(classify("https://x.com/i/status/2111642497927798995").unwrap()),
+            ("i".to_string(), "2111642497927798995".to_string())
+        );
+        assert_eq!(
+            post(classify("https://x.com/i/web/status/2111642497927798995").unwrap()),
+            ("i".to_string(), "2111642497927798995".to_string())
+        );
+    }
+
+    #[test]
+    fn an_article_link_says_to_use_the_post_address() {
+        // 长文页只能通过帖子地址取到；不指路的话它会落到「当直链文件」那条路，最后报「返回的是网页」。
+        let error = classify("https://x.com/i/article/2111636021112881152").unwrap_err();
+        assert!(error.contains("/status/"), "{error}");
+    }
+
+    #[test]
+    fn a_profile_link_is_not_a_post() {
+        assert!(classify("https://x.com/zureA255062").is_err());
+        assert!(classify("https://x.com/zureA255062/status/not-a-number").is_err());
+        assert!(classify("https://x.com/zureA255062/status/").is_err());
+    }
+
+    /// 真去请求镜像服务并写到临时目录。默认不跑（要外网、会随帖子变化），手动：
+    /// `cargo test a_real_post -- --ignored --nocapture`
+    #[test]
+    #[ignore = "需要外网，且依赖别人账号的帖子始终存在"]
+    fn a_real_post_becomes_a_document() {
+        let client = client().unwrap();
+        let post = tauri::async_runtime::block_on(fetch_post(&client, "ai_chuhai", "2111864471639498764")).unwrap();
+        assert!(!post.title.is_empty());
+        assert!(!post.body.trim().is_empty());
+        let text = tweet::document(&post, &|index| format!("images/{index}.jpg"));
+        println!("{}", text.chars().take(300).collect::<String>());
+        assert!(text.starts_with("# "), "{text}");
+        assert!(text.contains("2026-10-18"), "{text}");
+    }
+
+    /// 整条落盘链路：下载 → 转换 → 写文件 → 图片进 `images/`。
+    #[test]
+    #[ignore = "需要外网，且依赖别人账号的帖子始终存在"]
+    fn a_real_post_lands_in_the_library() {
+        let client = client().unwrap();
+        let library = std::env::temp_dir().join(format!("mdpad-post-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&library);
+        let fetched = tauri::async_runtime::block_on(post_to_library(
+            &client,
+            &library,
+            "zureA255062",
+            "2111642497927798995",
+        ))
+        .unwrap();
+        assert_eq!(fetched.kind, "tweet");
+        assert!(fetched.path.is_file(), "{:?}", fetched.path);
+        let text = std::fs::read_to_string(&fetched.path).unwrap();
+        assert!(text.starts_with("# "), "{text}");
+        let images = fetched.root.join("images");
+        let count = std::fs::read_dir(&images).map(|dir| dir.count()).unwrap_or(0);
+        println!("图片 {} 张，失败 {} 张，正文 {} 字", count, fetched.skipped, text.chars().count());
+        assert!(count > 0, "这篇文章有图，应该至少落一张");
+        // 相对路径能对上磁盘上的文件，MDPad 打开时才不会显示空图。
+        for line in text.lines().filter(|line| line.starts_with("![](")) {
+            let path = line.trim_start_matches("![](").trim_end_matches(')');
+            assert!(fetched.root.join(path).is_file(), "找不到 {path}");
+        }
+        let _ = std::fs::remove_dir_all(&library);
     }
 
     #[test]

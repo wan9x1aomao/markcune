@@ -3,6 +3,11 @@
 
 // What to say once a link has been downloaded.
 export function downloadNotice({ kind, title, files, skipped, replaced }) {
+  // 帖子：图片是逐张下载的，少数几张拿不到时要说清楚，否则读者会以为原文就没有图。
+  if (kind === 'tweet') {
+    const missing = skipped ? `，另有 ${skipped} 张图片没能下载` : '';
+    return `已下载《${title}》${missing}`;
+  }
   if (kind !== 'book') return `已下载 ${title}`;
   // A book may carry names this system cannot hold (Windows refuses `?`, `:` and friends); those
   // files are left out on purpose. Saying so beats quietly handing over a book with chapters missing.

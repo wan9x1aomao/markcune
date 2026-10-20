@@ -859,10 +859,6 @@ body.empty #mode-switch {
   flex-wrap: wrap;
   gap: 8px;
 }
-/* The second row of the same group sits tighter under the first. */
-.panel-actions + .panel-actions {
-  padding-top: 0;
-}
 
 .tree-row {
   position: relative;

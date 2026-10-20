@@ -200,11 +200,11 @@ export function createSidebar(el, options) {
     list.appendChild(
       Object.assign(document.createElement('div'), {
         className: 'panel-empty',
-        textContent: '打开一个文件或文件夹，就能在这里浏览 Markdown 文档。',
+        textContent: '打开一个文件夹，就能在这里浏览 Markdown 文档。',
       }),
     );
-    // The same three ways in as the empty state in the document area: a folder, a single file,
-    // or a link. They live here too because this panel is where people look for "open".
+    // The same two ways in as the empty state in the document area: a folder or a link.
+    // They live here too because this panel is where people look for "open".
     const actions = (buttons) => {
       const row = document.createElement('div');
       row.className = 'panel-actions';
@@ -217,9 +217,8 @@ export function createSidebar(el, options) {
       }
       list.appendChild(row);
     };
-    actions([['打开文件夹…', () => options.onOpenFolder(), true]]);
     actions([
-      ['打开文件…', () => options.onOpenFile()],
+      ['打开文件夹…', () => options.onOpenFolder()],
       ['从链接打开…', () => options.onOpenFromUrl()],
     ]);
 

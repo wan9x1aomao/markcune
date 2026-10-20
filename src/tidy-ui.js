@@ -1,12 +1,29 @@
 // "Tidy format": the command and the floating button that offers it. Text logic lives in tidy.js.
-// The model is chosen and configured by the gateway behind api.aiLabel; this page only sends lines and gets labels.
+// The model is chosen in Rust behind api.aiLabel: the user's own key when one is set, the team gateway otherwise.
+// This page only sends lines in chunks and gets labels back; a chunk that fails keeps the rule labels.
 import { api } from './bridge.js';
 import { applyLabels, chunkLines, needsTidy, ruleLabels, sameWords, splitLines, validateLabels } from './tidy.js';
 import { toast } from './ui.js';
 
 const MAX_CHECK_CHARS = 200_000; // beyond this the button check is skipped to keep typing smooth
+const RETRY_MS = 1500; // a long document means many requests; a busy provider means slow down, not give up
 
-/** Labels for all lines: the gateway when it is available and answers well, the rules otherwise. */
+/** One chunk. Retried once when the provider says it is being asked too often. */
+async function labelChunk(part) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await api.aiLabel(part);
+    } catch (error) {
+      if (attempt < 1 && /频繁|429/.test(String(error))) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+/** Labels for all lines: the model when it is reachable and answers well, the rules otherwise. */
 export async function labelLines(lines, { onProgress } = {}) {
   const rules = ruleLabels(lines);
   const configured = await api.aiAvailable().catch(() => false);
@@ -19,7 +36,7 @@ export async function labelLines(lines, { onProgress } = {}) {
   for (const [index, [from, to]] of chunks.entries()) {
     const part = lines.slice(from, to);
     try {
-      const checked = validateLabels(await api.aiLabel(part), part);
+      const checked = validateLabels(await labelChunk(part), part);
       if (!checked) throw new Error('标签对不上原文');
       checked.forEach((label, i) => (labels[from + i] = label));
     } catch (error) {
@@ -29,7 +46,7 @@ export async function labelLines(lines, { onProgress } = {}) {
     }
     onProgress?.(index + 1, chunks.length);
   }
-  return { labels, ai: failed < chunks.length, configured: true, failed, error: firstError };
+  return { labels, ai: failed < chunks.length, configured: true, failed, error: firstError, chunks: chunks.length };
 }
 
 /** Tidies the document in `editor`. One replace, so one undo brings the old text back. Returns true when it changed the text. */
@@ -40,7 +57,7 @@ export async function tidyDocument(editor, { onProgress } = {}) {
     return false;
   }
   const lines = splitLines(before);
-  const { labels, ai, configured, failed, error } = await labelLines(lines, { onProgress });
+  const { labels, ai, configured, failed, error, chunks } = await labelLines(lines, { onProgress });
   const after = applyLabels(lines, labels);
   // Safety net: markers and blank lines may change, words may not.
   if (!sameWords(before, after)) {
@@ -52,7 +69,13 @@ export async function tidyDocument(editor, { onProgress } = {}) {
     return false;
   }
   editor.setMarkdown(after);
-  const how = ai ? (failed ? `AI 整理（${failed} 段改用规则：${error}）` : 'AI 整理') : configured ? `规则整理（AI 没有成功：${error}）` : '规则整理';
+  // A long document goes to the model in pieces, so the receipt says how many requests it took.
+  const effort = chunks > 1 ? `分 ${chunks} 段` : '';
+  const how = ai
+    ? `AI 整理${effort ? `（${effort}）` : ''}${failed ? `，其中 ${failed} 段改用规则：${error}` : ''}`
+    : configured
+      ? `规则整理（AI 没有成功：${error}）`
+      : '规则整理';
   toast(`已${how}，可以用撤销恢复`, configured && !ai ? 8000 : 4000);
   return true;
 }

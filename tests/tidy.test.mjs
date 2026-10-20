@@ -47,6 +47,13 @@ const chunks = chunkLines(many, 120);
 assert.equal(chunks[0][0], 0);
 assert.equal(chunks.at(-1)[1], 300);
 assert.ok(chunks.every(([a, b], i) => b > a && (i === 0 || chunks[i - 1][1] === a)));
+
+// A chunk never carries more than its character budget, even when every line is long.
+const long = Array.from({ length: 40 }, () => '很长的段落'.repeat(200));
+const byChars = chunkLines(long, 120, 6000);
+assert.ok(byChars.length > 1, 'long lines are split by characters, not only by count');
+assert.ok(byChars.every(([a, b]) => long.slice(a, b).join('\n').length <= 6000), 'every chunk fits the budget');
+assert.equal(byChars.at(-1)[1], 40, 'the last chunk reaches the end');
 console.log('tidy ok');
 
 // The floating button: shows for untidy text, not for tidy or tiny text.

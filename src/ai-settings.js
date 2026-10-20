@@ -52,7 +52,7 @@ export function openAiSettings() {
         <div class="ai-custom-rows"></div>
       </div>
 
-      <p class="ai-privacy">开启后，你选中的文字会直接发送到上面填写的地址，MDPad 不做中转。Key 只保存在这台电脑上。</p>
+      <p class="ai-privacy">开启后，你选中的文字和「一键整理」要排版的文本会直接发送到上面填写的地址，MDPad 不做中转；长文档按段发送。Key 只保存在这台电脑上。</p>
 
       <div class="ai-footer">
         <button class="ai-test" type="button">测试连接</button>

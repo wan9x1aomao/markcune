@@ -8,8 +8,8 @@
 //! No key and no prompt ever reaches the page. The page sends text and gets text or labels back;
 //! the prompt skeletons live in this file, so they cannot be swapped out by the renderer.
 //!
-//! Tidy keeps using the gateway only (`ai_available` / `ai_label`): it needs the line classifier,
-//! which the gateway owns. The writing features below work with either path.
+//! Tidy follows the same order (`ai_available` / `ai_label`): a key the user configured classifies
+//! the lines directly, and the gateway is the team-wide alternative. Without either, tidy is rules only.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -420,16 +420,30 @@ pub async fn ai_test(app: AppHandle) -> Result<String, String> {
     Err("还没有配置 AI 服务".into())
 }
 
-// ---------------------------------------------------------------- tidy (gateway only)
+// ---------------------------------------------------------------- tidy (direct or gateway)
 
 const ALLOWED: [&str; 10] = ["h1", "h2", "h3", "ul", "ol", "quote", "p", "cont", "blank", "keep"];
 const MAX_LINES: usize = 400;
 const MAX_CHARS: usize = 30_000;
+/// One label per line, so a full chunk needs a fraction of this. Twice over is plenty of room.
+const MAX_LABEL_TOKENS: u32 = 2_048;
+const TIMEOUT_LABEL: u64 = 60;
 
-/// True when a gateway is configured, so the page knows whether the AI tidy path exists.
+/// The line classifier, worded the same way as the gateway's, so both paths ask a model for the same
+/// thing. The model answers with labels only: the Markdown is rebuilt from the original lines, so it
+/// cannot change, drop or invent a word.
+const LABEL_PROMPT: &str = "你是文档排版助手。下面是一段没有排版的纯文本，每行前面是行号和制表符。\n\
+请给每一行打一个标签，只输出 JSON，形如 {\"labels\":[\"h1\",\"p\"]}，数组长度必须等于行数。\n\
+标签只能是：h1、h2、h3、ul、ol、quote、p、cont、blank、keep。\n\
+空行必须标 blank，非空行不能标 blank。\n\
+h1 是文档标题（全文只有一个），h2 是章节标题，h3 是小节标题，ul / ol 是列表项，quote 是引用，\
+p 是正文段落，cont 是上一行被换行打断的后半句，keep 是本来就是 Markdown 的行。\n\
+不要修改、翻译、总结文字，你只打标签。";
+
+/// True when a model can be reached: the user's own key, or the team gateway.
 #[tauri::command]
-pub fn ai_available() -> bool {
-    gateway().is_some()
+pub fn ai_available(app: AppHandle) -> bool {
+    direct(&app).is_some() || gateway().is_some()
 }
 
 /// Accepts `{"labels": [...]}` or a bare array, with labels in any case.
@@ -438,13 +452,171 @@ fn parse_labels(body: &Value) -> Result<Vec<String>, String> {
     list.iter().map(|v| v.as_str().map(|s| s.trim().to_lowercase()).ok_or_else(|| "labels 里有不是文字的项".to_string())).collect()
 }
 
+/// Pulls a label array out of whatever a model wrote: a JSON object, a bare array, or either one
+/// wrapped in prose or a code fence.
+fn parse_labels_text(text: &str) -> Option<Vec<String>> {
+    let raw = unwrap_outer(text);
+    let mut attempts = vec![raw.clone()];
+    for (open, close) in [('{', '}'), ('[', ']')] {
+        if let (Some(from), Some(to)) = (raw.find(open), raw.rfind(close)) {
+            if to > from {
+                attempts.push(raw[from..=to].to_string());
+            }
+        }
+    }
+    for attempt in attempts {
+        let Ok(value) = serde_json::from_str::<Value>(&attempt) else { continue };
+        let Some(items) = value.get("labels").unwrap_or(&value).as_array() else { continue };
+        let labels: Vec<String> = items.iter().map(|v| v.as_str().unwrap_or("").trim().to_lowercase()).collect();
+        if !labels.is_empty() && labels.iter().all(|label| !label.is_empty()) {
+            return Some(labels);
+        }
+    }
+    None
+}
+
+/// Makes a model's labels usable, or gives up. A blank line becomes `blank` whatever was said, and a
+/// `blank` on a line that has text becomes `p`: both are facts about the line, so fixing them cannot
+/// change a word. Anything else (wrong length, unknown label) is refused and the chunk keeps rules.
+fn fit_labels(labels: Vec<String>, lines: &[String]) -> Option<Vec<String>> {
+    if labels.len() != lines.len() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(labels.len());
+    for (label, line) in labels.into_iter().zip(lines) {
+        let empty = line.trim().is_empty();
+        let label = match (empty, label.as_str()) {
+            (true, _) => "blank".to_string(),
+            (false, "blank") => "p".to_string(),
+            _ => label,
+        };
+        if !ALLOWED.contains(&label.as_str()) {
+            return None;
+        }
+        out.push(label);
+    }
+    Some(out)
+}
+
+/// A JSON-mode answer. Some OpenAI-compatible providers reject `response_format`, so the plain shape
+/// is tried again instead of losing the whole chunk to it.
+async fn chat_json(target: &Target, system: &str, user: &str, max_tokens: u32, timeout: u64) -> Result<String, String> {
+    let url = format!("{}/chat/completions", target.base.trim_end_matches('/'));
+    let payload = |json_mode: bool| {
+        let mut body = json!({
+            "model": target.model,
+            "messages": [
+                { "role": "system", "content": system },
+                { "role": "user", "content": user },
+            ],
+            "max_tokens": max_tokens,
+            "temperature": 0.0,
+            "stream": false,
+        });
+        if json_mode {
+            body["response_format"] = json!({ "type": "json_object" });
+        }
+        body
+    };
+    let mut json_mode = true;
+    loop {
+        let response = client()
+            .post(&url)
+            .timeout(Duration::from_secs(timeout))
+            .bearer_auth(&target.key)
+            .json(&payload(json_mode))
+            .send()
+            .await
+            .map_err(|e| transport_message(&e))?;
+        let status = response.status().as_u16();
+        let text = response.text().await.map_err(|_| "AI 服务返回的内容无法读取".to_string())?;
+        if status == 400 && json_mode && text.contains("response_format") {
+            json_mode = false;
+            continue;
+        }
+        if !(200..300).contains(&status) {
+            let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+            return Err(read_error(&body, status));
+        }
+        let body: Value = serde_json::from_str(&text).map_err(|_| "AI 服务返回的内容不是合法的 JSON".to_string())?;
+        return read_content(&body);
+    }
+}
+
+/// How small a piece may get before a bad answer is treated as the whole chunk's failure.
+const MIN_SPLIT_LINES: usize = 24;
+
+/// Why a piece could not be labelled. The difference matters: a bad answer may do better on a
+/// smaller piece, while a network or quota error will not.
+enum LabelFail {
+    Content(String),
+    Fatal(String),
+}
+
+/// Labels one piece: two asks, the second saying exactly how many items are needed.
+async fn label_piece(target: &Target, lines: &[String]) -> Result<Vec<String>, LabelFail> {
+    let numbered: Vec<String> = lines.iter().enumerate().map(|(i, line)| format!("{}\t{line}", i + 1)).collect();
+    let numbered = numbered.join("\n");
+    let mut last = "模型给的不是标签数组".to_string();
+    for strict in [false, true] {
+        let lead = if strict {
+            format!(
+                "上一次的输出不能用。数组必须正好 {} 项，第 i 项对应第 i 行；不许合并、省略或补行。共 {} 行：",
+                lines.len(),
+                lines.len()
+            )
+        } else {
+            format!("共 {} 行：", lines.len())
+        };
+        let asked = chat_json(target, LABEL_PROMPT, &format!("{lead}\n\n{numbered}"), MAX_LABEL_TOKENS, TIMEOUT_LABEL).await;
+        let content = match asked {
+            Ok(content) => content,
+            Err(message) => return Err(LabelFail::Fatal(message)),
+        };
+        match parse_labels_text(&content) {
+            Some(labels) => match fit_labels(labels, lines) {
+                Some(fitted) => return Ok(fitted),
+                None => last = format!("标签对不上原文（需要 {} 个）", lines.len()),
+            },
+            None => last = "模型给的不是标签数组".to_string(),
+        }
+    }
+    Err(LabelFail::Content(last))
+}
+
+/// Labels one chunk with the user's own model. A piece that comes back unusable is split and asked
+/// again, so one stubborn paragraph cannot send a whole long document back to the rules.
+async fn label_direct(target: &Target, lines: &[String]) -> Result<Vec<String>, String> {
+    let mut labels = vec![String::new(); lines.len()];
+    let mut pending = vec![(0usize, lines.len())];
+    while let Some((from, to)) = pending.pop() {
+        match label_piece(target, &lines[from..to]).await {
+            Ok(piece) => labels[from..to].clone_from_slice(&piece),
+            Err(LabelFail::Fatal(message)) => return Err(message),
+            Err(LabelFail::Content(message)) => {
+                if to - from <= MIN_SPLIT_LINES {
+                    return Err(message);
+                }
+                let middle = from + (to - from) / 2;
+                // The second half goes on the stack first, so pieces are asked for in reading order.
+                pending.push((middle, to));
+                pending.push((from, middle));
+            }
+        }
+    }
+    Ok(labels)
+}
+
 /// Labels the lines of one chunk. The page validates the result again before using it.
 #[tauri::command]
-pub async fn ai_label(lines: Vec<String>) -> Result<Vec<String>, String> {
-    let url = gateway().ok_or("还没有配置整理服务（MDPAD_TIDY_URL）")?;
+pub async fn ai_label(app: AppHandle, lines: Vec<String>) -> Result<Vec<String>, String> {
     if lines.is_empty() || lines.len() > MAX_LINES || lines.iter().map(|l| l.chars().count()).sum::<usize>() > MAX_CHARS {
         return Err("这一段太长，无法交给整理服务".into());
     }
+    if let Some(target) = direct(&app) {
+        return label_direct(&target, &lines).await;
+    }
+    let url = gateway().ok_or("还没有配置 AI 服务")?;
     let response = client()
         .post(&url)
         .timeout(Duration::from_secs(60))
@@ -474,6 +646,53 @@ mod tests {
         assert_eq!(parse_labels(&json!(["blank"])).unwrap(), vec!["blank"]);
         assert!(parse_labels(&json!({ "labels": "x" })).is_err());
         assert!(parse_labels(&json!({ "labels": [1] })).is_err());
+    }
+
+    #[test]
+    fn labels_are_found_in_an_object_an_array_or_prose() {
+        assert_eq!(parse_labels_text("{\"labels\":[\"H1\",\" p \"]}").unwrap(), vec!["h1", "p"]);
+        assert_eq!(parse_labels_text("```json\n[\"blank\"]\n```").unwrap(), vec!["blank"]);
+        assert_eq!(parse_labels_text("好的，结果如下：{\"labels\":[\"h2\"]}").unwrap(), vec!["h2"]);
+        assert!(parse_labels_text("没有 JSON").is_none());
+        assert!(parse_labels_text("{\"labels\":[]}").is_none(), "an empty list is not an answer");
+    }
+
+    #[test]
+    fn a_blank_label_follows_the_line_it_describes() {
+        let lines = vec!["标题".to_string(), String::new(), "正文".to_string()];
+        // `p` on a blank line and `blank` on text are both corrected: neither can change a word.
+        assert_eq!(fit_labels(vec!["h1".into(), "p".into(), "blank".into()], &lines).unwrap(), vec!["h1", "blank", "p"]);
+        assert!(fit_labels(vec!["h1".into(), "blank".into()], &lines).is_none(), "too few labels");
+        assert!(fit_labels(vec!["h1".into(), "blank".into(), "bullet".into()], &lines).is_none(), "unknown label");
+    }
+
+    /// 真去问一次模型，验证直连这条路（JSON 模式、标签解析、长度对齐）。默认不跑，手动：
+    /// `MDPAD_AI_KEY=sk-… cargo test a_real_model_labels -- --ignored --nocapture`
+    #[test]
+    #[ignore = "需要真实的 AI Key 和外网，只在手工验证时跑"]
+    fn a_real_model_labels_every_line() {
+        let Ok(key) = std::env::var("MDPAD_AI_KEY") else { return };
+        let target = Target {
+            base: std::env::var("MDPAD_AI_BASE").unwrap_or_else(|_| DEFAULT_BASE.into()),
+            model: std::env::var("MDPAD_AI_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into()),
+            key,
+        };
+        let lines: Vec<String> = [
+            "关于开展安全自查的通知",
+            "",
+            "一、自查范围",
+            "本次自查覆盖全部对外服务的系统。",
+            "1、账号与权限",
+            "核查是否存在共用账号。",
+        ]
+        .iter()
+        .map(|line| line.to_string())
+        .collect();
+        let labels = tauri::async_runtime::block_on(label_direct(&target, &lines)).unwrap();
+        println!("{labels:?}");
+        assert_eq!(labels.len(), lines.len());
+        assert_eq!(labels[1], "blank", "an empty line is always blank");
+        assert!(labels.iter().any(|label| label == "h1" || label == "h2"), "the title is a heading: {labels:?}");
     }
 
     #[test]

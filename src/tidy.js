@@ -142,14 +142,24 @@ export function sameWords(before, after) {
   return plain(before) === plain(after);
 }
 
-/** Splits lines into chunks for a model, preferring to cut at blank lines. */
-export function chunkLines(lines, size = 120) {
+/** Splits lines into chunks for a model: at most `size` lines and `maxChars` characters, cut at a blank line when it can.
+ *  The character budget matters because a long paragraph can be a thousand characters per line: counting lines alone would
+ *  hand one request more text than a service accepts. */
+export function chunkLines(lines, size = 120, maxChars = 6000) {
   const chunks = [];
   let start = 0;
   while (start < lines.length) {
-    let end = Math.min(lines.length, start + size);
-    if (end < lines.length) {
-      for (let j = end; j > start + size / 2; j--) {
+    let end = start;
+    let chars = 0;
+    while (end < lines.length && end - start < size) {
+      const width = lines[end].length + 1;
+      if (end > start && chars + width > maxChars) break;
+      chars += width;
+      end++;
+    }
+    const span = end - start;
+    if (end < lines.length && span > 1) {
+      for (let j = end; j > start + span / 2; j--) {
         if (lines[j - 1].trim() === '') {
           end = j;
           break;

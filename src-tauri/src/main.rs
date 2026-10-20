@@ -871,6 +871,7 @@ fn main() {
             files::draft_delete,
             fetch::open_from_url,
             update::check_update,
+            update::update_status,
             update::download_update,
             update::restart_to_update,
         ])

@@ -18,10 +18,11 @@ const THEMES = [
  * Options: settings (live {sidebar, outline}), setPanel(name, visible), run(id),
  * version (optional string — the shell's version is read async otherwise), onClose(),
  * voice (optional { status() } — the summary row is hidden without it; the form is its own
- * panel, see voice-settings.js).
+ * panel, see voice-settings.js), update (optional () => Promise<status> — fills the
+ * "last checked" line under 关于).
  * Returns a close function.
  */
-export function openSettings({ settings, setPanel, run, version, onClose, voice }) {
+export function openSettings({ settings, setPanel, run, version, onClose, voice, update }) {
   document.querySelector('.overlay.settings-overlay')?.remove();
 
   const overlay = document.createElement('div');
@@ -89,6 +90,7 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice 
           <div class="label">
             <b>MDPad <span class="version">…</span></b>
             <em>本地写作，文件留在你自己的电脑上。</em>
+            <em class="update-state"></em>
           </div>
           <div class="buttons">
             <button class="text-button opt-update" type="button">检查更新</button>
@@ -177,6 +179,42 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice 
   };
   if (version) showVersion(version);
   else getVersion().then(showVersion, () => showVersion('—'));
+
+  // 关于 also answers "is this thing even checking for updates?" — an automatic check that fails
+  // stays quiet on screen, so the reason has to live somewhere the user can find it.
+  const updateState = $('.update-state');
+  const when = (ms) => {
+    const minutes = Math.round((Date.now() - ms) / 60000);
+    if (minutes < 1) return '刚刚';
+    if (minutes < 60) return `${minutes} 分钟前`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours} 小时前`;
+    const date = new Date(ms);
+    const pad = (n) => String(n).padStart(2, '0');
+    const day = `${date.getFullYear() === new Date().getFullYear() ? '' : `${date.getFullYear()}-`}${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    return `${day} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
+  const describeUpdate = (status) => {
+    if (!status) return;
+    const last = status.lastChecked ? when(status.lastChecked) : '';
+    if (status.lastError) {
+      updateState.textContent = `上次检查${last ? `（${last}）` : ''}没成功：${status.lastError}`;
+    } else if (!last) {
+      updateState.textContent = '还没检查过更新。';
+    } else if (status.availableVersion) {
+      updateState.textContent = `${last}查过 · 发现 ${status.availableVersion}，点「检查更新」下载`;
+    } else {
+      updateState.textContent = `${last}查过 · 已是最新`;
+    }
+  };
+  if (update) {
+    Promise.resolve()
+      .then(update)
+      .then(describeUpdate)
+      .catch(() => {
+        updateState.textContent = '';
+      });
+  }
 
   $('.opt-update').addEventListener('click', () => {
     close();

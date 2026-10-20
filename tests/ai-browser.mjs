@@ -1381,6 +1381,12 @@ try {
       setPanel: (name, value) => calls.push(['panel', name, value]),
       run: (id) => calls.push(['run', id]),
       version: '3.4.2',
+      update: () => Promise.resolve({
+        currentVersion: '3.4.2',
+        lastChecked: Date.now() - 7 * 60 * 60 * 1000,
+        lastError: null,
+        availableVersion: '3.5.0',
+      }),
     });
     await new Promise((r) => setTimeout(r, 150));
     const overlay = document.querySelector('.settings-overlay');
@@ -1400,6 +1406,7 @@ try {
       themes, thumbBefore, afterPick,
       ai: overlay.querySelector('.ai-state').textContent,
       version: overlay.querySelector('.version').textContent,
+      updateState: overlay.querySelector('.update-state').textContent,
       calls,
     };
     overlay.querySelector('.settings-close').click();
@@ -1416,7 +1423,30 @@ try {
     JSON.stringify(panel.calls));
   check('设置', 'AI 一行说明当前状态，不重复表单', panel.ai.includes('已配置') && panel.ai.includes('test-model'), panel.ai);
   check('设置', '关于里读得到版本号', panel.version === '3.4.2', panel.version);
+  check('设置', '关于里说明上次检查更新查到了什么',
+    panel.updateState.includes('7 小时前') && panel.updateState.includes('发现 3.5.0'), panel.updateState);
   check('设置', '关闭按钮收掉面板', panel.closed === true);
+
+  const updateFail = await run(`(async () => {
+    const { openSettings } = await import('/settings.js');
+    openSettings({
+      settings: { sidebar: true, outline: false },
+      setPanel() {}, run() {}, version: '3.4.2',
+      update: () => Promise.resolve({
+        currentVersion: '3.4.2',
+        lastChecked: Date.now() - 3 * 24 * 60 * 60 * 1000,
+        lastError: '暂时无法获取更新信息，请稍后再试',
+        availableVersion: null,
+      }),
+    });
+    await new Promise((r) => setTimeout(r, 120));
+    const overlay = document.querySelector('.settings-overlay');
+    const text = overlay.querySelector('.update-state').textContent;
+    overlay.querySelector('.settings-close').click();
+    return text;
+  })()`);
+  check('设置', '自动检查失败也在「关于」里说明原因',
+    updateFail.includes('没成功') && updateFail.includes('请稍后再试'), updateFail);
 
   const voiceSetup = await run(`(async () => {
     const { openSettings } = await import('/settings.js');

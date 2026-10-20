@@ -899,6 +899,7 @@ const actions = {
       setPanel,
       run,
       voice: voiceBridge,
+      update: () => updater.status(),
       onClose: () => {
         voice?.refresh();
         app.editor?.focus();
@@ -1000,6 +1001,7 @@ function showMore(anchor) {
       item('reveal'),
       'separator',
       { label: '命令面板…', hint: formatKeys('Mod+K'), run: () => run('command-palette') },
+      item('check-update'),
       // Preferences (theme, panels, AI, updates) live behind one entry instead of crowding this list.
       item('settings'),
     ],
@@ -1030,6 +1032,13 @@ const updater = createUpdater($('update-banner'), {
     await save();
     rememberPosition();
   },
+});
+
+// A window left open for days never runs the launch check twice, so look again whenever the user
+// comes back to it. The shell's own gate makes this cheap: at most one request per six hours.
+window.addEventListener('focus', () => updater.recheck());
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') updater.recheck();
 });
 
 const buttons = {

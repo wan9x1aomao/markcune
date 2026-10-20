@@ -1,4 +1,9 @@
 // In-app updates: a quiet banner offers the new version, then downloads it and restarts.
+//
+// The shell decides when a check may run (six hours after one that answered, ten minutes after one
+// that failed), so `recheck()` can be called freely — on launch, when the window regains focus, and
+// from the menu. Failures of an automatic check stay quiet on screen but are recorded where
+// 设置 › 关于 shows them.
 import { getVersion } from '@tauri-apps/api/app';
 
 /** Options: api, toast, beforeRestart() (saves the document). */
@@ -26,7 +31,13 @@ export function createUpdater(el, { api, toast, beforeRestart }) {
     try {
       info = await api.checkUpdate(automatic);
     } catch (error) {
-      if (!automatic) toast(String(error), 4000);
+      if (automatic) {
+        // Not worth interrupting the writing for; 设置 › 关于 has the reason, and the shell will
+        // try again in ten minutes.
+        console.warn('check for updates failed:', error);
+      } else {
+        toast(String(error), 4000);
+      }
       return;
     }
     if (!info) {
@@ -70,5 +81,10 @@ export function createUpdater(el, { api, toast, beforeRestart }) {
       : `正在下载更新… ${size(downloaded)}`;
   });
 
-  return { check };
+  return {
+    check,
+    /** A check nobody asked for: quiet on screen, rate limited by the shell. */
+    recheck: () => check(true),
+    status: () => api.updateStatus(),
+  };
 }

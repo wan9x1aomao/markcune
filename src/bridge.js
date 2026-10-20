@@ -59,6 +59,8 @@ export const api = {
   /** Uploads a short tone to check the key/address/model without speaking. */
   voiceTest: () => invoke('voice_test'),
   checkUpdate: (automatic) => invoke('check_update', { automatic }),
+  /** {currentVersion, lastChecked, lastError, availableVersion} for 设置 › 关于. */
+  updateStatus: () => invoke('update_status'),
   downloadUpdate: () => invoke('download_update'),
   restartToUpdate: () => invoke('restart_to_update'),
   fileURL: (path) => convertFileSrc(path),

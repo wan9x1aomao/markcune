@@ -3,6 +3,7 @@
 mod ai;
 mod fetch;
 mod files;
+mod pinned;
 mod state;
 mod store;
 mod tweet;
@@ -307,6 +308,7 @@ struct InitData {
     settings: Map<String, Value>,
     recent_files: Vec<PathBuf>,
     recent_folders: Vec<PathBuf>,
+    pinned_files: Vec<pinned::Pinned>,
     platform: &'static str,
 }
 
@@ -320,12 +322,15 @@ fn window_init(window: WebviewWindow) -> InitData {
     #[cfg(debug_assertions)]
     test_hook::start(&window);
     let state = app_state(app);
+    // Read the pins before taking the store lock — the command locks it itself.
+    let pinned_files = pinned::list_pinned(app.clone());
     let store = state.store.lock().unwrap();
     InitData {
         startup,
         settings: store.settings.clone(),
         recent_files: store.recent_files.clone(),
         recent_folders: store.recent_folders.clone(),
+        pinned_files,
         platform: if cfg!(target_os = "macos") { "macos" } else if cfg!(windows) { "windows" } else { "linux" },
     }
 }
@@ -867,6 +872,10 @@ fn main() {
             files::set_root,
             files::create_document,
             files::rename_path,
+            pinned::list_pinned,
+            pinned::pin_file,
+            pinned::unpin_file,
+            pinned::relink_pinned,
             files::draft_write,
             files::draft_delete,
             fetch::open_from_url,

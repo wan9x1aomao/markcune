@@ -1624,6 +1624,58 @@ try {
   check('语音', '录音中按 Esc 取消，不落字', voice.cancelCalls === 1 && voice.cancelState === 'idle'
     && voice.cancelKeptDoc === true, JSON.stringify({ calls: voice.cancelCalls, state: voice.cancelState }));
 
+  // ============================== 置顶 ==============================
+  const pinnedUi = await run(`(async () => {
+    const { createSidebar } = await import('/sidebar.js');
+    const host = document.createElement('div');
+    host.style.cssText = 'display:flex;flex-direction:column;width:260px;height:300px;overflow:hidden';
+    const body = document.createElement('div');
+    body.style.cssText = 'flex:1;min-height:0;overflow-y:auto';
+    host.appendChild(body);
+    document.body.appendChild(host);
+    const calls = [];
+    const sidebar = createSidebar(body, {
+      api: { listDir: async () => [], reveal: async () => {} },
+      revealLabel: '在访达中显示',
+      onOpen() {}, onOpenInNewWindow() {}, onOpenFolder() {}, onOpenFile() {}, onOpenFromUrl() {},
+      onNewDocument() {}, onRenamed() {}, onError() {},
+      onOpenPinned: (p) => calls.push(['open', p]),
+      onPinFile: () => calls.push(['pin-file']),
+      onPinPath: (p) => calls.push(['pin', p]),
+      onUnpinPinned: (p) => calls.push(['unpin', p]),
+      onRelinkPinned: (p) => calls.push(['relink', p]),
+      onRevealPinned: (p) => calls.push(['reveal', p]),
+    });
+    const block = document.querySelector('.sidebar-pinned');
+    const emptyHidden = block.hidden;
+    sidebar.setPinned([
+      { path: '/Users/me/工作/日报.md', name: '日报.md', dir: '~/工作', exists: true },
+      { path: '/Users/me/旧/周报.md', name: '周报.md', dir: '~/旧', exists: false },
+    ]);
+    const rows = [...block.querySelectorAll('.pinned-row')];
+    rows[1].click();
+    rows[0].querySelector('.pin-remove').click();
+    rows[0].click();
+    return {
+      emptyHidden,
+      above: block.getBoundingClientRect().bottom <= body.getBoundingClientRect().top + 1,
+      names: [...block.querySelectorAll('.pinned-row .name')].map((n) => n.textContent),
+      secondLine: rows[0].querySelector('.dir')?.textContent,
+      missing: rows[1].classList.contains('missing'),
+      missingText: rows[1].querySelector('.dir')?.textContent,
+      calls,
+    };
+  })()`);
+  check('置顶', '空置顶不占位', pinnedUi.emptyHidden === true);
+  check('置顶', '置顶块在滚动区之上，树再长也压不走', pinnedUi.above === true, `rows=${pinnedUi.names?.length}`);
+  check('置顶', '每行显示文件名和来源文件夹', pinnedUi.names.join() === '日报.md,周报.md'
+    && pinnedUi.secondLine === '~/工作', JSON.stringify(pinnedUi.names));
+  check('置顶', '找不到的文件标灰，点它是重新定位', pinnedUi.missing === true
+    && pinnedUi.missingText === '找不到这个文件' && pinnedUi.calls.some((c) => c[0] === 'relink'),
+  JSON.stringify(pinnedUi.calls));
+  check('置顶', '✕ 只取消置顶，点行才是打开', pinnedUi.calls.some((c) => c[0] === 'unpin')
+    && pinnedUi.calls.some((c) => c[0] === 'open'), JSON.stringify(pinnedUi.calls));
+
   // ============================== 汇总 ==============================
   const failed = results.filter((r) => !r.pass);
   console.log(`\n${results.length - failed.length}/${results.length} 通过`);

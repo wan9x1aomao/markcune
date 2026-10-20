@@ -345,6 +345,118 @@ body.focus #sidebar {
   scrollbar-width: thin;
 }
 
+/* Pinned files sit outside the scroller: a long tree scrolls under them, they never move. */
+.sidebar-pinned {
+  flex: none;
+  max-height: 42vh;
+  overflow-y: auto;
+  padding: 2px 8px 0;
+  scrollbar-width: thin;
+}
+.sidebar-pinned[hidden] {
+  display: none;
+}
+.sidebar-pinned::after {
+  content: '';
+  display: block;
+  height: 1px;
+  margin: 6px 2px 0;
+  background: var(--line);
+}
+.pinned-head {
+  display: flex;
+  align-items: center;
+  padding: 4px 2px 2px 10px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.pinned-head .title {
+  flex: 1;
+}
+.pinned-head .icon-button {
+  width: 24px;
+  height: 24px;
+}
+.pinned-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 3px 8px 3px 10px;
+  border-radius: 10px;
+  cursor: default;
+  transition: background var(--t-micro);
+}
+.pinned-row:hover,
+.pinned-row:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+.pinned-row.active {
+  background: var(--active);
+}
+.pinned-row .pin {
+  flex: none;
+  display: inline-flex;
+  color: var(--text-faint);
+}
+.pinned-row .pin svg {
+  width: 14px;
+  height: 14px;
+}
+.pinned-row .body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pinned-row .name {
+  color: var(--text);
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pinned-row .dir {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pinned-row.missing .name {
+  color: var(--text-faint);
+}
+.pinned-row .pin-remove {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: var(--text-faint);
+  opacity: 0;
+  transition: opacity var(--t-micro), background var(--t-micro);
+}
+.pinned-row:hover .pin-remove,
+.pinned-row:focus-within .pin-remove {
+  opacity: 1;
+}
+.pinned-row .pin-remove:hover {
+  background: var(--active);
+  color: var(--text);
+}
+.pinned-row .pin-remove svg {
+  width: 12px;
+  height: 12px;
+}
+.pinned-row input {
+  flex: 1;
+  min-width: 0;
+}
+
 #outline {
   z-index: 4;
   right: var(--inset);

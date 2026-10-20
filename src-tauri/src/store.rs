@@ -13,6 +13,8 @@ pub struct Store {
     pub settings: Map<String, Value>,
     pub recent_files: Vec<PathBuf>,
     pub recent_folders: Vec<PathBuf>,
+    /// Files pinned above the tree, in the order they were pinned. Paths only — see `pinned.rs`.
+    pub pinned_files: Vec<PathBuf>,
     /// Oldest first, so the list can be trimmed from the front.
     positions: Vec<(PathBuf, Value)>,
     #[serde(skip)]
@@ -69,6 +71,7 @@ impl Store {
         };
         self.recent_files.iter_mut().for_each(rename);
         self.recent_folders.iter_mut().for_each(rename);
+        self.pinned_files.iter_mut().for_each(rename);
         self.positions.iter_mut().for_each(|(p, _)| rename(p));
         self.save();
     }

@@ -83,6 +83,8 @@ const app = {
   saving: Promise.resolve(),
   headings: [],
   recentFiles: [],
+  /** [{path, name, dir, exists}] — bookmarks drawn above the tree; see src-tauri/src/pinned.rs. */
+  pinned: [],
 };
 
 // Status, title and close guard
@@ -115,6 +117,8 @@ function setStatus(status, detail = '') {
 function updateTitle() {
   const name = app.doc.path ? basename(app.doc.path) : '未命名';
   els.docName.textContent = name;
+  // A pinned document often sits outside the open folder; the full path answers "where is this?".
+  els.docName.title = app.doc.path ?? '';
   api.setTitle(isMac ? name : `${name} - MDPad`);
 }
 
@@ -506,12 +510,12 @@ async function withProgress(task) {
   }
 }
 
-async function openFile(path) {
+async function openFile(path, { keepRoot = false } = {}) {
   if (samePath(path, app.doc.path)) return;
-  return withProgress(() => openFileNow(path));
+  return withProgress(() => openFileNow(path, keepRoot));
 }
 
-async function openFileNow(path) {
+async function openFileNow(path, keepRoot = false) {
   // Never drop an unsaved draft: open the file next to it instead.
   if (!app.doc.path && app.hasDraftContent) return api.openInNewWindow(path);
   await save();
@@ -530,7 +534,8 @@ async function openFileNow(path) {
   app.hasDraftContent = false;
   app.pending = false;
   hideBanner();
-  if (!app.root || !isInside(opened.path, app.root)) await setRoot(dirname(opened.path));
+  // A pinned file is usually outside the open folder: opening it must not tear that folder down.
+  if (!keepRoot && (!app.root || !isInside(opened.path, app.root))) await setRoot(dirname(opened.path));
   await mountEditor(opened.content, opened.position);
   setStatus('saved');
   updateTitle();
@@ -590,6 +595,80 @@ function onRenamed(from, to) {
     updateTitle();
     sidebar.setActive(app.doc.path);
   }
+  // The shell moved the stored path; the panel only needs to redraw.
+  if (app.pinned.some((item) => samePath(item.path, from) || isInside(item.path, from))) refreshPinned();
+}
+
+// Pinned files: a bookmark list above the tree. Nothing is copied, so the document under the row is
+// the one on disk — unpinning removes the row and nothing else.
+
+const isPinned = (path) => app.pinned.some((item) => samePath(item.path, path));
+
+async function refreshPinned() {
+  app.pinned = await api.listPinned().catch(() => app.pinned);
+  sidebar.setPinned(app.pinned);
+}
+
+async function pinPath(path, { quiet = false } = {}) {
+  try {
+    await api.pinFile(path);
+  } catch (error) {
+    toast(`无法置顶：${error}`);
+    return false;
+  }
+  await refreshPinned();
+  if (!quiet) {
+    if (app.settings.pinHintSeen) toast(`已置顶《${basename(path)}》`);
+    else {
+      api.setSetting('pinHintSeen', true);
+      app.settings.pinHintSeen = true;
+      toast('已置顶。以后打开的就是这份文件，在任何编辑器里的修改都是同一份。', 6000);
+    }
+  }
+  return true;
+}
+
+async function pinCurrent() {
+  if (!app.doc.path) return toast('先把这个文档保存到磁盘，再置顶');
+  await pinPath(app.doc.path);
+}
+
+/** The ＋ in the pinned block: any number of documents from disk. */
+async function pinFromDisk() {
+  const paths = await api.pickDocuments();
+  if (!paths.length) return;
+  const before = app.pinned.length;
+  for (const path of paths) await pinPath(path, { quiet: true });
+  await refreshPinned();
+  // Count what actually landed: pinning the same file twice is a no-op, not an addition.
+  const added = app.pinned.length - before;
+  if (added) toast(added === 1 ? '已置顶 1 个文件' : `已置顶 ${added} 个文件`);
+  else toast('选中的文件已经在置顶里');
+}
+
+async function unpinPath(path) {
+  const item = app.pinned.find((pinned) => samePath(pinned.path, path));
+  try {
+    await api.unpinFile(path);
+  } catch (error) {
+    return toast(`无法取消置顶：${error}`);
+  }
+  await refreshPinned();
+  // Say where it still is: "取消置顶" must never read as "删掉".
+  toast(`已取消置顶，文件还在 ${item?.dir ?? dirname(path)}`);
+}
+
+/** Points a pin at a file that moved; the position in the list is kept. */
+async function relinkPinned(from) {
+  const [path] = await api.pickDocuments();
+  if (!path) return;
+  try {
+    await api.relinkPinned(from, path);
+  } catch (error) {
+    return toast(`无法重新定位：${error}`);
+  }
+  await refreshPinned();
+  toast(`已重新定位到《${basename(path)}》`);
 }
 
 async function renameCurrent() {
@@ -729,7 +808,8 @@ function renderEmpty() {
     row('folder', '打开文件夹…', formatKeys('Mod+Shift+O'), () => run('open-folder')),
     row('download', '从链接打开…', 'GitHub · X', () => run('open-from-url')),
   );
-  const recent = app.recentFiles.slice(0, 5);
+  // Pinned files already have their own block in the sidebar; do not repeat them here.
+  const recent = app.recentFiles.filter((path) => !isPinned(path)).slice(0, 5);
   $('empty-recent-label').hidden = !recent.length;
   $('empty-recent').replaceChildren(
     ...recent.map((path) => row('clock', basename(path), basename(dirname(path)), () => openFile(path))),
@@ -999,6 +1079,13 @@ function showMore(anchor) {
       item('export-pdf'),
       'separator',
       item('reveal'),
+      ...(app.doc.path
+        ? [
+            isPinned(app.doc.path)
+              ? { label: '取消置顶', run: () => unpinPath(app.doc.path) }
+              : { label: '置顶此文件', run: pinCurrent },
+          ]
+        : []),
       'separator',
       { label: '命令面板…', hint: formatKeys('Mod+K'), run: () => run('command-palette') },
       item('check-update'),
@@ -1022,6 +1109,13 @@ const sidebar = createSidebar(els.sidebarBody, {
   onNewDocument: newDocument,
   onRenamed,
   onError: toast,
+  // Pinned rows always open in place: switching the tree root would hide the folder being browsed.
+  onOpenPinned: (path) => openFile(path, { keepRoot: true }),
+  onPinFile: pinFromDisk,
+  onPinPath: (path) => pinPath(path),
+  onUnpinPinned: unpinPath,
+  onRelinkPinned: relinkPinned,
+  onRevealPinned: (path) => api.reveal(path),
 });
 const outline = createOutline(els.outline, { onSelect: (heading) => app.editor?.scrollToHeading(heading) });
 const findbar = createFindbar($('findbar'), { getEditor: () => app.editor });
@@ -1162,6 +1256,8 @@ await voice.refresh();
 onAiChange(() => voice.refresh());
 applyPanels();
 sidebar.setRecent(init.recentFiles, init.recentFolders);
+app.pinned = init.pinnedFiles ?? [];
+sidebar.setPinned(app.pinned);
 
 const startup = init.startup;
 if (startup.kind === 'file') await openFile(startup.path);

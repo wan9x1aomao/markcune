@@ -19,6 +19,11 @@ export const api = {
   setRoot: (path) => invoke('set_root', { path }),
   createDocument: (dir) => invoke('create_document', { dir }),
   renamePath: (path, name) => invoke('rename_path', { path, name }),
+  /** Pins store paths only — the document itself is never copied. */
+  listPinned: () => invoke('list_pinned'),
+  pinFile: (path) => invoke('pin_file', { path }),
+  unpinFile: (path) => invoke('unpin_file', { path }),
+  relinkPinned: (from, to) => invoke('relink_pinned', { from, to }),
   draftWrite: (content) => invoke('draft_write', { content }),
   draftDelete: () => invoke('draft_delete'),
   setCloseGuard: (guard) => invoke('set_close_guard', { guard }),

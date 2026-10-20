@@ -322,6 +322,10 @@ async function mountEditor(content, position) {
   syncModeSwitch();
   updateEmpty();
   tidyHint.schedule();
+  // Re-adding the class restarts the animation, so every mount fades in — including a mode switch.
+  els.panes.classList.remove('fresh');
+  void els.panes.offsetWidth;
+  els.panes.classList.add('fresh');
   performance.mark('mdpad:mount-done');
 }
 
@@ -1015,6 +1019,8 @@ const sidebar = createSidebar(els.sidebarBody, {
   onOpen: openFile,
   onOpenInNewWindow: (path) => api.openInNewWindow(path),
   onOpenFolder: openFolder,
+  onOpenFile: () => run('open-file'),
+  onOpenFromUrl: () => run('open-from-url'),
   onNewDocument: newDocument,
   onRenamed,
   onError: toast,

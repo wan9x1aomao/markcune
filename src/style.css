@@ -183,6 +183,12 @@ button {
   padding: 0;
   cursor: default;
 }
+/* Keyboard focus only: a mouse click never leaves a ring behind, but tabbing shows where you are.
+   Nothing else in the app removes the default ring from buttons, so this is the one place it lives. */
+button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+}
 
 input {
   font: inherit;
@@ -275,6 +281,12 @@ input {
 .pill-button.primary:hover,
 .text-button.primary:hover {
   background: color-mix(in srgb, var(--accent) 88%, #000);
+}
+/* The dark theme's accent is a light blue, so white on it would be unreadable (≈1.9:1).
+   Same treatment as the floating 一键整理 pill. */
+:root[data-theme='dark'] .pill-button.primary,
+:root[data-theme='dark'] .text-button.primary {
+  color: #0f1426;
 }
 
 /* Layout: floating sidebar and outline cards around the document. */
@@ -675,6 +687,16 @@ body.loading #progress {
 body.split .pane + .pane {
   border-left: 1px solid var(--line);
 }
+/* A different document (or another mode) swaps in within one frame; a short fade keeps that from
+   snapping. Opacity only, and it runs once per mount — never while typing. */
+#panes.fresh > .pane:not([hidden]) {
+  animation: pane-in 120ms var(--ease);
+}
+@keyframes pane-in {
+  from {
+    opacity: 0;
+  }
+}
 
 /* Empty state: shown over an untouched untitled document; typing goes straight to the editor. */
 
@@ -819,7 +841,12 @@ body.empty #editor [data-placeholder]::before {
 .panel-actions {
   padding: 8px 10px;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+/* The second row of the same group sits tighter under the first. */
+.panel-actions + .panel-actions {
+  padding-top: 0;
 }
 
 .tree-row {
@@ -1065,6 +1092,10 @@ body.empty #editor [data-placeholder]::before {
   border-radius: 8px;
   text-align: left;
   position: relative;
+  /* Same 120ms as every other hover in the app: the highlight settles instead of blinking on. */
+  transition:
+    background var(--t-micro),
+    color var(--t-micro);
 }
 /* Only menus that can show a check mark need room for it. */
 .popup-menu.with-check .item {
@@ -1160,6 +1191,9 @@ body.empty #editor [data-placeholder]::before {
   border-radius: 10px;
   text-align: left;
   font-size: 13.5px;
+  transition:
+    background var(--t-micro),
+    color var(--t-micro);
 }
 .palette .result .label {
   flex: 1;

@@ -5,7 +5,7 @@ import { showMenu } from './ui.js';
 
 /**
  * Options: api, revealLabel, onOpen(path), onOpenInNewWindow(path), onOpenFolder(path|undefined),
- * onNewDocument(dir), onRenamed(from, to).
+ * onOpenFile(), onOpenFromUrl(), onNewDocument(dir), onRenamed(from, to), onError(message).
  */
 export function createSidebar(el, options) {
   const { api } = options;
@@ -93,6 +93,7 @@ export function createSidebar(el, options) {
       basename(root),
       [
         ['plus', '新建文档', () => options.onNewDocument(root)],
+        ['download', '从链接打开…', () => options.onOpenFromUrl()],
         ['folder', '打开其他文件夹…', () => options.onOpenFolder()],
       ],
       'folder',
@@ -199,15 +200,28 @@ export function createSidebar(el, options) {
     list.appendChild(
       Object.assign(document.createElement('div'), {
         className: 'panel-empty',
-        textContent: '打开一个文件夹，就能在这里浏览其中的 Markdown 文档。',
+        textContent: '打开一个文件或文件夹，就能在这里浏览 Markdown 文档。',
       }),
     );
-    const actions = document.createElement('div');
-    actions.className = 'panel-actions';
-    const button = Object.assign(document.createElement('button'), { className: 'text-button', textContent: '打开文件夹…' });
-    button.addEventListener('click', () => options.onOpenFolder());
-    actions.appendChild(button);
-    list.appendChild(actions);
+    // The same three ways in as the empty state in the document area: a folder, a single file,
+    // or a link. They live here too because this panel is where people look for "open".
+    const actions = (buttons) => {
+      const row = document.createElement('div');
+      row.className = 'panel-actions';
+      for (const [label, run, primary] of buttons) {
+        const button = document.createElement('button');
+        button.className = 'text-button' + (primary ? ' primary' : '');
+        button.textContent = label;
+        button.addEventListener('click', run);
+        row.appendChild(button);
+      }
+      list.appendChild(row);
+    };
+    actions([['打开文件夹…', () => options.onOpenFolder(), true]]);
+    actions([
+      ['打开文件…', () => options.onOpenFile()],
+      ['从链接打开…', () => options.onOpenFromUrl()],
+    ]);
 
     const section = (title, items, run) => {
       if (!items.length) return;

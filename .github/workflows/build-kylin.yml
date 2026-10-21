@@ -1,0 +1,88 @@
+name: 麒麟兼容包
+
+# 只做一件事：用 zig cc 把 glibc 基线压到麒麟能跑的水平，产出一个可以拿去真机验的 deb。
+#
+# 为什么不塞进 build.yml：那条链是发版链，产物进 latest.json、用户直接更新。
+# 这条链只出「可验证的包」，不上官网、不进 latest.json，跑坏了也不影响任何人。
+# 等真机验收通过，再决定要不要给它一个 latest.json 平台键、接进 release.sh。
+on:
+  workflow_dispatch:
+    inputs:
+      glibc:
+        description: "目标 glibc 基线（2.31 = 麒麟 V10 SP1 2203+；2.28 = 更老的 2107/早期镜像）"
+        type: choice
+        options: ["2.31", "2.28"]
+        default: "2.31"
+      appimage:
+        description: "同时产出 AppImage（麒麟 kysec 对未签名 AppImage 有限制，一般不需要）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # 用 22.04 而不是 ubuntu-latest：和正式发版包同一个基座，差异只有 glibc 基线，
+    # 这样两边的行为可以互相印证。16G 内存是选它的主要原因——Tauri release 编译
+    # 在小内存机器上会疯狂换页（不是编得慢，是 96% 时间在等磁盘）。
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri -> target.noindex
+
+      # zig 只当链接器用（zig cc -target x86_64-linux-gnu.2.31），不参与 C 代码编译。
+      # 版本固定在 0.17.x：0.13 也能用，但两个版本对 rustc 传参的容忍度不同，
+      # 换版本前先在本地跑一次 scripts/build-kylin.sh。
+      - name: 安装 zig
+        run: |
+          pip3 install --user "ziglang>=0.17,<0.18"
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$(python3 -c 'import os,ziglang;print(os.path.join(os.path.dirname(ziglang.__file__),"zig"))')" "$HOME/.local/bin/zig"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/zig" version
+
+      - name: 打包（降 glibc 基线）
+        env:
+          CARGO_BUILD_JOBS: 4
+        run: |
+          ARGS=(--glibc "${{ inputs.glibc }}")
+          if [ "${{ inputs.appimage }}" = "true" ]; then ARGS+=(--appimage); fi
+          bash scripts/build-kylin.sh "${ARGS[@]}"
+
+      # 光看 glibc 不够：二进制还会对 GLIB / GTK / SOUP 声明符号版本，
+      # 如果链接时用的是比麒麟新的 glib 符号，装上去照样起不来。这里一次全打出来。
+      - name: 报告符号版本需求
+        run: |
+          BIN=$(ls src-tauri/target.noindex/x86_64-unknown-linux-gnu/release/mdpad src-tauri/target/x86_64-unknown-linux-gnu/release/mdpad 2>/dev/null | head -1)
+          echo "### $BIN" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          readelf -V "$BIN" | awk '/Version needs section/ {f=1} f' | grep -oE '(GLIBC|GLIBCXX|GLIB|GTK|GDK|SOUP|WEBKIT|PANGO|CAIRO|ATK|GIO)_[0-9.]+' | sed -E 's/_[0-9.]+$//' | sort | uniq -c | sort -rn >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          for lib in libc.so.6 libglib-2.0.so.0 libgtk-3.so.0 libsoup-3.0.so.0 libwebkit2gtk-4.1.so.0; do
+            echo "--- $lib 最高需求版本 ---"
+            readelf -V "$BIN" | grep -A400 "$lib" | grep -oE '(GLIBC|GLIB|GTK|SOUP|WEBKIT)_[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -uV | tail -3
+          done
+          echo "--- DT_NEEDED ---"
+          readelf -d "$BIN" | grep NEEDED
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kylin-glibc${{ inputs.glibc }}
+          path: dist/kylin/*
+          if-no-files-found: error
+          retention-days: 14

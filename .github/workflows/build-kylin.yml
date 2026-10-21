@@ -66,19 +66,29 @@ jobs:
 
       # 光看 glibc 不够：二进制还会对 GLIB / GTK / SOUP 声明符号版本，
       # 如果链接时用的是比麒麟新的 glib 符号，装上去照样起不来。这里一次全打出来。
+      # readelf -V 的结构是「File: libX  Cnt: n」开头，后面跟若干「Name: GLIB_2.xx」，
+      # 所以按 File 分组收集，别用 grep -A 猜行数。
       - name: 报告符号版本需求
         run: |
           BIN=$(ls src-tauri/target.noindex/x86_64-unknown-linux-gnu/release/mdpad src-tauri/target/x86_64-unknown-linux-gnu/release/mdpad 2>/dev/null | head -1)
-          echo "### $BIN" >> "$GITHUB_STEP_SUMMARY"
+          [ -n "$BIN" ] || { echo "找不到可执行文件"; exit 1; }
+          echo "### DT_NEEDED" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          readelf -V "$BIN" | awk '/Version needs section/ {f=1} f' | grep -oE '(GLIBC|GLIBCXX|GLIB|GTK|GDK|SOUP|WEBKIT|PANGO|CAIRO|ATK|GIO)_[0-9.]+' | sed -E 's/_[0-9.]+$//' | sort | uniq -c | sort -rn >> "$GITHUB_STEP_SUMMARY"
+          readelf -d "$BIN" | grep NEEDED | sed -E 's/.*\[(.*)\]/\1/' >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          for lib in libc.so.6 libglib-2.0.so.0 libgtk-3.so.0 libsoup-3.0.so.0 libwebkit2gtk-4.1.so.0; do
-            echo "--- $lib 最高需求版本 ---"
-            readelf -V "$BIN" | grep -A400 "$lib" | grep -oE '(GLIBC|GLIB|GTK|SOUP|WEBKIT)_[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -uV | tail -3
-          done
-          echo "--- DT_NEEDED ---"
-          readelf -d "$BIN" | grep NEEDED
+          echo "### 运行时库要求的最高符号版本" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          readelf -V "$BIN" \
+            | awk '/File:/ {for(i=1;i<=NF;i++) if($i=="File:") lib=$(i+1)}
+                   /Name:/ {for(i=1;i<=NF;i++) if($i=="Name:") print lib"\t"$(i+1)}' \
+            | sort -u \
+            | awk -F'\t' '{print}' \
+            | sort -t$'\t' -k1,1 -k2,2V \
+            | awk -F'\t' '{max[$1]=$2} END {for (l in max) printf "%-28s %s\n", l, max[l]}' \
+            | sort >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "--- 基线判定（libc）---"
+          readelf -V "$BIN" | grep -oE 'GLIBC_2\.[0-9]+' | sort -uV | tail -1
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

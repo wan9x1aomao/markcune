@@ -155,8 +155,27 @@ LINKER_DIR="$(mktemp -d)"
 trap 'rm -rf "$LINKER_DIR"' EXIT
 WRAP="$LINKER_DIR/zigcc"
 {
-	echo '#!/bin/sh'
-	echo "exec \"$ZIG_BIN\" cc -target $ZIG_TRIPLE \"\$@\""
+	cat <<'WRAPPER'
+#!/bin/bash
+# 这个包装同时充当 rustc 的链接器和 cc-rs 的 CC/CXX。
+#
+# cc-rs 会自己往命令行里塞 --target=x86_64-unknown-linux-gnu（rust 的三元组），
+# 但 zig 的 target 语法里没有 "unknown" 这个 OS，写法必须是 x86_64-linux-gnu，
+# 所以它会直接报 "unable to parse target query ... UnknownOperatingSystem"；
+# 而且那个参数排在后面，会把下面 exec 里的 -target 覆盖掉。
+# 处理办法：先把上游的 target 全部剥掉（含 -target 后面独立成项的值），再换成我们的。
+args=()
+skip=0
+for a in "$@"; do
+	if [ "$skip" = 1 ]; then skip=0; continue; fi
+	case "$a" in
+		--target=*) continue ;;
+		-target) skip=1; continue ;;
+	esac
+	args+=("$a")
+done
+WRAPPER
+	echo "exec \"$ZIG_BIN\" cc -target $ZIG_TRIPLE \"\${args[@]}\""
 } > "$WRAP"
 chmod +x "$WRAP"
 

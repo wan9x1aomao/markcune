@@ -1,6 +1,12 @@
 name: 麒麟兼容包
 
-# 只做一件事：用 zig cc 把 glibc 基线压到麒麟能跑的水平，产出一个可以拿去真机验的 deb。
+# 只做一件事：用 zig cc 把 glibc 基线压到麒麟能跑的水平，产出可以拿去真机验的 deb。
+#
+# 目标是麒麟（国产信创），**主线是 arm64**（飞腾 / 鲲鹏）。x86_64 顺带一起出，
+# 因为海光 / 兆芯的麒麟机在存量里占大头，多跑一个 job 而已。
+#
+# 两个架构都是原生编译：arm64 跑在 ubuntu-22.04-arm 上（public 仓库免费），
+# 不做交叉编译——交叉要 arm64 的 webkit2gtk 头文件，AppImage 更是没法交叉。
 #
 # 为什么不塞进 build.yml：那条链是发版链，产物进 latest.json、用户直接更新。
 # 这条链只出「可验证的包」，不上官网、不进 latest.json，跑坏了也不影响任何人。
@@ -23,10 +29,20 @@ permissions:
 
 jobs:
   build:
-    # 用 22.04 而不是 ubuntu-latest：和正式发版包同一个基座，差异只有 glibc 基线，
-    # 这样两边的行为可以互相印证。16G 内存是选它的主要原因——Tauri release 编译
-    # 在小内存机器上会疯狂换页（不是编得慢，是 96% 时间在等磁盘）。
-    runs-on: ubuntu-22.04
+    # arm64 和 x86_64 并行，两个包都要：
+    #   arm64  —— 飞腾 / 鲲鹏，这是最初要的那个
+    #   x86_64 —— 海光 / 兆芯 / Intel 的麒麟机，信创存量里占大头
+    # 都是原生跑，不做交叉编译；zig 只当链接器用，负责把 glibc 压到基线。
+    # ubuntu-22.04-arm 对 public 仓库免费，和 ubuntu-22.04 一样是 4 核 / 16 G。
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            os: ubuntu-22.04-arm
+          - arch: x86_64
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -45,7 +61,7 @@ jobs:
         with:
           workspaces: src-tauri -> target.noindex
 
-      # zig 只当链接器用（zig cc -target x86_64-linux-gnu.2.31），不参与 C 代码编译。
+      # zig 只当链接器用（zig cc -target <arch>-linux-gnu.<glibc>），不参与 C 代码编译。
       # 版本固定在 0.17.x：0.13 也能用，但两个版本对 rustc 传参的容忍度不同，
       # 换版本前先在本地跑一次 scripts/build-kylin.sh。
       - name: 安装 zig
@@ -55,6 +71,7 @@ jobs:
           ln -sf "$(python3 -c 'import os,ziglang;print(os.path.join(os.path.dirname(ziglang.__file__),"zig"))')" "$HOME/.local/bin/zig"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/zig" version
+          echo "runner 架构：$(uname -m)"
 
       - name: 打包（降 glibc 基线）
         env:
@@ -69,9 +86,12 @@ jobs:
       # readelf -V 的结构是「File: libX  Cnt: n」开头，后面跟若干「Name: GLIB_2.xx」，
       # 所以按 File 分组收集，别用 grep -A 猜行数。
       - name: 报告符号版本需求
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
-          BIN=$(ls src-tauri/target.noindex/x86_64-unknown-linux-gnu/release/mdpad src-tauri/target/x86_64-unknown-linux-gnu/release/mdpad 2>/dev/null | head -1)
+          BIN=$(ls "src-tauri/target.noindex/$ARCH-unknown-linux-gnu/release/mdpad" "src-tauri/target/$ARCH-unknown-linux-gnu/release/mdpad" 2>/dev/null | head -1)
           [ -n "$BIN" ] || { echo "找不到可执行文件"; exit 1; }
+          echo "架构 $ARCH  基线 glibc ${{ inputs.glibc }}" >> "$GITHUB_STEP_SUMMARY"
           echo "### DT_NEEDED" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           readelf -d "$BIN" | grep NEEDED | sed -E 's/.*\[(.*)\]/\1/' >> "$GITHUB_STEP_SUMMARY"
@@ -82,17 +102,18 @@ jobs:
             | awk '/File:/ {for(i=1;i<=NF;i++) if($i=="File:") lib=$(i+1)}
                    /Name:/ {for(i=1;i<=NF;i++) if($i=="Name:") print lib"\t"$(i+1)}' \
             | sort -u \
-            | awk -F'\t' '{print}' \
             | sort -t$'\t' -k1,1 -k2,2V \
             | awk -F'\t' '{max[$1]=$2} END {for (l in max) printf "%-28s %s\n", l, max[l]}' \
             | sort >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo "--- 基线判定（libc）---"
           readelf -V "$BIN" | grep -oE 'GLIBC_2\.[0-9]+' | sort -uV | tail -1
+          echo "--- 机器类型 ---"
+          readelf -h "$BIN" | grep -E "Machine|Class"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: kylin-glibc${{ inputs.glibc }}
+          name: kylin-${{ matrix.arch }}-glibc${{ inputs.glibc }}
           path: dist/kylin/*
           if-no-files-found: error
           retention-days: 14

@@ -171,6 +171,12 @@ for a in "$@"; do
 	case "$a" in
 		--target=*) continue ;;
 		-target) skip=1; continue ;;
+		# aarch64 目标上 rustc 会自动加这个（Cortex-A53 芯片勘误 843419 的修补）。
+		# zig cc 的链接参数是白名单式的，不认识它就整条命令失败：
+		#   error: unsupported linker arg: --fix-cortex-a53-843419
+		# 丢掉是安全的：它只对早期 A53 内核有意义，而麒麟桌面跑的是飞腾 D2000
+		# （FTC663）和鲲鹏 920（TaiShan v110），都是 A72 系内核，不涉及这个勘误。
+		-Wl,--fix-cortex-a53-*) continue ;;
 	esac
 	args+=("$a")
 done

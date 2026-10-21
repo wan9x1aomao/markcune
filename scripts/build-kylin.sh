@@ -174,8 +174,19 @@ for a in "$@"; do
 	esac
 	args+=("$a")
 done
+
+# 只在「链接」时加这个参数（有 -c 就是在编 C 源码，不需要）：
+# 系统里的 libasound / libglib / libgmodule 是拿 2.35 的头编的，它们自己引用
+# GLIBC_2.33/2.34 的符号；而我们链到的是 2.31 的桩库，链接器默认
+# --no-allow-shlib-undefined，于是报一堆 undefined reference——注意那些引用
+# 来自 /usr/lib 下的 .so，不是我们的代码。放行它们是对的：运行时这些符号由
+# 目标机（麒麟）自己那套同名库提供，而麒麟的库本来就是按 2.31 编的。
+link=1
+for a in "${args[@]}"; do [ "$a" = "-c" ] && { link=0; break; }; done
+extra=()
+[ "$link" -eq 1 ] && extra=(-Wl,--allow-shlib-undefined)
 WRAPPER
-	echo "exec \"$ZIG_BIN\" cc -target $ZIG_TRIPLE \"\${args[@]}\""
+	echo "exec \"$ZIG_BIN\" cc -target $ZIG_TRIPLE \"\${extra[@]}\" \"\${args[@]}\""
 } > "$WRAP"
 chmod +x "$WRAP"
 

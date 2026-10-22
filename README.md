@@ -1,10 +1,14 @@
-# MDPad
+# MDPad 编辑器
 
 [![CI](https://github.com/wan9x1aomao/mdpad/actions/workflows/ci.yml/badge.svg)](https://github.com/wan9x1aomao/mdpad/actions/workflows/ci.yml)
 
 轻量、免费的本地 Markdown 编辑器。打开就能写字，写下的每个字都留在你自己的硬盘上 —— 不登录、不联网、不上传。
 
-![MDPad 界面](docs/screenshot.png)
+**官网：<https://mdpad.app.workbuddy.host/>** ｜ 免费开源（MIT）｜ macOS / Windows / Linux
+
+> 名称说明：本项目是带 AI 续写与改写的桌面编辑器，与 GitHub 上同名的终端工具 [`lpalbou/mdpad`](https://github.com/lpalbou/mdpad)、[`radueduard97/MdPad`](https://github.com/radueduard97/MdPad) 及其他同名仓库**无关**。中文语境请称「**MDPad 编辑器**」。
+
+![MDPad 编辑器界面](docs/screenshot.png)
 
 ## 下载
 

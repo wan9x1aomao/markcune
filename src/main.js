@@ -1147,11 +1147,17 @@ const updater = createUpdater($('update-banner'), {
 });
 
 // A window left open for days never runs the launch check twice, so look again whenever the user
-// comes back to it. The shell's own gate makes this cheap: at most one request per six hours.
+// comes back to it and on a timer while it stays in front. The shell gates the requests (half an
+// hour after one that answered, ten minutes after one that failed), so these are cheap. The nudge
+// is shorter than the gate on purpose: a timer aligned with it would drift just past the boundary
+// and end up checking every other tick.
 window.addEventListener('focus', () => updater.recheck());
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') updater.recheck();
 });
+setInterval(() => {
+  if (document.visibilityState === 'visible') updater.recheck();
+}, 5 * 60 * 1000);
 
 const buttons = {
   'toggle-sidebar': [icons.sidebar, `显示文件列表（${formatKeys('Mod+Shift+L')}）`, () => run('toggle-sidebar')],
@@ -1231,6 +1237,10 @@ appWindow.onFocusChanged(({ payload: focused }) => {
   if (!focused) {
     save();
     rememberPosition();
+  } else {
+    // The native window event is the reliable one on macOS: DOM focus alone can be missed when the
+    // app is brought back from the Dock. The shell's gate keeps this from becoming a request storm.
+    updater.recheck();
   }
 });
 appWindow.onResized(async () => {

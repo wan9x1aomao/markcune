@@ -1,8 +1,8 @@
 // In-app updates: a quiet banner offers the new version, then downloads it and restarts.
 //
-// The shell decides when a check may run (six hours after one that answered, ten minutes after one
-// that failed), so `recheck()` can be called freely — on launch, when the window regains focus, and
-// from the menu. Failures of an automatic check stay quiet on screen but are recorded where
+// The shell decides when a check may run (half an hour after one that answered, ten minutes after
+// one that failed), so `recheck()` can be called freely — on launch, on focus, on a timer, and from
+// the menu. Failures of an automatic check stay quiet on screen but are recorded where
 // 设置 › 关于 shows them.
 import { getVersion } from '@tauri-apps/api/app';
 
@@ -44,7 +44,10 @@ export function createUpdater(el, { api, toast, beforeRestart }) {
       if (!automatic) toast(`已是最新版本（${await getVersion()}）`);
       return;
     }
-    const notes = info.notes?.split('\n').find((line) => line.trim())?.trim();
+    const first = info.notes?.split('\n').find((line) => line.trim())?.trim();
+    // `latest.json` notes conventionally start with the version ("3.5.3：…"); the banner already
+    // names it, so strip the duplicate instead of printing "MDPad 3.5.4 已发布：3.5.4：…".
+    const notes = first?.replace(/^\d+\.\d+\.\d+\s*[：:]\s*/, '');
     show(`MDPad ${info.version} 已发布${notes ? `：${notes}` : '。'}`, [
       ['立即更新', download, true],
       ['稍后', hide],

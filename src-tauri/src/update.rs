@@ -14,13 +14,20 @@ use crate::state::app_state;
 
 const ENDPOINT: Option<&str> = option_env!("MDPAD_UPDATE_ENDPOINT");
 
-/// How long a *successful* check silences the next automatic one. Six hours instead of a day:
-/// a machine that stays open across a release should hear about it the same day, and the check
-/// itself is one small JSON request.
-const AUTO_CHECK_INTERVAL_MS: u64 = 6 * 60 * 60 * 1000;
+/// How long a *successful* check silences the next automatic one. Half an hour: the check is one
+/// small JSON request, and a release should surface while the person is still working. It used to
+/// be six hours, which meant an app opened in the morning heard about an afternoon release only
+/// after lunch — or, if it was closed before then, never.
+const AUTO_CHECK_INTERVAL_MS: u64 = 30 * 60 * 1000;
 /// After a failed check, wait this long before trying again. Without it a window that regains
 /// focus while offline would hammer the endpoint on every switch back.
 const FAILED_RETRY_MS: u64 = 10 * 60 * 1000;
+
+/// Whether an automatic check may run now. Split out from the command so the rule is testable
+/// without a window — and so a future change cannot quietly make reminders disappear again.
+fn auto_check_due(now: u64, last_ok: u64, last_fail: u64) -> bool {
+    now.saturating_sub(last_ok) >= AUTO_CHECK_INTERVAL_MS && now.saturating_sub(last_fail) >= FAILED_RETRY_MS
+}
 
 // The times live in the settings map so they survive restarts. Only a check that came back with
 // an answer stamps `LAST_OK` — a failure must never buy itself a quiet spell.
@@ -109,8 +116,8 @@ async fn fetch(app: &AppHandle) -> Result<Option<Update>, String> {
 /// Looks for a newer version.
 ///
 /// `automatic` is the quiet path: nothing is shown on failure, but the reason is remembered so
-/// 设置 › 关于 can say what went wrong. It is rate limited — six hours after a check that got an
-/// answer, ten minutes after one that did not. The manual path (`automatic: false`) always runs
+/// 设置 › 关于 can say what went wrong. It is rate limited — half an hour after a check that got
+/// an answer, ten minutes after one that did not. The manual path (`automatic: false`) always runs
 /// and returns the error to the caller, who shows it.
 #[tauri::command]
 pub async fn check_update(app: AppHandle, automatic: bool) -> Result<Option<UpdateInfo>, String> {
@@ -119,9 +126,7 @@ pub async fn check_update(app: AppHandle, automatic: bool) -> Result<Option<Upda
             return Ok(None);
         }
         let now = now_ms();
-        if now.saturating_sub(stored_ms(&app, KEY_LAST_OK)) < AUTO_CHECK_INTERVAL_MS
-            || now.saturating_sub(stored_ms(&app, KEY_LAST_FAIL)) < FAILED_RETRY_MS
-        {
+        if !auto_check_due(now, stored_ms(&app, KEY_LAST_OK), stored_ms(&app, KEY_LAST_FAIL)) {
             return Ok(None);
         }
     }
@@ -246,5 +251,33 @@ pub fn install_and_restart(app: &AppHandle) {
     match update.install(bytes) {
         Ok(()) => app.restart(),
         Err(err) => eprintln!("failed to install update: {err}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MIN: u64 = 60 * 1000;
+    const NOW: u64 = 1_000_000_000;
+
+    /// The bug this guards: a check that answered in the morning used to silence the rest of the
+    /// day, so an afternoon release was never announced while the app was open.
+    #[test]
+    fn a_check_that_answered_waits_half_an_hour() {
+        assert!(!auto_check_due(NOW, NOW - 29 * MIN, 0));
+        assert!(auto_check_due(NOW, NOW - 30 * MIN, 0));
+    }
+
+    #[test]
+    fn never_checked_is_due() {
+        assert!(auto_check_due(NOW, 0, 0));
+    }
+
+    /// A failure must not buy a long silence, but must stop focus switches from hammering it.
+    #[test]
+    fn a_failure_waits_ten_minutes() {
+        assert!(!auto_check_due(NOW, 0, NOW - 9 * MIN));
+        assert!(auto_check_due(NOW, 0, NOW - 10 * MIN));
     }
 }

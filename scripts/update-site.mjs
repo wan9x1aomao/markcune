@@ -71,4 +71,14 @@ const rendered = shown
   .join('');
 html = html.replace(/(<!-- changelog:start -->)[\s\S]*?(<!-- changelog:end -->)/, `$1${rendered}$2`);
 
+// The changelog starts collapsed in the static HTML, so the toggle button carries a
+// placeholder count that must match what the toggle script computes after load —
+// otherwise the label changes on every page load and the button shifts. The script uses
+// (number of .release items - 1), so mirror that here before writing.
+const hiddenReleases = Math.max(shown.length - 1, 0);
+html = html.replace(
+  /(<button class="cl-more"[^>]*>)[^<]*(<\/button>)/,
+  `$1展开其余 ${hiddenReleases} 个版本的更新记录$2`,
+);
+
 writeFileSync(file, html);

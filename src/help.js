@@ -6,6 +6,11 @@
 import { helpGroups } from './discovery.js';
 import { formatKeys } from './ui.js';
 
+const isMac = navigator.userAgent.includes('Mac');
+// Where people find this panel again. macOS has the menu bar; Windows/Linux have neither a menu
+// bar nor a visible button, so F1 is the one thing worth spelling out.
+const REOPEN = isMac ? '也可以随时在菜单栏「帮助」里打开。' : '也可以随时按 F1 打开。';
+
 export function openHelp({ run, onClose } = {}) {
   document.querySelector('.overlay.help-overlay')?.remove();
   const overlay = document.createElement('div');
@@ -16,7 +21,7 @@ export function openHelp({ run, onClose } = {}) {
         <h2>键盘快捷键与功能</h2>
         <button class="help-close" type="button" aria-label="关闭">×</button>
       </header>
-      <p class="help-lead">点一行直接执行。也可以随时用命令面板搜功能名或英文名，比如「导出」「word」「置顶」。</p>
+      <p class="help-lead">点一行直接执行。${REOPEN}命令面板也能搜功能名或英文名，比如「导出」「word」「置顶」。</p>
       <div class="help-groups"></div>
     </div>`;
   const host = overlay.querySelector('.help-groups');

@@ -1782,6 +1782,28 @@ try {
     && discover.hints.other === true && discover.hints.persisted.length === 2
     && discover.hints.shown.length === 2 && discover.hints.remembered === true, JSON.stringify(discover.hints));
 
+  // ============================== 跨平台 ==============================
+  // 本机是 macOS，主程序因此不安装 Windows/Linux 那套快捷键；这里直接装一遍键盘表，验证
+  // Windows/Linux 唯一的入口是通的：没有菜单栏，全靠 ··· / 命令面板 / F1。
+  await fresh();
+  const winKeys = await run(`(async () => {
+    const { installShortcuts } = await import('/shortcuts.js');
+    const calls = [];
+    installShortcuts({ run: (id) => calls.push(id), isRichEditor: () => false });
+    const press = (key, extra = {}) => {
+      const event = new KeyboardEvent('keydown', { key, code: extra.code, bubbles: true, cancelable: true, ...extra });
+      document.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    const f1 = press('F1', { code: 'F1' });
+    const ctrlK = press('k', { code: 'KeyK', ctrlKey: true });
+    return { calls, f1, ctrlK };
+  })()`);
+  check('跨平台', 'Windows/Linux 按 F1 打开键盘快捷键与功能', winKeys.f1 === true
+    && winKeys.calls.includes('help'), JSON.stringify({ f1: winKeys.f1, calls: winKeys.calls }));
+  check('跨平台', 'Windows/Linux 的 Ctrl+K 打开命令面板', winKeys.ctrlK === true
+    && winKeys.calls.includes('command-palette'), JSON.stringify({ ctrlK: winKeys.ctrlK, calls: winKeys.calls }));
+
   // ============================== 汇总 ==============================
   const failed = results.filter((r) => !r.pass);
   console.log(`\n${results.length - failed.length}/${results.length} 通过`);

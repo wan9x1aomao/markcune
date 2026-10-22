@@ -37,6 +37,7 @@ const SILENCE: f32 = 0.001;
 
 const KEY_BASE: &str = "voice.baseUrl";
 const KEY_MODEL: &str = "voice.model";
+// 也在 `store::SECRET_SETTINGS` 里：window_init 回给页面之前会把它滤掉，别只改这一处。
 const KEY_SECRET: &str = "voice.apiKey";
 /// 语音 Key 没配时借用的 AI Key —— 只在两家是同一个地址时才借。
 const AI_SECRET: &str = "ai.apiKey";
@@ -459,6 +460,13 @@ async fn transcribe(app: &AppHandle, audio: Vec<u8>, allow_empty: bool) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The page must never learn the key; `window_init` filters settings through that list.
+    /// If this fails, the key is on its way back to the renderer.
+    #[test]
+    fn the_key_is_on_the_never_sent_list() {
+        assert!(crate::store::SECRET_SETTINGS.contains(&KEY_SECRET));
+    }
 
     #[test]
     fn wav_header_matches_the_samples() {

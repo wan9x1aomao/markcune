@@ -35,6 +35,7 @@ const TIMEOUT_REWRITE: u64 = 45;
 
 const KEY_BASE: &str = "ai.baseUrl";
 const KEY_MODEL: &str = "ai.model";
+// 也在 `store::SECRET_SETTINGS` 里：window_init 回给页面之前会把它滤掉，别只改这一处。
 const KEY_SECRET: &str = "ai.apiKey";
 const KEY_COMPLETION: &str = "ai.completion";
 const KEY_CUSTOM: &str = "ai.custom";
@@ -639,6 +640,13 @@ pub async fn ai_label(app: AppHandle, lines: Vec<String>) -> Result<Vec<String>,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The page must never learn the key; `window_init` filters settings through that list.
+    /// If this fails, the key is on its way back to the renderer.
+    #[test]
+    fn the_key_is_on_the_never_sent_list() {
+        assert!(crate::store::SECRET_SETTINGS.contains(&KEY_SECRET));
+    }
 
     #[test]
     fn labels_come_from_an_object_or_a_bare_array() {

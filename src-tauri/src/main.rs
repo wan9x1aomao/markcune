@@ -327,7 +327,9 @@ fn window_init(window: WebviewWindow) -> InitData {
     let store = state.store.lock().unwrap();
     InitData {
         startup,
-        settings: store.settings.clone(),
+        // 页面只拿界面偏好。`ai.apiKey` / `voice.apiKey` 也存在 settings 里，但它们属于外壳：
+        // 过滤在 Store::public_settings 一处完成，以后再加凭据也只需要改那里。
+        settings: store.public_settings(),
         recent_files: store.recent_files.clone(),
         recent_folders: store.recent_folders.clone(),
         pinned_files,

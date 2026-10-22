@@ -5,6 +5,9 @@ import { installReview } from './ai-review.js';
 import { installAiActions, skillCommands } from './ai-skills.js';
 import { openAiSettings } from './ai-settings.js';
 import { COMMANDS } from './commands.js';
+import { paletteCommands } from './discovery.js';
+import { createHints } from './hints.js';
+import { openHelp } from './help.js';
 import { createRichEditor } from './editor.js';
 import { createFindbar } from './findbar.js';
 import { icons } from './icons.js';
@@ -28,6 +31,7 @@ primeTheme();
 
 const AUTOSAVE_DELAY = 1000;
 const CHANGELOG_URL = 'https://mdpad.app.workbuddy.host/#changelog';
+const HOMEPAGE_URL = 'https://mdpad.app.workbuddy.host';
 const isMac = navigator.userAgent.includes('Mac');
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -455,6 +459,7 @@ async function saveAs() {
     return false;
   }
   if (!result) return false;
+  const untitled = !app.doc.path;
   app.doc = { path: result.path, draftId: null, raw: result.content, snapshot, saved: result.content };
   app.hasDraftContent = false;
   app.pending = false;
@@ -465,9 +470,13 @@ async function saveAs() {
   }
   setStatus('saved');
   updateTitle();
-  if (!app.root || !isInside(result.path, app.root)) await setRoot(dirname(result.path));
+  if (!app.root || !isInside(result.path, app.root)) await setRoot(dirname(result.path), { quiet: true });
   else await sidebar.refreshDirs([dirname(result.path)]);
   await sidebar.setActive(result.path);
+  // The document has a home on disk now; pinning is the feature people miss at exactly this point.
+  if (untitled) {
+    hints.once('hintSavedSeen', '已保存到磁盘。常用文件可以在 ⋯ 菜单里「置顶此文件」，固定到左侧。');
+  }
   return true;
 }
 
@@ -491,12 +500,15 @@ function rememberPosition() {
   if (app.doc.path && app.editor) api.rememberPosition(app.doc.path, app.editor.getPosition());
 }
 
-async function setRoot(path) {
+async function setRoot(path, { quiet = false } = {}) {
   app.root = path;
   app.documents = null;
   await api.setRoot(path);
   await sidebar.setRoot(path);
   if (app.doc.path) await sidebar.setActive(app.doc.path);
+  // A folder tree just appeared for the first time: that is the one moment the outline is worth
+  // explaining. `quiet` keeps this out of save-as, where the tree is a side effect.
+  if (!quiet) hints.once('hintFolderSeen', '文件夹已打开。右上角的「大纲」能列出所有章节，点一下直接跳过去。');
 }
 
 /** Shows the progress bar while `task` runs, unless it finishes quickly. */
@@ -967,6 +979,8 @@ const actions = {
   save: saveNow,
   'save-as': saveAs,
   rename: renameCurrent,
+  'pin-file': pinCurrent,
+  'unpin-file': () => app.doc.path && unpinPath(app.doc.path),
   reveal: () => (app.doc.path || app.root) && api.reveal(app.doc.path ?? app.root),
   'export-html': exportHtml,
   'export-word': exportWord,
@@ -1006,6 +1020,8 @@ const actions = {
   'toggle-outline': () => setPanel('outline', !app.settings.outline),
   'check-update': () => updater.check(false),
   changelog: () => api.openUrl(CHANGELOG_URL),
+  website: () => api.openUrl(HOMEPAGE_URL),
+  help: () => openHelp({ run, onClose: () => app.editor?.focus() }),
   // Handled by the shell (native menu items on macOS).
   'zoom-in': () => api.nativeAction('zoom-in'),
   'zoom-out': () => api.nativeAction('zoom-out'),
@@ -1030,7 +1046,7 @@ function showPalette(mode) {
   openPalette({
     mode,
     commands: [
-      ...COMMANDS.map((c) => ({ title: c.title, hint: formatKeys(c.keys), run: () => run(c.id) })),
+      ...paletteCommands(run),
       // Rewrite skills live here too, so a keyboard user never needs the floating button.
       ...(mode === 'all' && ai.available() && app.editor?.kind === 'rich' ? skillCommands(app.editor.view) : []),
     ],
@@ -1082,12 +1098,14 @@ function showMore(anchor) {
       ...(app.doc.path
         ? [
             isPinned(app.doc.path)
-              ? { label: '取消置顶', run: () => unpinPath(app.doc.path) }
-              : { label: '置顶此文件', run: pinCurrent },
+              ? item('unpin-file')
+              : item('pin-file'),
           ]
         : []),
       'separator',
       { label: '命令面板…', hint: formatKeys('Mod+K'), run: () => run('command-palette') },
+      item('help'),
+      item('changelog'),
       item('check-update'),
       // Preferences (theme, panels, AI, updates) live behind one entry instead of crowding this list.
       item('settings'),
@@ -1244,6 +1262,14 @@ document.documentElement.classList.add(init.platform);
 if (!isMac) installShortcuts({ run, isRichEditor: () => app.editor?.kind === 'rich' });
 if (init.platform === 'windows') setupWindowControls();
 app.settings = { ...app.settings, ...init.settings };
+// One-time tips: each shows once per profile and is remembered locally (no telemetry). Created
+// after the settings merge so the object it writes to is the one the page keeps using.
+const hints = createHints({ settings: app.settings, persist: (key, value) => api.setSetting(key, value), toast });
+// The empty screen's low-key line is static markup; fill in the platform's key names once.
+const emptyHint = $('empty-hint');
+emptyHint.querySelector('.keys').textContent =
+  `${formatKeys('Mod+K')} 命令面板 · ${formatKeys('Mod+P')} 快速打开`;
+emptyHint.querySelector('button').addEventListener('click', () => run('command-palette'));
 // The store is the truth; the value mirrored in localStorage only covered the first paint.
 initTheme(init.settings?.theme);
 app.recentFiles = init.recentFiles;

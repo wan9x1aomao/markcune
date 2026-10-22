@@ -12,6 +12,8 @@ const EXTRA = {
   'Mod+-': 'zoom-out',
   'Mod+0': 'zoom-reset',
   F11: 'fullscreen',
+  // Windows/Linux have no Help menu; F1 is the desktop convention people try first.
+  F1: 'help',
 };
 // The editors already handle these themselves in rich mode.
 const EDITOR_KEYS = new Set(['bold', 'italic', 'strikethrough', 'inline-code']);

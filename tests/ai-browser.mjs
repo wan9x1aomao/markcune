@@ -1676,6 +1676,112 @@ try {
   check('置顶', '✕ 只取消置顶，点行才是打开', pinnedUi.calls.some((c) => c[0] === 'unpin')
     && pinnedUi.calls.some((c) => c[0] === 'open'), JSON.stringify(pinnedUi.calls));
 
+  // ============================== 可发现性 ==============================
+  // 1. 命令面板是功能目录：空查询分组、关键词搜索、快捷键展示、点行执行。
+  // 2. 键盘快捷键与功能：按用途分组、点行执行、Esc 关闭。
+  // 3. 一次性提示：同一条只出现一次，记在本地设置里。
+  await fresh();
+  const discover = await run(`(async () => {
+    const { COMMANDS } = await import('/commands.js');
+    const { paletteCommands, helpGroups } = await import('/discovery.js');
+    const { openPalette } = await import('/palette.js');
+    const { openHelp } = await import('/help.js');
+    const { createHints } = await import('/hints.js');
+
+    const calls = [];
+    const run = (id) => calls.push(id);
+    const labels = () => [...document.querySelectorAll('.palette .result .label')].map((el) => el.textContent);
+    const groupNames = () => [...document.querySelectorAll('.palette .group')].map((el) => el.textContent);
+    const type = (value) => {
+      const input = document.querySelector('.palette input');
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+    };
+    const openCommands = async () => {
+      document.querySelector('.palette-overlay')?.remove();
+      openPalette({ mode: 'all', commands: paletteCommands(run), recent: [], files: async () => [] });
+      await new Promise((r) => setTimeout(r, 80));
+    };
+
+    await openCommands();
+    const initialGroups = groupNames();
+    const initialLabels = labels();
+
+    type('docx');
+    await new Promise((r) => setTimeout(r, 60));
+    const docx = labels();
+    type('置顶');
+    await new Promise((r) => setTimeout(r, 60));
+    const pin = labels();
+    type('pdf');
+    await new Promise((r) => setTimeout(r, 60));
+    const pdf = labels();
+    type('命令面板');
+    await new Promise((r) => setTimeout(r, 60));
+    const palette = labels();
+
+    await openCommands();
+    const saveRow = [...document.querySelectorAll('.palette .result')]
+      .find((row) => row.querySelector('.label').textContent === '保存');
+    const saveHint = saveRow?.querySelector('.hint').textContent ?? '';
+    saveRow?.click();
+    const clickedSave = calls.includes('save');
+
+    const help = openHelp({ run: (id) => calls.push('help:' + id) });
+    await new Promise((r) => setTimeout(r, 60));
+    const helpGroupNames = [...document.querySelectorAll('.help-group h3')].map((el) => el.textContent);
+    const helpRows = [...document.querySelectorAll('.help-row')];
+    const saveHelpRow = helpRows.find((row) => row.querySelector('.label').textContent === '保存');
+    const saveHelpKeys = saveHelpRow?.querySelector('.keys').textContent ?? '';
+    saveHelpRow?.click();
+    const helpClosedByRow = !document.querySelector('.help-overlay');
+    openHelp({ run: () => {} });
+    const helpOpenAgain = !!document.querySelector('.help-overlay');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const helpClosedByEsc = !document.querySelector('.help-overlay');
+
+    const persisted = [];
+    const shown = [];
+    const settings = {};
+    const hints = createHints({ settings, persist: (key, value) => persisted.push([key, value]), toast: (m) => shown.push(m) });
+    const first = hints.once('hintFolderSeen', '第一次');
+    const second = hints.once('hintFolderSeen', '第二次');
+    const other = hints.once('hintSavedSeen', '另一条');
+
+    document.querySelector('.overlay.help-overlay')?.remove();
+    document.querySelector('.overlay.palette-overlay')?.remove();
+    return {
+      registryComplete: COMMANDS.every((c) => c.id && c.title && c.group && c.keywords),
+      commandCount: COMMANDS.length,
+      initialGroups, initialLabels, docx, pin, pdf, palette,
+      saveHint, clickedSave,
+      helpGroups: helpGroups().length, helpGroupNames, saveHelpKeys, helpClosedByRow, helpOpenAgain, helpClosedByEsc,
+      hints: { first, second, other, persisted, shown, remembered: settings.hintFolderSeen },
+    };
+  })()`);
+  check('发现', '每条命令都有分组和搜索关键词', discover.registryComplete === true, `${discover.commandCount} 条命令`);
+  check('发现', '命令面板空查询先给「常用」，再给「全部命令」',
+    discover.initialGroups?.[0] === '常用' && discover.initialGroups?.[1] === '全部命令'
+    && discover.initialLabels?.includes('打开文件…'), JSON.stringify(discover.initialGroups));
+  check('发现', '搜英文关键词能找到命令（docx → 导出为 Word）',
+    discover.docx?.some((label) => label.includes('Word')), JSON.stringify(discover.docx));
+  check('发现', '搜中文关键词能找到命令（置顶 / pdf / 命令面板）',
+    discover.pin?.some((label) => label.includes('置顶'))
+    && discover.pdf?.some((label) => label.includes('PDF'))
+    && discover.palette?.some((label) => label.includes('命令面板')), JSON.stringify({ pin: discover.pin, pdf: discover.pdf }));
+  check('发现', '命令行显示快捷键，点一下就执行',
+    discover.saveHint !== '' && discover.clickedSave === true, `hint=${discover.saveHint}`);
+  check('发现', '键盘快捷键与功能按用途分组', discover.helpGroups >= 7
+    && discover.helpGroupNames?.includes('文件') && discover.helpGroupNames?.includes('导出')
+    && discover.helpGroupNames?.includes('设置与帮助'), JSON.stringify(discover.helpGroupNames));
+  check('发现', '帮助里每行带快捷键，点行执行并收起', discover.saveHelpKeys !== ''
+    && discover.helpClosedByRow === true, `keys=${discover.saveHelpKeys}`);
+  check('发现', '帮助面板 Esc 关闭', discover.helpOpenAgain === true && discover.helpClosedByEsc === true,
+    JSON.stringify({ open: discover.helpOpenAgain, closed: discover.helpClosedByEsc }));
+  check('发现', '一次性提示只出现一次并记在本地', discover.hints.first === true && discover.hints.second === false
+    && discover.hints.other === true && discover.hints.persisted.length === 2
+    && discover.hints.shown.length === 2 && discover.hints.remembered === true, JSON.stringify(discover.hints));
+
   // ============================== 汇总 ==============================
   const failed = results.filter((r) => !r.pass);
   console.log(`\n${results.length - failed.length}/${results.length} 通过`);

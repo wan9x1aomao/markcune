@@ -288,14 +288,19 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         &item("fullscreen", "切换全屏幕", Some(if mac { "Ctrl+Cmd+F" } else { "F11" }))?,
     ])?)?;
 
-    if !mac {
-        menu.append(&Submenu::with_items(app, "帮助", true, &[&item("check-update", "检查更新…", None)?, &item("changelog", "更新日志", None)?])?)?;
-    }
-
     #[cfg(target_os = "macos")]
     menu.append(&Submenu::with_id_and_items(app, tauri::menu::WINDOW_SUBMENU_ID, "窗口", true, &[
         &PredefinedMenuItem::minimize(app, Some("最小化"))?,
         &PredefinedMenuItem::maximize(app, Some("缩放"))?,
+    ])?)?;
+
+    // macOS wants the Help menu last. Windows and Linux have no menu bar at all — their entries
+    // live in the page's "···" menu, which reads the same command ids.
+    #[cfg(target_os = "macos")]
+    menu.append(&Submenu::with_items(app, "帮助", true, &[
+        &item("help", "键盘快捷键与功能…", None)?,
+        &item("changelog", "更新日志", None)?,
+        &item("website", "MDPad 官网", None)?,
     ])?)?;
 
     Ok(menu)

@@ -6,13 +6,17 @@ function score(item, query) {
   const title = item.title.toLowerCase();
   if (title.startsWith(query)) return 0;
   if (title.includes(query)) return 1;
-  if (item.hint?.toLowerCase().includes(query)) return 2;
+  // What makes the palette a directory instead of a memory test: "word", "pdf", "置顶" find the
+  // command even when the title says 导出为 Word / 导出为 PDF / 置顶此文件.
+  if (item.keywords?.toLowerCase().includes(query)) return 2;
+  if (item.hint?.toLowerCase().includes(query)) return 3;
   return -1;
 }
 
 /**
  * mode: 'all' (commands and files) or 'files'.
- * commands: [{ title, hint, run }]; files(): Promise<[{ title, hint, run }]>; recent: same shape.
+ * commands: [{ title, hint, keywords?, common?, run }]; files(): Promise<[{ title, hint, run }]>;
+ * recent: same shape.
  */
 export function openPalette({ mode, commands, files, recent }) {
   document.querySelector('.overlay.palette-overlay')?.remove();
@@ -42,7 +46,15 @@ export function openPalette({ mode, commands, files, recent }) {
         .filter(({ s }) => s >= 0)
         .sort((a, b) => a.s - b.s)
         .map(({ item }) => item);
-    if (mode === 'all') groups.push(['命令', pick(commands)]);
+    if (mode === 'all') {
+      if (query) groups.push(['命令', pick(commands)]);
+      else {
+        // Nothing typed yet: start people at the few entries a document needs, and keep the rest
+        // right below so the palette still reads as the complete function list.
+        groups.push(['常用', pick(commands.filter((item) => item.common))]);
+        groups.push(['全部命令', pick(commands.filter((item) => !item.common))]);
+      }
+    }
     if (!query && recent.length) groups.push(['最近的文件', recent]);
     if (query || mode === 'files') {
       const recentTitles = new Set(query ? [] : recent.map((r) => r.hint + r.title));

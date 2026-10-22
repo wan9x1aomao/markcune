@@ -828,6 +828,9 @@ fn main() {
                 fs_events: watch::start_debouncer(app.handle().clone()),
                 drafts_dir: data_dir.join("drafts"),
             });
+            // A downloaded installer lives in a temp file; one left by a session that ended without
+            // installing it is dead weight from the previous version.
+            update::clean_staging(app.handle());
             Ok(())
         })
         .on_window_event(on_window_event)

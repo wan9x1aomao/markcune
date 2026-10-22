@@ -35,10 +35,20 @@ const KEY_LAST_OK: &str = "lastUpdateCheck";
 const KEY_LAST_FAIL: &str = "lastUpdateFailedAt";
 const KEY_LAST_ERROR: &str = "lastUpdateError";
 
+/// Where a verified installer waits between "downloaded" and "restart to install".
+///
+/// It used to stay in memory: a 6 MB (macOS / Windows) or 80 MB (Linux AppImage) `Vec<u8>` held for
+/// the rest of the session, because people postpone the restart. Now it goes to a temp file next to
+/// the drafts and is read back once, at install time.
+enum Staged {
+    File(std::path::PathBuf),
+    Memory(Vec<u8>),
+}
+
 #[derive(Default)]
 pub struct UpdateState {
     available: Mutex<Option<Update>>,
-    downloaded: Mutex<Option<(Update, Vec<u8>)>>,
+    downloaded: Mutex<Option<(Update, Staged)>>,
     install_on_exit: AtomicBool,
     /// One check in flight at a time: launch, window focus and the manual entry all land here.
     checking: AtomicBool,
@@ -220,7 +230,17 @@ pub async fn download_update(window: WebviewWindow) -> Result<String, String> {
     match result {
         Ok(bytes) => {
             let version = update.version.clone();
-            *state.downloaded.lock().unwrap() = Some((update, bytes));
+            let path = staging_path(&app, &version);
+            // Keep the verified installer off the heap: it can be up to ~80 MB (Linux AppImage) and
+            // someone who postpones the restart would otherwise carry it for the whole session.
+            let staged = match std::fs::write(&path, &bytes) {
+                Ok(()) => Staged::File(path),
+                Err(err) => {
+                    eprintln!("update: 无法暂存更新包，保留在内存里：{err}");
+                    Staged::Memory(bytes)
+                }
+            };
+            *state.downloaded.lock().unwrap() = Some((update, staged));
             Ok(version)
         }
         Err(err) => {
@@ -243,11 +263,46 @@ pub fn install_pending(app: &AppHandle) -> bool {
     app.state::<UpdateState>().install_on_exit.load(Ordering::Relaxed)
 }
 
+/// Path of the temp file a downloaded installer waits in. Next to the drafts folder, so it shares
+/// the data directory's lifetime and never lands somewhere shared.
+fn staging_path(app: &AppHandle, version: &str) -> std::path::PathBuf {
+    app_state(app).drafts_dir.with_file_name(format!("update-{version}.bin"))
+}
+
+/// Whether a file in the data directory is one of our downloaded installers.
+fn is_staged_update(name: &str) -> bool {
+    name.starts_with("update-") && name.ends_with(".bin")
+}
+
+/// Removes installers from a session that ended without installing them.
+pub fn clean_staging(app: &AppHandle) {
+    let drafts = app_state(app).drafts_dir.clone();
+    let dir = drafts.parent().map(std::path::Path::to_path_buf).unwrap_or(drafts);
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        if is_staged_update(&entry.file_name().to_string_lossy()) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Installs the downloaded update and relaunches. Returns only if installing failed.
 pub fn install_and_restart(app: &AppHandle) {
     let state = app.state::<UpdateState>();
     state.install_on_exit.store(false, Ordering::Relaxed);
-    let Some((update, bytes)) = state.downloaded.lock().unwrap().take() else { return };
+    let Some((update, staged)) = state.downloaded.lock().unwrap().take() else { return };
+    let bytes = match staged {
+        Staged::File(path) => {
+            let bytes = std::fs::read(&path).ok();
+            let _ = std::fs::remove_file(&path);
+            bytes
+        }
+        Staged::Memory(bytes) => Some(bytes),
+    };
+    let Some(bytes) = bytes else {
+        eprintln!("update: 暂存的更新包不见了，已取消安装");
+        return;
+    };
     match update.install(bytes) {
         Ok(()) => app.restart(),
         Err(err) => eprintln!("failed to install update: {err}"),
@@ -279,5 +334,14 @@ mod tests {
     fn a_failure_waits_ten_minutes() {
         assert!(!auto_check_due(NOW, 0, NOW - 9 * MIN));
         assert!(auto_check_due(NOW, 0, NOW - 10 * MIN));
+    }
+
+    /// Only our own staging files may be deleted on startup; the drafts folder shares the directory.
+    #[test]
+    fn only_staged_installers_are_cleaned_up() {
+        assert!(is_staged_update("update-3.5.4.bin"));
+        assert!(!is_staged_update("state.json"));
+        assert!(!is_staged_update("1700000000000-0.md"));
+        assert!(!is_staged_update("update-notes.txt"));
     }
 }

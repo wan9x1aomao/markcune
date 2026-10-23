@@ -1804,6 +1804,56 @@ try {
   check('跨平台', 'Windows/Linux 的 Ctrl+K 打开命令面板', winKeys.ctrlK === true
     && winKeys.calls.includes('command-palette'), JSON.stringify({ ctrlK: winKeys.ctrlK, calls: winKeys.calls }));
 
+  // ============================== 导出 PDF ==============================
+  // The failure this guards: WebKit clips anything inside an overflow:hidden box once the box crosses
+  // a page boundary, so a long table or code block came out of the PDF cut in half. The print
+  // stylesheet has to let those boxes split and stop clipping them.
+  await fresh();
+  const printLayout = await run(`(async () => {
+    const fence = String.fromCharCode(96).repeat(3);
+    const md = '# 标题\\n\\n| A | B |\\n| --- | --- |\\n| 1 | 2 |\\n\\n' + fence + 'js\\nconsole.log(1);\\n' + fence + '\\n';
+    window.__lab.setDoc(md);
+    await new Promise((r) => setTimeout(r, 400));
+    const { buildHtml } = await import('/export.js');
+    const html = await buildHtml(window.__lab.view.state.doc, '测试', { image: async (s) => s, diagram: async () => '' });
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;left:-9999px;top:0;width:800px;height:600px';
+    document.body.appendChild(frame);
+    frame.srcdoc = html;
+    await new Promise((resolve) => frame.addEventListener('load', resolve, { once: true }));
+    const doc = frame.contentDocument;
+    window.__printFrame = frame;
+    return {
+      hasTable: !!doc.querySelector('table'),
+      hasCode: !!doc.querySelector('figure.code'),
+    };
+  })()`);
+  await page.send('Emulation.setEmulatedMedia', { media: 'print' });
+  await sleep(250);
+  const printStyles = await run(`(() => {
+    const frame = window.__printFrame;
+    const doc = frame.contentDocument;
+    const cs = (el) => (el ? getComputedStyle(el) : null);
+    const table = doc.querySelector('table');
+    const code = doc.querySelector('figure.code');
+    const cell = doc.querySelector('td');
+    return {
+      tableOverflow: cs(table)?.overflow,
+      tableBreak: cs(table)?.breakInside,
+      codeOverflow: cs(code)?.overflow,
+      codeBreak: cs(code)?.breakInside,
+      cellWrap: cs(cell)?.overflowWrap,
+    };
+  })()`);
+  await page.send('Emulation.setEmulatedMedia', { media: '' });
+  await run(`(() => { window.__printFrame?.remove(); delete window.__printFrame; })()`);
+  check('导出 PDF', '导出内容是完整文档（表格与代码块都在）',
+    printLayout.hasTable === true && printLayout.hasCode === true, JSON.stringify(printLayout));
+  check('导出 PDF', '打印时表格与代码块可跨页、不再被裁掉',
+    printStyles.tableOverflow === 'visible' && printStyles.tableBreak === 'auto'
+    && printStyles.codeOverflow === 'visible' && printStyles.codeBreak === 'auto'
+    && printStyles.cellWrap === 'anywhere', JSON.stringify(printStyles));
+
   // ============================== 汇总 ==============================
   const failed = results.filter((r) => !r.pass);
   console.log(`\n${results.length - failed.length}/${results.length} 通过`);

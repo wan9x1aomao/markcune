@@ -255,8 +255,20 @@ const printRules = (prefix) => `
   ${prefix}${SCOPE} { max-width: none; padding: 0; font-size: 11pt; }
   ${prefix}${SCOPE} * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   ${prefix}${SCOPE} h1, ${prefix}${SCOPE} h2, ${prefix}${SCOPE} h3, ${prefix}${SCOPE} h4 { break-after: avoid; page-break-after: avoid; }
-  ${prefix}${SCOPE} figure, ${prefix}${SCOPE} tr, ${prefix}${SCOPE} img, ${prefix}${SCOPE} blockquote, ${prefix}${SCOPE} .math-block, ${prefix}${SCOPE} li.task { break-inside: avoid; page-break-inside: avoid; }
+  /* Anything that can be taller than one page has to be allowed to split. WebKit clips the rest of
+     an overflow:hidden box once it crosses a page boundary and refuses to break inside a box marked
+     break-inside: avoid — long tables and code blocks were the ones coming out incomplete. */
+  ${prefix}${SCOPE} figure, ${prefix}${SCOPE} table, ${prefix}${SCOPE} blockquote { break-inside: auto; page-break-inside: auto; }
+  ${prefix}${SCOPE} figure.code, ${prefix}${SCOPE} figure.code pre,
+  ${prefix}${SCOPE} table, ${prefix}${SCOPE} .math-block { overflow: visible; }
+  ${prefix}${SCOPE} figure.code, ${prefix}${SCOPE} table { border-radius: 0; }
+  /* Things that fit on one page keep their no-split rule; oversized images must at least scale. */
+  ${prefix}${SCOPE} tr, ${prefix}${SCOPE} img, ${prefix}${SCOPE} blockquote > :first-child,
+  ${prefix}${SCOPE} .math-block, ${prefix}${SCOPE} li.task,
+  ${prefix}${SCOPE} figure.image, ${prefix}${SCOPE} figure.diagram { break-inside: avoid; page-break-inside: avoid; }
+  ${prefix}${SCOPE} img, ${prefix}${SCOPE} figure.diagram svg { max-height: 23cm; }
   ${prefix}${SCOPE} figure.code pre { white-space: pre-wrap; word-break: break-all; }
+  ${prefix}${SCOPE} th, ${prefix}${SCOPE} td { overflow-wrap: anywhere; }
   ${prefix}${SCOPE} thead { display: table-header-group; }
   ${prefix}${SCOPE} a { border-bottom: 0; }`;
 
@@ -266,7 +278,7 @@ const PRINT_CSS = `
 @media print {
   html, body { height: auto !important; overflow: visible !important; display: block !important; background: #fff !important; }
   body > *:not(#print-root) { display: none !important; }
-  #print-root { display: block !important; }
+  #print-root { display: block !important; position: static !important; height: auto !important; overflow: visible !important; }
 ${printRules('#print-root ')}
 }`;
 

@@ -19,12 +19,13 @@ import {
   toggleStrongCommand,
 } from '@milkdown/kit/preset/commonmark';
 import { toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
-import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state';
+import { AllSelection, Plugin, PluginKey, Selection, TextSelection } from '@milkdown/kit/prose/state';
 import { $prose, callCommand, replaceAll } from '@milkdown/kit/utils';
 import { ghostControls, ghostFeature } from './ai-ghost.js';
 import { proposalFeature } from './ai-proposal.js';
 import { slashItems } from './ai-skills.js';
 import { createLazy, lazyController } from './lazy.js';
+import { columnResizingPlugin, resizableTable } from './table.js';
 import { preserveMarkdown } from './markdown.js';
 import { codeTheme } from './code-theme.js';
 import { countMarkdownWords } from './count.js';
@@ -243,6 +244,122 @@ function changeWatcher(onChange) {
  * uploadImage(file), pickImage(), promptCaption(caption), renderDiagram(language, code),
  * onChange(), onCopy(text), onOpenLink(url).
  */
+/**
+ * Lets a press beside the text start a selection.
+ *
+ * Chromium (and therefore WebView2 on Windows) does not begin a text selection when the mousedown
+ * lands in the editor's padding box; WebKit does. Selecting from the left margin then takes several
+ * tries on Windows and works first time on macOS. Presses that hit the editor box itself are handled
+ * here: the caret goes to the nearest text position and the drag is extended by hand. Presses on
+ * text keep the browser's own selection behaviour.
+ */
+function installMarginSelection(view, scroller) {
+  let drag = null;
+
+  /** Bottom edge of the last rendered block; below it a drag should end at the document end. */
+  const lastBottom = () => {
+    const last = view.dom.lastElementChild;
+    return last ? last.getBoundingClientRect().bottom : view.dom.getBoundingClientRect().top;
+  };
+  const posAt = (x, y) => {
+    if (y > lastBottom()) return view.state.doc.content.size;
+    const hit = view.posAtCoords({ left: x, top: y });
+    return hit ? hit.pos : null;
+  };
+  const caretAt = (pos) => {
+    const { doc } = view.state;
+    const $pos = doc.resolve(Math.min(Math.max(pos, 0), doc.content.size));
+    // Bias forward: the padding box resolves to the boundary before the block, and the caret the
+    // user is asking for is the first position inside that block.
+    return Selection.near($pos, 1);
+  };
+  /** The text range of the top-level block at `pos`, for double clicks in the margin. */
+  const blockRangeAt = (pos) => {
+    const { doc } = view.state;
+    let start = 0;
+    for (let i = 0; i < doc.childCount; i++) {
+      const node = doc.child(i);
+      if (pos < start + node.nodeSize || i === doc.childCount - 1) {
+        const from = start + 1;
+        const to = start + node.nodeSize - 1;
+        return from < to && node.isTextblock ? TextSelection.create(doc, from, to) : null;
+      }
+      start += node.nodeSize;
+    }
+    return null;
+  };
+  const extendTo = (x, y) => {
+    if (!drag) return;
+    const head = posAt(x, y);
+    if (head == null) return;
+    drag.lastX = x;
+    drag.lastY = y;
+    const { doc, selection } = view.state;
+    // TextSelection.between normalises the block boundaries the padding box tends to resolve to.
+    const next = TextSelection.between(doc.resolve(drag.anchor), doc.resolve(head), drag.anchor > head ? -1 : 1);
+    if (!selection.eq(next)) view.dispatch(view.state.tr.setSelection(next).scrollIntoView());
+  };
+  /** Dragging past the visible edge keeps selecting, so a whole long document can be picked. */
+  const autoScroll = () => {
+    if (!drag) return;
+    const box = scroller.getBoundingClientRect();
+    const edge = 32;
+    const over = drag.lastY - (box.bottom - edge);
+    const under = box.top + edge - drag.lastY;
+    const delta = over > 0 ? Math.min(48, over / 2) : under > 0 ? -Math.min(48, under / 2) : 0;
+    if (delta) {
+      const before = scroller.scrollTop;
+      scroller.scrollTop = before + delta;
+      if (scroller.scrollTop !== before) extendTo(drag.lastX, drag.lastY);
+    }
+    drag.frame = requestAnimationFrame(autoScroll);
+  };
+  const onMove = (event) => extendTo(event.clientX, event.clientY);
+  const onUp = () => {
+    if (!drag) return;
+    cancelAnimationFrame(drag.frame);
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp, true);
+    drag = null;
+  };
+  const onDown = (event) => {
+    if (event.button !== 0 || event.target !== view.dom || event.isComposing) return;
+    const pos = posAt(event.clientX, event.clientY);
+    if (pos == null) return;
+    event.preventDefault();
+    view.focus();
+    const { doc, selection } = view.state;
+    if (event.detail >= 3) {
+      view.dispatch(view.state.tr.setSelection(new AllSelection(doc)));
+      return;
+    }
+    if (event.detail === 2) {
+      const range = blockRangeAt(pos);
+      if (range) view.dispatch(view.state.tr.setSelection(range));
+      return;
+    }
+    if (event.shiftKey && !selection.empty) {
+      const next = TextSelection.between(doc.resolve(selection.anchor), doc.resolve(pos));
+      view.dispatch(view.state.tr.setSelection(next));
+      return;
+    }
+    view.dispatch(view.state.tr.setSelection(caretAt(pos)));
+    drag = {
+      anchor: view.state.selection.from,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      frame: requestAnimationFrame(autoScroll),
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp, true);
+  };
+  view.dom.addEventListener('mousedown', onDown);
+  return () => {
+    view.dom.removeEventListener('mousedown', onDown);
+    onUp();
+  };
+}
+
 export async function createRichEditor(options) {
   const { root, content, readonly = false, scroller } = options;
   const crepe = new Crepe({
@@ -363,6 +480,9 @@ export async function createRichEditor(options) {
     .use(proposalFeature)
     .use(ghostFeature)
     .use(imageActions({ onReplace: options.pickImage, onCaption: options.promptCaption }))
+    // Draggable column borders: our node view gives the stock plugin the colgroup it expects.
+    .use(resizableTable)
+    .use(columnResizingPlugin)
     .use(syncHeadingIds)
     .use(syncListOrder)
     .use(changeWatcher(() => options.onChange?.()));
@@ -374,6 +494,7 @@ export async function createRichEditor(options) {
   if (readonly) crepe.setReadonly(true);
 
   const view = crepe.editor.action((ctx) => ctx.get(editorViewCtx));
+  installMarginSelection(view, scroller);
   const { serialize, serializeAsync, warm } = crepe.editor.action(incrementalSerializer);
   // Fill the markdown cache in small slices while idle, so the first save is cheap too.
   let warmTimer = setTimeout(function warmUp() {

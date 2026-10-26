@@ -1516,6 +1516,24 @@ body.empty #mode-switch {
   background: var(--hover);
   font-weight: 600;
 }
+/* Tables fit the text column and size columns to content; once a column has been dragged, the
+   colgroup written by src/table.js takes over and the table keeps the chosen pixel widths. */
+#editor .milkdown .milkdown-table-block .table-wrapper {
+  overflow-x: auto;
+}
+#editor .milkdown .milkdown-table-block table {
+  table-layout: auto;
+  width: 100%;
+}
+#editor .milkdown .milkdown-table-block table:has(> colgroup > col[style*='width']) {
+  table-layout: fixed;
+}
+#editor .milkdown .milkdown-table-block th,
+#editor .milkdown .milkdown-table-block td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: middle;
+}
 #editor .milkdown .ProseMirror :not(pre) > code {
   padding: 0.12em 0.38em;
   border-radius: 6px;

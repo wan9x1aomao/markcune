@@ -17,6 +17,7 @@ import { openPalette } from './palette.js';
 import { basename, dirname, isInside, relative, samePath, splitExtension } from './paths.js';
 import { installShortcuts } from './shortcuts.js';
 import { createSidebar } from './sidebar.js';
+import { readTableWidths, restoreTableWidths } from './table.js';
 import { createUpdater } from './update.js';
 import { formatKeys, prompt, showMenu, toast } from './ui.js';
 import { createVoiceInput } from './voice.js';
@@ -90,6 +91,45 @@ const app = {
   /** [{path, name, dir, exists}] — bookmarks drawn above the tree; see src-tauri/src/pinned.rs. */
   pinned: [],
 };
+
+// Table widths: markdown has no column-width field, but dragging a column should survive mode
+// switches and reopening the document, so the widths live in the app settings keyed by document.
+let tableWidths = {};
+const tableDocKey = () => app.doc.path ?? `draft:${app.doc.draftId ?? 'untitled'}`;
+function persistTableWidths() {
+  app.settings.tableWidths = tableWidths;
+  api.setSetting('tableWidths', tableWidths);
+}
+function moveTableWidths(fromKey, toKey) {
+  if (!fromKey || fromKey === toKey || !tableWidths[fromKey]) return;
+  tableWidths[toKey] = tableWidths[fromKey];
+  delete tableWidths[fromKey];
+  persistTableWidths();
+}
+let tableWidthTimer;
+/** After a resize, remember what every table in this document currently shows. */
+function scheduleTableWidths() {
+  clearTimeout(tableWidthTimer);
+  tableWidthTimer = setTimeout(() => {
+    const editor = app.editor;
+    if (!editor || editor.kind !== 'rich') return;
+    const key = tableDocKey();
+    const widths = readTableWidths(editor.view);
+    const current = tableWidths[key];
+    if (widths.some(Boolean)) {
+      if (JSON.stringify(current) === JSON.stringify(widths)) return;
+      // Keep the store small: it is a convenience, not a document archive.
+      const keys = Object.keys(tableWidths);
+      if (!(key in tableWidths) && keys.length >= 40) delete tableWidths[keys[0]];
+      tableWidths[key] = widths;
+    } else if (current) {
+      delete tableWidths[key];
+    } else {
+      return;
+    }
+    persistTableWidths();
+  }, 500);
+}
 
 // Status, title and close guard
 
@@ -310,9 +350,16 @@ async function mountEditor(content, position) {
         readonly: true,
         scroller: els.richPane,
       });
+      const previewWidths = tableWidths[tableDocKey()];
+      if (previewWidths) restoreTableWidths(app.preview.view, previewWidths);
     }
   } else {
     editor = await createRichEditor({ ...editorOptions(), root: els.editorRoot, content, scroller: els.richPane, onChange });
+  }
+  // Restore remembered table widths before the baseline snapshot, so this never reads as an edit.
+  if (editor.kind === 'rich') {
+    const widths = tableWidths[tableDocKey()];
+    if (widths) restoreTableWidths(editor.view, widths);
   }
   performance.mark('mdpad:mount-created');
   app.doc.snapshot = editor.snapshot();
@@ -367,6 +414,7 @@ function onChange() {
   scheduleOutline();
   schedulePreview();
   updateGuard();
+  scheduleTableWidths();
   tidyHint.schedule();
 }
 
@@ -460,7 +508,9 @@ async function saveAs() {
   }
   if (!result) return false;
   const untitled = !app.doc.path;
+  const previousKey = tableDocKey();
   app.doc = { path: result.path, draftId: null, raw: result.content, snapshot, saved: result.content };
+  moveTableWidths(previousKey, tableDocKey());
   app.hasDraftContent = false;
   app.pending = false;
   hideBanner();
@@ -603,7 +653,9 @@ async function newDocument(dir) {
 
 function onRenamed(from, to) {
   if (app.doc.path && (samePath(app.doc.path, from) || isInside(app.doc.path, from))) {
+    const previousKey = tableDocKey();
     app.doc.path = to + app.doc.path.slice(from.length);
+    moveTableWidths(previousKey, tableDocKey());
     updateTitle();
     sidebar.setActive(app.doc.path);
   }
@@ -1272,6 +1324,7 @@ document.documentElement.classList.add(init.platform);
 if (!isMac) installShortcuts({ run, isRichEditor: () => app.editor?.kind === 'rich' });
 if (init.platform === 'windows') setupWindowControls();
 app.settings = { ...app.settings, ...init.settings };
+tableWidths = { ...(init.settings?.tableWidths ?? {}) };
 // One-time tips: each shows once per profile and is remembered locally (no telemetry). Created
 // after the settings merge so the object it writes to is the one the page keeps using.
 const hints = createHints({ settings: app.settings, persist: (key, value) => api.setSetting(key, value), toast });

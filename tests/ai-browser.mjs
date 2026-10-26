@@ -1854,6 +1854,143 @@ try {
     && printStyles.codeOverflow === 'visible' && printStyles.codeBreak === 'auto'
     && printStyles.cellWrap === 'anywhere', JSON.stringify(printStyles));
 
+  // ============================== 选中（Windows 反馈：左边距拖选失效） ==============================
+  // Chromium/WebView2 does not start a text selection from a mousedown in the editor's padding box;
+  // WebKit does. The app installs its own drag for that case, and these checks drive real mouse
+  // input through CDP so the fallback is exercised end to end.
+  const marginDoc = ['# 标题', '', '第一段正文内容，用来测试点击与选中位置。', '', '第二段正文内容，稍微长一点，方便看左侧边界。', '', '第三段。', ''].join('\n');
+  const loadMarginDoc = async () => {
+    await fresh();
+    const geo = await run(`(async () => {
+      window.__lab.setDoc(${JSON.stringify(marginDoc)});
+      await new Promise((r) => setTimeout(r, 500));
+      const ps = [...document.querySelectorAll('.ProseMirror p')];
+      const first = ps[0].getBoundingClientRect();
+      const last = ps[2].getBoundingClientRect();
+      const prose = document.querySelector('.ProseMirror').getBoundingClientRect();
+      return { left: first.left, y: first.top + first.height / 2, lastY: last.top + last.height / 2, bottom: prose.bottom, docEnd: window.__lab.view.state.doc.content.size };
+    })()`);
+    return geo;
+  };
+  const mouse = (type, x, y, extra = {}) =>
+    page.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', ...extra });
+  const marginDrag = async (geo, fromX, toX, toY) => {
+    await mouse('mousePressed', fromX, geo.y, { clickCount: 1 });
+    for (let i = 1; i <= 10; i++) {
+      await mouse('mouseMoved', fromX + ((toX - fromX) * i) / 10, geo.y + ((toY - geo.y) * i) / 10, { buttons: 1 });
+      await sleep(25);
+    }
+    await mouse('mouseReleased', toX, toY, { clickCount: 1 });
+    await sleep(300);
+    return run(`(() => { const v = window.__lab.view; const s = v.state.selection; return { from: s.from, to: s.to, empty: s.empty, parent: v.state.doc.resolve(s.from).parent.textContent.slice(0, 8), text: v.state.doc.textBetween(s.from, s.to, '\\n').slice(0, 200) }; })()`);
+  };
+
+  let geo = await loadMarginDoc();
+  await mouse('mousePressed', geo.left - 40, geo.y, { clickCount: 1 });
+  await mouse('mouseReleased', geo.left - 40, geo.y, { clickCount: 1 });
+  await sleep(300);
+  const marginCaret = await run(`(() => { const v = window.__lab.view; const s = v.state.selection; return { from: s.from, empty: s.empty, parent: v.state.doc.resolve(s.from).parent.textContent.slice(0, 8) }; })()`);
+  check('选中', '左边距单击把光标放到段首', marginCaret.empty === true && marginCaret.parent.includes('第一段'), JSON.stringify(marginCaret));
+
+  await sleep(400);
+  geo = await loadMarginDoc();
+  const marginAcross = await marginDrag(geo, geo.left - 40, geo.left + 200, geo.y);
+  check('选中', '从左边距拖进正文能选中文字', marginAcross.empty === false
+    && marginAcross.text.startsWith('第一段正文内容'), JSON.stringify(marginAcross));
+
+  await sleep(400);
+  geo = await loadMarginDoc();
+  const marginWhole = await marginDrag(geo, geo.left - 40, geo.left - 20, geo.bottom - 8);
+  check('选中', '从左边距一路拖到页底能跨段选中', marginWhole.empty === false
+    && marginWhole.text.includes('第一段正文内容') && marginWhole.text.includes('第三段'), JSON.stringify(marginWhole));
+
+  await sleep(400);
+  geo = await loadMarginDoc();
+  await mouse('mousePressed', geo.left + 2, geo.y, { clickCount: 1 });
+  for (const dx of [40, 100, 180]) {
+    await mouse('mouseMoved', geo.left + dx, geo.y, { buttons: 1 });
+    await sleep(25);
+  }
+  await mouse('mouseReleased', geo.left + 180, geo.y, { clickCount: 1 });
+  await sleep(300);
+  const textDrag = await run(`(() => { const s = window.__lab.view.state.selection; return { empty: s.empty, text: window.__lab.view.state.doc.textBetween(s.from, s.to, '\\n').slice(0, 20) }; })()`);
+  check('选中', '正文里的原生拖选没有被影响', textDrag.empty === false && textDrag.text.includes('正文内容'), JSON.stringify(textDrag));
+
+  await sleep(400);
+  geo = await loadMarginDoc();
+  await mouse('mousePressed', geo.left - 40, geo.y, { clickCount: 2 });
+  await mouse('mouseReleased', geo.left - 40, geo.y, { clickCount: 2 });
+  await sleep(300);
+  const marginDouble = await run(`(() => { const v = window.__lab.view; const s = v.state.selection; return { from: s.from, to: s.to, text: v.state.doc.textBetween(s.from, s.to, '\\n').slice(0, 40) }; })()`);
+  check('选中', '左边距双击选中整段', marginDouble.text.includes('第一段正文内容') && !marginDouble.text.includes('第二段'), JSON.stringify(marginDouble));
+
+  await sleep(400);
+  geo = await loadMarginDoc();
+  await mouse('mousePressed', geo.left - 40, geo.y, { clickCount: 3 });
+  await mouse('mouseReleased', geo.left - 40, geo.y, { clickCount: 3 });
+  await sleep(300);
+  const marginTriple = await run(`(() => { const v = window.__lab.view; const s = v.state.selection; return { text: v.state.doc.textBetween(s.from, s.to, '\\n') }; })()`);
+  check('选中', '左边距三连击选中全文', marginTriple.text.includes('标题') && marginTriple.text.includes('第三段'), JSON.stringify(marginTriple.text.slice(0, 30)));
+
+  // ============================== 表格 ==============================
+  await fresh();
+  const tableDoc = '# 表格\n\n| 甲 | 乙长一点 | 丙 |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n';
+  const tableGeo = await run(`(async () => {
+    window.__lab.setDoc(${JSON.stringify(tableDoc)});
+    await new Promise((r) => setTimeout(r, 800));
+    const table = document.querySelector('.milkdown-table-block tbody[data-content-dom]')?.closest('table');
+    const prose = document.querySelector('.ProseMirror');
+    const cells = [...table.querySelectorAll('tr')[1].children].map((c) => { const r = c.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom) }; });
+    return {
+      layout: getComputedStyle(table).tableLayout,
+      width: Math.round(table.getBoundingClientRect().width),
+      proseWidth: Math.round(prose.getBoundingClientRect().width),
+      cols: [...table.querySelectorAll(':scope > colgroup > col')].map((c) => c.style.width),
+      cells,
+    };
+  })()`);
+  // The lab page does not load the app's stylesheet, so the adaptive layout itself is checked in
+  // the app; here we only need a plain, un-sized table as the starting point (see style.css).
+  check('表格', '表格有列结构，未调整前不写死列宽', tableGeo.cols.length === 3
+    && tableGeo.cols.every((width) => width === ''), JSON.stringify(tableGeo));
+
+  const c0 = tableGeo.cells[0];
+  const edgeX = c0.r - 2;
+  const edgeY = (c0.t + c0.b) / 2;
+  const initialWidth = c0.r - c0.l;
+  await mouse('mouseMoved', edgeX, edgeY);
+  await sleep(250);
+  const hasHandle = await run(`!!document.querySelector('.column-resize-handle')`);
+  await mouse('mousePressed', edgeX, edgeY, { clickCount: 1 });
+  for (const dx of [20, 50, 90]) {
+    await mouse('mouseMoved', edgeX + dx, edgeY, { buttons: 1 });
+    await sleep(60);
+  }
+  await mouse('mouseReleased', edgeX + 90, edgeY, { clickCount: 1 });
+  await sleep(500);
+  const resized = await run(`(async () => {
+    const table = document.querySelector('.milkdown-table-block tbody[data-content-dom]')?.closest('table');
+    const widths = [...table.querySelectorAll('tr')[1].children].map((c) => Math.round(c.getBoundingClientRect().width));
+    const { readTableWidths } = await import('/table.js');
+    return { layout: getComputedStyle(table).tableLayout, widths, saved: readTableWidths(window.__lab.view) };
+  })()`);
+  check('表格', '拖动列边框能改列宽', hasHandle === true && resized.layout === 'fixed'
+    && resized.widths[0] >= initialWidth + 50 && Array.isArray(resized.saved[0]),
+  JSON.stringify({ hasHandle, initialWidth, resized }));
+
+  const restored = await run(`(async () => {
+    const { readTableWidths, restoreTableWidths } = await import('/table.js');
+    const view = window.__lab.view;
+    const saved = readTableWidths(view);
+    const table = document.querySelector('.milkdown-table-block tbody[data-content-dom]')?.closest('table');
+    for (const col of table.querySelectorAll(':scope > colgroup > col')) col.style.width = '';
+    restoreTableWidths(view, saved);
+    await new Promise((r) => setTimeout(r, 400));
+    return { saved, cols: [...table.querySelectorAll(':scope > colgroup > col')].map((c) => c.style.width) };
+  })()`);
+  check('表格', '记住的列宽能在重新挂载后恢复', restored.saved?.[0]?.length > 0
+    && restored.cols.every((width) => width !== ''), JSON.stringify(restored));
+
   // ============================== 汇总 ==============================
   const failed = results.filter((r) => !r.pass);
   console.log(`\n${results.length - failed.length}/${results.length} 通过`);

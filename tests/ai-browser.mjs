@@ -2089,6 +2089,57 @@ try {
   check('表格', '记住的列宽能在重新挂载后恢复', restored.saved?.[0]?.length > 0
     && restored.cols.every((width) => width !== ''), JSON.stringify(restored));
 
+  // ============================== 代码块 ==============================
+  // Milkdown mounts CodeMirror only while a code block is near the viewport, then tears it down
+  // 5s after it leaves. The placeholder must be exactly as tall as the mounted block, or every
+  // mount/teardown shifts everything below it — the jump users see when scrolling through a
+  // document with code blocks around a table. The lab root is #root, while the app stylesheet
+  // scopes these metrics under #editor, so rename it to test the real cascade.
+  await fresh();
+  await run(`(() => {
+    const root = document.getElementById('root');
+    root.id = 'editor';
+    root.style.height = '100%';
+    root.style.overflow = 'auto';
+  })()`);
+  const codeLines = [
+    'export KB_URL=http://10.111.11.236:5173',
+    'export KB_USER=你的账号',
+    'export KB_PASSWORD=你的密码',
+    '',
+    'python3 bp.py login',
+    'python3 bp.py health',
+  ].join('\n');
+  const codeDoc = `# 标题\n\n\`\`\`bash\n${codeLines}\n\`\`\`\n\n${'段落。\n\n'.repeat(40)}\`\`\`bash\n${codeLines}\n\`\`\`\n`;
+  await run(`window.__lab.setDoc(${JSON.stringify(codeDoc)})`);
+  await sleep(1000);
+  const codeState = () => run(`(() => {
+    const root = document.getElementById('editor');
+    const blocks = [...document.querySelectorAll('.milkdown-code-block')];
+    return {
+      count: blocks.length,
+      mounted: blocks.map((b) => !!b.querySelector('.cm-editor')),
+      heights: blocks.map((b) => Math.round(b.getBoundingClientRect().height)),
+      scrollHeight: Math.round(root.scrollHeight),
+    };
+  })()`);
+  const codeNear = await codeState();
+  check('代码块', '占位块和挂载后的高度一致', codeNear.count === 2
+    && codeNear.heights[0] === codeNear.heights[1], JSON.stringify(codeNear));
+
+  await run(`(() => { const root = document.getElementById('editor'); root.scrollTop = root.scrollHeight; })()`);
+  await sleep(1000);
+  const codeFar = await codeState();
+  check('代码块', '滚到第二块后两块依然等高', codeFar.count === 2
+    && codeFar.heights[0] === codeFar.heights[1] && codeFar.mounted[1] === true,
+  JSON.stringify(codeFar));
+
+  await sleep(5200); // the first block is now far away; its CodeMirror tears down after 5s
+  const codeTorn = await codeState();
+  check('代码块', 'CodeMirror 卸载后页面高度不变', codeTorn.scrollHeight === codeFar.scrollHeight
+    && codeTorn.heights[0] === codeFar.heights[0],
+  JSON.stringify({ before: codeFar, after: codeTorn }));
+
   // ============================== 汇总 ==============================
   const failed = results.filter((r) => !r.pass);
   console.log(`\n${results.length - failed.length}/${results.length} 通过`);

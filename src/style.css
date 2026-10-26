@@ -1619,7 +1619,10 @@ body.empty #mode-switch {
   background: var(--hover);
   color: var(--text);
 }
-/* Same metrics for the lazy placeholder and the live editor, so nothing jumps when it mounts. */
+/* Same metrics for the lazy placeholder and the live editor, so nothing jumps when it mounts.
+   Two traps: Crepe's reset shrinks the placeholder's <code> to 87.5% / 1.4286 (the editor's
+   text is not a <code>), and the 34px toolbar only exists while CodeMirror is mounted. Both
+   have to be paid back here, or every mount/teardown changes the page height. */
 #editor .milkdown .milkdown-code-block .cm-editor,
 #editor .milkdown .milkdown-code-block .milkdown-code-block-placeholder {
   padding: 12px 16px 14px;
@@ -1631,10 +1634,19 @@ body.empty #mode-switch {
 }
 #editor .milkdown .milkdown-code-block .milkdown-code-block-placeholder {
   margin: 0;
+  padding-top: 46px; /* 12px padding + the 34px toolbar that exists only with CodeMirror */
   color: var(--text);
   white-space: pre;
   overflow-x: auto;
   word-break: normal;
+}
+#editor .milkdown .milkdown-code-block .milkdown-code-block-placeholder code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
 }
 #editor .milkdown .milkdown-code-block .cm-editor .cm-scroller {
   font-size: inherit;

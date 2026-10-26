@@ -19,6 +19,31 @@ jobs:
           workspaces: src-tauri -> target.noindex
       - run: npm ci
       - run: npx tauri build --debug --no-bundle
+      - name: 交互检查（真实 WebView2）
+        shell: pwsh
+        run: |
+          $work = Join-Path $env:RUNNER_TEMP 'interaction'
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          $env:MDPAD_DATA_DIR = Join-Path $work '.data'
+          $env:MDPAD_TEST_JS = Get-Content -Raw -Encoding UTF8 'tests/interaction-check.js'
+          $log = Join-Path $work 'interaction.txt'
+          $app = Start-Process -FilePath 'src-tauri/target.noindex/debug/mdpad.exe' -RedirectStandardError $log -PassThru
+          if (-not $app.WaitForExit(120000)) { $app.Kill(); Write-Host 'TIMEOUT'; exit 1 }
+          $out = Get-Content -Raw -Encoding UTF8 $log
+          Write-Host $out
+          # 左边距点击/拖选（Windows 反馈的选区问题）、表格 colgroup/自适应/列宽应用
+          if ($out -notmatch '"marginCaretOk":true' -or $out -notmatch '"marginDragOk":true' -or
+              $out -notmatch '"tableColsOk":true' -or $out -notmatch '"tableLayout":"auto"' -or
+              $out -notmatch '"tableWidthsApplied":true') {
+            Write-Host 'FAIL interaction'
+            exit 1
+          }
+          Write-Host 'PASS interaction'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-interaction
+          path: ${{ runner.temp }}/interaction/interaction.txt
       - name: 截图
         shell: pwsh
         run: |

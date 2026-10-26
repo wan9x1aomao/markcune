@@ -48,6 +48,16 @@
         "mimeType": "text/markdown"
       }
     ],
+    "linux": {
+      "deb": {
+        "conflicts": [
+          "md-pad"
+        ],
+        "replaces": [
+          "md-pad"
+        ]
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "13.0",
       "signingIdentity": "-",

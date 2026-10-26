@@ -87,10 +87,11 @@
 
 ## 9. 下一步（发 4.0.0 之前必须做）
 
-1. **升级 spike**：打一个 4.0.0 测试包，从 3.5.6 真机升级，检查
+1. **升级 spike**：逐项见 [多平台更名清单](rebrand-platforms.md) 第 4 节。重点
    - macOS：`/Applications/MDPad.app` 升级后内容是否变成 MarkCune、是否出现两个应用；
-   - Windows：NSIS 安装目录、开始菜单、旧快捷方式是否残留；
-   - 设置、AI Key、草稿、最近文件、`~/Documents/MDPad` 书库是否原样。
+   - Windows：旧卸载键 `Uninstall\MDPad`、旧目录 `%LOCALAPPDATA%\MDPad`，新安装器 `/UPDATE` 找不到旧版会在新目录再装一份 —— 发版前必须在“A. NSIS 迁移钩子”与“B. 4.0.0 先不推自动更新、官网手动下载”之间拍板（见平台清单第 2 节）；
+   - Linux：新 `.deb` 已声明 `Conflicts/Replaces: md-pad`，要装一次确认旧包被替换、菜单只有一项；
+   - 三端都要确认设置、AI Key、草稿、最近文件、`~/Documents/MDPad` 书库原样。
 2. **域名与站点**：注册 `markcune.com / .md / .app / .cn`；新站上线后把 README、`src/main.js` 里的旧地址切过去，旧域名 301。
 3. **图标与字标**：以“楔形刻痕 / 文字光标”为起点做正式图标，跑 `npx tauri icon` 重新生成全套并替换 `docs/screenshot.png`。
 4. **GitHub 仓库改名**：站点与域名就绪后再改，旧地址要能跳转。

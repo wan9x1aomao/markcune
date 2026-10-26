@@ -57,15 +57,17 @@ echo
 # 1. One version everywhere, committed so GitHub Actions builds exactly this code.
 VERSION="$VERSION" node -e '
   const fs = require("fs");
-  for (const file of ["package.json", "src-tauri/tauri.conf.json"]) {
+  for (const file of ["package.json", "src-tauri/tauri.conf.json", "package-lock.json"]) {
     const json = JSON.parse(fs.readFileSync(file, "utf8"));
     json.version = process.env.VERSION;
+    // package-lock.json 里还有一个 packages[""].version，tests/rebrand.test.mjs 会核对。
+    if (file === "package-lock.json") json.packages[""].version = process.env.VERSION;
     fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
   }'
 sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
 (cd src-tauri && cargo update -p mdpad --offline >/dev/null 2>&1 || true)
 if [[ -n "$(git status --porcelain)" ]]; then
-  git add -A package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+  git add -A package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
   git commit -q -m "发布 v$VERSION"
 fi
 git push -q

@@ -35,6 +35,10 @@ html = html
   // Any other mention of a versioned file (unmarked buttons, install commands) becomes the fixed name too.
   .replace(/MDPad-\d+\.\d+\.\d+-(macOS-arm64\.dmg|macOS-arm64\.tar\.gz|windows-x64-setup\.exe|linux-amd64\.deb|linux-x86_64\.AppImage)/g, 'MDPad-$1')
   .replace(/<b>v\d+\.\d+\.\d+<\/b>/g, `<b>v${version}</b>`)
+  // Hero pill reads "<b>品牌</b> v3.5.5 · macOS / …". It must stay plain text: .pill is an
+  // inline-flex box with gap, so wrapping the number in a <span> would split the text into
+  // extra flex items and change the spacing. Replace the digits only.
+  .replace(/(class="pill"><b>[^<]*<\/b> v)\d+\.\d+\.\d+/g, `$1${version}`)
   .replace(/(data-mdpad="version">)[^<]*/g, `$1${version}`);
 
 for (const [platform, path] of Object.entries(files)) {

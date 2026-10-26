@@ -67,7 +67,7 @@ Linux 的 `.deb` / `.AppImage` 与 Windows 的 `.exe` 由 GitHub Actions 构建�
 
 ```bash
 npm test                                   # 纯逻辑单测（整理、AI 触发规则、网关协议、下载回执、更新日志格式）
-npm run test:browser                       # 界面与 AI 的逐项测试，真编辑器 + 无头 Chrome（需 Chrome）
+npm run test:browser                       # 界面与 AI 的逐项测试，真编辑器 + 无头 Chrome（需 Chrome；CI 也会跑）
 (cd src-tauri && cargo test)               # Rust 单测（文件操作、链接识别、解压、AI 输出清洗）
 npx tauri build --debug --no-bundle
 tests/smoke/run.sh                         # 冒烟测试；Windows 上用 tests/smoke/run.ps1
@@ -77,6 +77,8 @@ tests/scenarios.sh                         # 文件操作场景，仅 macOS
 ⚠️ 冒烟测试会真的去 GitHub 下载一个仓库来验证「从链接打开」，需要联网。
 
 `npm run test:browser` 驱动的是 `src/__lab.html`——一个带假 Tauri 外壳的看板，界面是真的、只有外壳的回答是写死的，所以不填 Key、不联网也能跑。每条用例都从一个新加载的页面开始，失败不会被前一条带歪；开发服务器没起的话脚本会自己起一个。覆盖范围：续写何时发请求（段末/句中/标题/组字中/冷却/开关）、灰字何时消失、Tab/Esc、改写对照与采纳/拒绝/重来、文档中途被改、多行结果、多段选中的逐块对照与逐段改写、审阅清单的逐条与批量操作、斜杠菜单里真的点得到、自定义指令的增删存、设置面板的每个字段与「清除 Key」、命令面板的关键词搜索与空查询分组、帮助面板的开关与点行执行、一次性提示只出现一次、以及没配置时入口是否真的消失。`src/__lab.*` 只是这个看板，不参与打包。
+
+每次 push / PR，CI 会在 Linux 上自动跑一遍这套界面测试（`.github/workflows/ci.yml` 里的「界面测试（Chrome）」）。Chrome 和 WebView2 同属 Chromium，这类回归不用等发版才暴露；Windows 上真实 WebView2 的交互检查在 `preview.yml` 里，手动触发、不发版。
 
 ## 自动更新
 

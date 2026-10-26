@@ -33,6 +33,8 @@ export async function open(url, { width = 1280, height = 860, scale = 2 } = {}) 
       `--user-data-dir=/tmp/chrome-lab-${PORT}`,
       '--hide-scrollbars',
       '--disable-gpu',
+      // CI 的 /dev/shm 只有 64 MB，大文档用例下 Chromium 会因共享内存不够而崩。
+      '--disable-dev-shm-usage',
       '--no-sandbox',
       '--no-proxy-server',
       `--force-device-scale-factor=${scale}`,

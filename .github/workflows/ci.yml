@@ -1,6 +1,6 @@
 name: CI
 
-# 每个 PR 和每次推 main 都跑一遍三平台的单测。
+# 每个 PR 和每次推 main 都跑一遍三平台的单测；界面测试单独一条 Linux job（见文件末尾）。
 # 冒烟测试（tests/smoke）不放在这里：它会真的去 GitHub 下载一个仓库，容易受网络和限流影响，
 # 只由 .github/workflows/build.yml 在发版时跑。
 on:
@@ -69,3 +69,32 @@ jobs:
       - name: Rust 单测
         working-directory: src-tauri
         run: cargo test
+
+  # 真编辑器 + 无头 Chrome，外壳的回答是写死的：不填 Key、不联网也能跑。
+  # Chrome 和 Windows 的 WebView2 同属 Chromium，「从左边距拖选」「表格列宽」这类
+  # 只在 Chromium 下出现的回归，在这条线上就能挡住，不用等发版才暴露。
+  # 只挂 Linux：三个平台跑的是同一个 Chromium 引擎，多开两倍机器不会多挡住什么；
+  # WebView2 真机检查仍由 preview.yml 手动触发（那条要打调试包、跑真实 WebView2）。
+  browser:
+    name: 界面测试（Chrome）
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      # 第三方 Action 一律固定到 commit SHA，别让上游的 tag 决定这里跑什么。
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # 先确认 Chrome 在，缺了就在这一步报清楚，别让后面的用例报成「页面起不来」。
+      - name: Chrome 就位
+        run: google-chrome --version || chromium --version || chromium-browser --version
+
+      - name: 界面与 AI 逐项测试
+        run: npm run test:browser

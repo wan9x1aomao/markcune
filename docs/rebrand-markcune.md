@@ -1,6 +1,6 @@
 # MarkCune 品牌更名实施说明
 
-- **状态：** A 类（品牌表层）已完成；B 类升级 spike、域名与图标待办
+- **状态：** A 类（品牌表层）已完成；升级方式已定 **B（手动升级）**；域名与图标待办
 - **日期：** 2026-10-26
 - **定名结论：** 公开品牌只用 **MarkCune**；**MarkCuneus** 只作为商标 / 法务主体名，不进界面、不进官网标题。
 - **版本：** 更名版本为 **4.0.0**。
@@ -59,13 +59,13 @@
 - **域名**：`markcune.com / .md / .app / .cn` 待注册；注册并部署前，README / 应用里的官网链接继续指向旧地址，并注明“过渡期”。
 - **GitHub 仓库**：仍是 `wan9x1aomao/mdpad`；改名后旧地址会自动跳转，但要在域名与站点就绪后再做。
 - **图标 / 字标**：MarkCune 的视觉应从“楔形刻痕 / 文本光标”出发，不用毛笔与墨痕；本次只改原型，正式图标另起一轮。
-- **升级 spike**：`productName` 已经改成 MarkCune，但 macOS 覆盖升级后的 `.app` 目录名、Windows NSIS 是否残留旧快捷方式，必须在发 4.0.0 前真机验证 3.5.6 → 4.0.0。
+- **升级方式（已定 B）**：4.0.0 不推自动更新，旧站 `latest.json` 停在 3.5.6；官网手动下载并提示先卸载旧版。发版流程见 [多平台更名清单](rebrand-platforms.md) 第 6 节。
 - **书库目录**：新用户仍落在 `~/Documents/MDPad/`；是否改成 `~/Documents/MarkCune/` 并做复制式迁移，放到升级 spike 里一起决定。
 
 ## 6. 版本与更新日志
 
 - `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`、`package-lock.json`、`src-tauri/Cargo.lock` 统一为 `4.0.0`。
-- CHANGELOG 新增 `## 4.0.0 · 2026-10-26`，第一条写明改名，并说明“升级不用重新配置”；条数 ≤ 5，禁止 `**` 与三反引号（`tests/changelog.test.mjs` 会查）。
+- CHANGELOG 新增 `## 4.0.0 · 2026-10-26`，写明改名、手动升级方式与“数据不动”；条数 ≤ 5，禁止 `**` 与三反引号（`tests/changelog.test.mjs` 会查）。
 
 ## 7. 验收（A 类）
 
@@ -83,15 +83,15 @@
 - **文档与发布**：README、CHANGELOG（4.0.0）、package / Cargo 版本与包名、release / make-dmg / build-kylin / update-site / DMG 背景、CI 产物名、press 模板、置顶设计文档、测试样例。
 - **官网原型**：`preview/quiet-paper.html` 换成 `Mark / Cune` 两行字标 + 文字光标记号，signature 与页脚同步；截图已重出。
 
-验证：`npm test`（含 changelog 结构检查）、`npm run build:web`、`cargo test`（74 passed）、浏览器界面测试（188 条）全部通过；旧名残留只落在第 4 节例外与历史记录。
+验证：`npm test`（含 changelog 结构检查与 `tests/rebrand.test.mjs`）、`npm run build:web`、`cargo test`（74 passed）、浏览器界面测试（191 条）全部通过；旧名残留只落在第 4 节例外与历史记录。
 
 ## 9. 下一步（发 4.0.0 之前必须做）
 
-1. **升级 spike**：逐项见 [多平台更名清单](rebrand-platforms.md) 第 4 节。重点
-   - macOS：`/Applications/MDPad.app` 升级后内容是否变成 MarkCune、是否出现两个应用；
-   - Windows：旧卸载键 `Uninstall\MDPad`、旧目录 `%LOCALAPPDATA%\MDPad`，新安装器 `/UPDATE` 找不到旧版会在新目录再装一份 —— 发版前必须在“A. NSIS 迁移钩子”与“B. 4.0.0 先不推自动更新、官网手动下载”之间拍板（见平台清单第 2 节）；
-   - Linux：新 `.deb` 已声明 `Conflicts/Replaces: md-pad`，要装一次确认旧包被替换、菜单只有一项；
-   - 三端都要确认设置、AI Key、草稿、最近文件、`~/Documents/MDPad` 书库原样。
+1. **手动升级验证（B 方案）**：逐项见 [多平台更名清单](rebrand-platforms.md) 第 4、6 节。重点
+   - 旧站 `latest.json` 不被覆盖，3.5.6 客户端检查更新时不弹 4.0.0；
+   - macOS：先删旧 `MDPad.app` 再装，设置、AI Key、草稿、书库原样；
+   - Windows：先卸载旧版 MDPad 再装 MarkCune，目录/快捷方式/卸载项只有一份；
+   - Linux：`.deb` 自动替换旧包，菜单只有一项；AppImage 手动删旧文件。
 2. **域名与站点**：注册 `markcune.com / .md / .app / .cn`；新站上线后把 README、`src/main.js` 里的旧地址切过去，旧域名 301。
 3. **图标与字标**：以“楔形刻痕 / 文字光标”为起点做正式图标，跑 `npx tauri icon` 重新生成全套并替换 `docs/screenshot.png`。
 4. **GitHub 仓库改名**：站点与域名就绪后再改，旧地址要能跳转。

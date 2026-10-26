@@ -20,6 +20,8 @@ MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编�
 | Windows | 10 / 11，使用系统自带的 WebView2 |
 | Linux | 需要 WebKitGTK 4.1（`.deb` 与 `.AppImage` 都提供） |
 
+> 从 3.5.x 升级：4.0.0 不通过自动更新推送，请先卸载旧版 MDPad，再下载安装 MarkCune；设置、AI Key、草稿和书库都会保留。macOS 记得删掉旧的 `MDPad.app`，Windows 先在「应用」里卸载旧版。
+
 历史版本从 [`v3.2.1`](https://github.com/wan9x1aomao/mdpad/tags) 起都打了 tag，每个 tag 就是那个版本的源码快照。
 
 ## 功能

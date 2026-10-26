@@ -33,8 +33,9 @@ jobs:
           Write-Host $out
           # 左边距点击/拖选（Windows 反馈的选区问题）、表格 colgroup/自适应/列宽应用
           if ($out -notmatch '"marginCaretOk":true' -or $out -notmatch '"marginDragOk":true' -or
+              $out -notmatch '"rightPadOk":true' -or $out -notmatch '"atomCaretOk":true' -or
               $out -notmatch '"tableColsOk":true' -or $out -notmatch '"tableLayout":"auto"' -or
-              $out -notmatch '"tableWidthsApplied":true') {
+              $out -notmatch '"tableWidthsApplied":true' -or $out -notmatch '"cellCaretOk":true') {
             Write-Host 'FAIL interaction'
             exit 1
           }

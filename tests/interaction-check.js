@@ -31,6 +31,27 @@ const range = editor().view.state.selection;
 const marginDragOk = !range.empty
   && editor().view.state.doc.textBetween(range.from, range.to, '\n').includes('第一段正文内容');
 
+// right padding: caret at the end of the clicked line, not in the next block
+mouse(prose, 'mousedown', rect.right + 30, y);
+document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: rect.right + 30, clientY: y, button: 0 }));
+await new Promise((r) => setTimeout(r, 250));
+const rightPad = editor().view.state.selection;
+const rightPadOk = rightPad.empty === true
+  && editor().view.state.doc.resolve(rightPad.from).parent.textContent.includes('第一段');
+
+// an <hr> next to the margin: margin clicks must land a text caret, not select the atom
+await editor().setMarkdown('# 标题\n\n分割线前的段落。\n\n---\n\n分割线后的段落。\n');
+await new Promise((r) => setTimeout(r, 800));
+const hr = (document.querySelector('#editor .ProseMirror') ?? document.querySelector('.ProseMirror')).querySelector('hr');
+const hrRect = hr.getBoundingClientRect();
+mouse(prose, 'mousedown', hrRect.left - 30, hrRect.top + 4);
+document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: hrRect.left - 30, clientY: hrRect.top + 4, button: 0 }));
+await new Promise((r) => setTimeout(r, 250));
+const atomSel = editor().view.state.selection;
+const atomParent = editor().view.state.doc.resolve(atomSel.from).parent;
+const atomCaretOk = atomSel.empty === true && atomParent.type.name === 'paragraph';
+
+
 // --- table: colgroup present, content-sized layout, dragging a border changes the width ---
 await editor().setMarkdown('# 表格\n\n| 甲 | 乙长一点 | 丙 |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n');
 await new Promise((r) => setTimeout(r, 1000));
@@ -75,5 +96,20 @@ if (table) {
   const bodyRow = after ? [...after.querySelectorAll('tbody tr')][1] : null;
   resizeChanged = !!bodyRow && bodyRow.children[0].getBoundingClientRect().width >= startWidth + 40;
 }
+// clicking a cell must place a text caret in it (the table has its own handles on the edges)
+let cellCaretOk = false;
+const tableForClick = document.querySelector('.milkdown-table-block tbody[data-content-dom]')?.closest('table');
+if (tableForClick) {
+  const bodyCell = [...tableForClick.querySelectorAll('tbody tr')][1]?.children[0];
+  if (bodyCell) {
+    const cr = bodyCell.getBoundingClientRect();
+    bodyCell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: cr.left + 10, clientY: cr.top + cr.height / 2, button: 0 }));
+    bodyCell.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: cr.left + 10, clientY: cr.top + cr.height / 2, button: 0 }));
+    await new Promise((r) => setTimeout(r, 250));
+    const cellSel = editor().view.state.selection;
+    cellCaretOk = cellSel.empty === true
+      && editor().view.state.doc.resolve(cellSel.from).parent.type.name === 'paragraph';
+  }
+}
 
-return JSON.stringify({ marginCaretOk, marginDragOk, tableColsOk, tableLayout, tableWidthsApplied, resizeChanged });
+return JSON.stringify({ marginCaretOk, marginDragOk, rightPadOk, atomCaretOk, tableColsOk, tableLayout, tableWidthsApplied, cellCaretOk, resizeChanged });

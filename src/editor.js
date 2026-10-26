@@ -19,7 +19,7 @@ import {
   toggleStrongCommand,
 } from '@milkdown/kit/preset/commonmark';
 import { toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
-import { AllSelection, Plugin, PluginKey, Selection, TextSelection } from '@milkdown/kit/prose/state';
+import { AllSelection, NodeSelection, Plugin, PluginKey, Selection, TextSelection } from '@milkdown/kit/prose/state';
 import { $prose, callCommand, replaceAll } from '@milkdown/kit/utils';
 import { ghostControls, ghostFeature } from './ai-ghost.js';
 import { proposalFeature } from './ai-proposal.js';
@@ -266,12 +266,21 @@ function installMarginSelection(view, scroller) {
     const hit = view.posAtCoords({ left: x, top: y });
     return hit ? hit.pos : null;
   };
-  const caretAt = (pos) => {
+  const caretAt = (pos, x) => {
     const { doc } = view.state;
     const $pos = doc.resolve(Math.min(Math.max(pos, 0), doc.content.size));
-    // Bias forward: the padding box resolves to the boundary before the block, and the caret the
-    // user is asking for is the first position inside that block.
-    return Selection.near($pos, 1);
+    // The padding box resolves to a block boundary. Prefer a text caret: Selection.near would
+    // select a leaf block (an <hr>, an image) instead, and a click in the margin should place the
+    // caret next to it rather than select it.
+    const forward = Selection.findFrom($pos, 1, true);
+    const backward = Selection.findFrom($pos, -1, true);
+    if (!forward) return backward ?? Selection.near($pos, 1);
+    if (!backward || x == null) return forward;
+    // Left of the text the boundary belongs to the next block, right of it to the previous one;
+    // comparing horizontal distance to the two candidate carets picks the line the user clicked.
+    const forwardX = view.coordsAtPos(forward.from).left;
+    const backwardX = view.coordsAtPos(backward.from).left;
+    return Math.abs(x - forwardX) < Math.abs(x - backwardX) ? forward : backward;
   };
   /** The text range of the top-level block at `pos`, for double clicks in the margin. */
   const blockRangeAt = (pos) => {
@@ -282,7 +291,11 @@ function installMarginSelection(view, scroller) {
       if (pos < start + node.nodeSize || i === doc.childCount - 1) {
         const from = start + 1;
         const to = start + node.nodeSize - 1;
-        return from < to && node.isTextblock ? TextSelection.create(doc, from, to) : null;
+        if (from < to && node.isTextblock) return TextSelection.create(doc, from, to);
+        // Atom blocks (an <hr>, an image, a table) cannot take a text range: select the node
+        // itself when possible, otherwise fall back to the nearest text block.
+        if (node.selectable) return NodeSelection.create(doc, start);
+        return Selection.findFrom(doc.resolve(from), 1, true) ?? null;
       }
       start += node.nodeSize;
     }
@@ -297,11 +310,11 @@ function installMarginSelection(view, scroller) {
     const { doc, selection } = view.state;
     // TextSelection.between normalises the block boundaries the padding box tends to resolve to.
     const next = TextSelection.between(doc.resolve(drag.anchor), doc.resolve(head), drag.anchor > head ? -1 : 1);
-    if (!selection.eq(next)) view.dispatch(view.state.tr.setSelection(next).scrollIntoView());
+    if (next && !selection.eq(next)) view.dispatch(view.state.tr.setSelection(next).scrollIntoView());
   };
   /** Dragging past the visible edge keeps selecting, so a whole long document can be picked. */
   const autoScroll = () => {
-    if (!drag) return;
+    if (!drag || !scroller) return;
     const box = scroller.getBoundingClientRect();
     const edge = 32;
     const over = drag.lastY - (box.bottom - edge);
@@ -326,7 +339,10 @@ function installMarginSelection(view, scroller) {
     if (event.button !== 0 || event.target !== view.dom || event.isComposing) return;
     const pos = posAt(event.clientX, event.clientY);
     if (pos == null) return;
+    // Capture phase + stopPropagation so ProseMirror's own mousedown handling cannot replace the
+    // caret with a GapCursor (it does that for clicks next to an <hr>, an image or a table).
     event.preventDefault();
+    event.stopPropagation();
     view.focus();
     const { doc, selection } = view.state;
     if (event.detail >= 3) {
@@ -335,7 +351,7 @@ function installMarginSelection(view, scroller) {
     }
     if (event.detail === 2) {
       const range = blockRangeAt(pos);
-      if (range) view.dispatch(view.state.tr.setSelection(range));
+      view.dispatch(view.state.tr.setSelection(range ?? caretAt(pos, event.clientX)));
       return;
     }
     if (event.shiftKey && !selection.empty) {
@@ -343,7 +359,7 @@ function installMarginSelection(view, scroller) {
       view.dispatch(view.state.tr.setSelection(next));
       return;
     }
-    view.dispatch(view.state.tr.setSelection(caretAt(pos)));
+    view.dispatch(view.state.tr.setSelection(caretAt(pos, event.clientX)));
     drag = {
       anchor: view.state.selection.from,
       lastX: event.clientX,
@@ -353,9 +369,9 @@ function installMarginSelection(view, scroller) {
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp, true);
   };
-  view.dom.addEventListener('mousedown', onDown);
+  view.dom.addEventListener('mousedown', onDown, true);
   return () => {
-    view.dom.removeEventListener('mousedown', onDown);
+    view.dom.removeEventListener('mousedown', onDown, true);
     onUp();
   };
 }

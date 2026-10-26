@@ -1932,6 +1932,104 @@ try {
   const marginTriple = await run(`(() => { const v = window.__lab.view; const s = v.state.selection; return { text: v.state.doc.textBetween(s.from, s.to, '\\n') }; })()`);
   check('选中', '左边距三连击选中全文', marginTriple.text.includes('标题') && marginTriple.text.includes('第三段'), JSON.stringify(marginTriple.text.slice(0, 30)));
 
+  // ============================== 交互 ==============================
+  // The caret has to land the same way around every kind of block, and floating UI (block handles,
+  // code buttons, checkboxes) must not swallow clicks that belong to the text.
+  await fresh();
+  const caretState = () => run(`(() => {
+    const v = window.__lab.view;
+    const s = v.state.selection;
+    const $p = v.state.doc.resolve(s.from);
+    return { type: s.constructor.name, from: s.from, to: s.to, empty: s.empty, parent: $p.parent?.textContent?.slice(0, 10) ?? '' };
+  })()`);
+  const interDoc = ['# 标题', '', '第一段正文内容，用来测试空白处的落点。', '', '---', '', '最后一段文字。', ''].join('\n');
+  const interGeo = await run(`(async () => {
+    window.__lab.setDoc(${JSON.stringify(interDoc)});
+    await new Promise((r) => setTimeout(r, 800));
+    const prose = document.querySelector('.ProseMirror');
+    const pick = (sel) => { const el = document.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom) }; };
+    const p = [...prose.querySelectorAll('p')][0];
+    return { p: pick('p'), hr: pick('hr'), prose: pick('.ProseMirror') };
+  })()`);
+  const interClick = async (x, y, count = 1) => { await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: count }); await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: count }); await sleep(250); };
+  const pMid = Math.round((interGeo.p.t + interGeo.p.b) / 2);
+
+  await interClick(interGeo.hr.l - 30, Math.round(interGeo.hr.t + 6));
+  const atomMargin = await caretState();
+  check('交互', '原子块（分割线）旁边的空白单击也落光标', atomMargin.type === 'TextSelection'
+    && atomMargin.empty === true && atomMargin.parent.includes('段'), JSON.stringify(atomMargin));
+
+  await interClick(interGeo.p.r + 30, pMid);
+  const rightPad = await caretState();
+  check('交互', '右边距单击把光标放到行尾', rightPad.type === 'TextSelection'
+    && rightPad.empty === true && rightPad.parent.includes('第一段'), JSON.stringify(rightPad));
+
+  await interClick(interGeo.prose.l + 40, interGeo.prose.t + 3);
+  const topPad = await caretState();
+  check('交互', '顶部空白单击把光标放到文档开头', topPad.type === 'TextSelection' && topPad.from <= 3, JSON.stringify(topPad));
+
+  await interClick(interGeo.p.l - 30, pMid);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 124, modifiers: 8 });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 124, modifiers: 8 });
+  await sleep(220);
+  const afterShift = await caretState();
+  check('交互', '在边距落光标后键盘能直接扩展选区', afterShift.type === 'TextSelection'
+    && afterShift.to === afterShift.from + 1, JSON.stringify(afterShift));
+
+  await fresh();
+  await run(`window.__lab.setDoc(${JSON.stringify('# 代码\n\n```js\nconst a = 1;\n```\n')})`);
+  await sleep(800);
+  const codeGeo = await run(`(() => { const b = document.querySelector('.milkdown-code-block'); const r = b.getBoundingClientRect(); const copy = document.querySelector('.copy-button'); const cr = copy?.getBoundingClientRect(); return { l: Math.round(r.left), t: Math.round(r.top), copy: cr ? { l: Math.round(cr.left), r: Math.round(cr.right), t: Math.round(cr.top), b: Math.round(cr.bottom) } : null }; })()`);
+  await interClick(codeGeo.l + 40, codeGeo.t + 90);
+  const beforeCopy = await caretState();
+  if (codeGeo.copy) { await interClick((codeGeo.copy.l + codeGeo.copy.r) / 2, (codeGeo.copy.t + codeGeo.copy.b) / 2); await sleep(200); }
+  const afterCopy = await caretState();
+  check('交互', '点代码块的复制按钮不会改动光标', !!codeGeo.copy
+    && beforeCopy.from === afterCopy.from && beforeCopy.to === afterCopy.to,
+  JSON.stringify({ beforeCopy, afterCopy }));
+
+  await fresh();
+  await run(`window.__lab.setDoc(${JSON.stringify('# 任务\n\n- [ ] 待办一\n- [ ] 待办二\n')})`);
+  await sleep(800);
+  const taskGeo = await run(`(() => { const label = document.querySelector('.ProseMirror li .label-wrapper'); const text = document.querySelector('.ProseMirror li p'); const lr = label.getBoundingClientRect(); const tr = text.getBoundingClientRect(); return { label: { l: Math.round(lr.left), r: Math.round(lr.right), t: Math.round(lr.top), b: Math.round(lr.bottom) }, text: { l: Math.round(tr.left), r: Math.round(tr.right), t: Math.round(tr.top), b: Math.round(tr.bottom) } }; })()`);
+  await interClick((taskGeo.label.l + taskGeo.label.r) / 2, (taskGeo.label.t + taskGeo.label.b) / 2);
+  const checked = await run(`!!document.querySelector('.ProseMirror li .label-wrapper .checked')`);
+  await interClick(taskGeo.text.l + 10, Math.round((taskGeo.text.t + taskGeo.text.b) / 2));
+  const taskCaret = await caretState();
+  check('交互', '任务清单的勾选框可点，点文字正常落光标', checked === true
+    && taskCaret.type === 'TextSelection' && taskCaret.empty === true && taskCaret.parent.includes('待办'), JSON.stringify({ checked, taskCaret }));
+
+  await fresh();
+  await run(`window.__lab.setDoc(${JSON.stringify('# 手柄\n\n第一段正文内容，用来测试悬浮手柄。\n')})`);
+  await sleep(800);
+  const handleGeo = await run(`(() => { const p = document.querySelector('.ProseMirror p'); const r = p.getBoundingClientRect(); return { l: Math.round(r.left), t: Math.round(r.top), b: Math.round(r.bottom) }; })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: handleGeo.l + 80, y: Math.round((handleGeo.t + handleGeo.b) / 2), button: 'none' });
+  await sleep(450);
+  const handleState = await run(`(() => {
+    const h = document.querySelector('.milkdown-block-handle[data-show="true"]');
+    const p = document.querySelector('.ProseMirror p');
+    const pr = p.getBoundingClientRect();
+    const el = document.elementFromPoint(pr.left + 1, pr.top + 8);
+    const plus = h?.querySelector('.operation-item');
+    const pr2 = plus?.getBoundingClientRect();
+    return { shown: !!h, textHit: el ? el.tagName : null, inHandle: !!el?.closest?.('.milkdown-block-handle'), plus: pr2 ? { l: Math.round(pr2.left), r: Math.round(pr2.right), t: Math.round(pr2.top), b: Math.round(pr2.bottom) } : null, paragraphs: document.querySelectorAll('.ProseMirror p').length };
+  })()`);
+  const beforePlus = handleState.paragraphs;
+  if (handleState.plus) { await interClick((handleState.plus.l + handleState.plus.r) / 2, (handleState.plus.t + handleState.plus.b) / 2); await sleep(300); }
+  const afterPlus = await run(`document.querySelectorAll('.ProseMirror p').length`);
+  check('交互', '悬浮手柄不覆盖正文左端，加号能插入新段落', handleState.shown === true
+    && handleState.inHandle === false && afterPlus === beforePlus + 1,
+  JSON.stringify({ handleState, beforePlus, afterPlus }));
+
+  await fresh();
+  await run(`window.__lab.setDoc(${JSON.stringify('# 表\n\n| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n')})`);
+  await sleep(800);
+  const cellGeo = await run(`(() => { const c = document.querySelector('.ProseMirror tbody[data-content-dom] tr:nth-child(2) td'); const r = c.getBoundingClientRect(); return { l: Math.round(r.left), t: Math.round(r.top), b: Math.round(r.bottom) }; })()`);
+  await interClick(cellGeo.l + 10, Math.round((cellGeo.t + cellGeo.b) / 2));
+  const cellCaret = await caretState();
+  check('交互', '点表格单元格落光标而不是选中单元格', cellCaret.type === 'TextSelection'
+    && cellCaret.empty === true && cellCaret.parent.includes('1'), JSON.stringify(cellCaret));
+
   // ============================== 表格 ==============================
   await fresh();
   const tableDoc = '# 表格\n\n| 甲 | 乙长一点 | 丙 |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n';

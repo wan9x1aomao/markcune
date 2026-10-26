@@ -1,7 +1,7 @@
 {
-  "name": "mdpad",
-  "version": "3.5.6",
-  "description": "MDPad 编辑器 · 免费开源的本地 Markdown 所见即所得编辑器",
+  "name": "markcune",
+  "version": "4.0.0",
+  "description": "MarkCune 编辑器 · 免费开源的本地 Markdown 所见即所得编辑器",
   "license": "MIT",
   "author": "wan9x1aomao",
   "repository": {

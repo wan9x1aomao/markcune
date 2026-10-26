@@ -296,7 +296,7 @@ impl Failure {
 fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         // GitHub's API answers 403 to a request without one.
-        .user_agent(format!("MDPad/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("MarkCune/{}", env!("CARGO_PKG_VERSION")))
         .timeout(TIMEOUT)
         .build()
         .map_err(|error| format!("无法准备网络请求：{error}"))
@@ -531,6 +531,7 @@ fn library_dir(app: &AppHandle) -> Result<PathBuf, String> {
     if let Some(dir) = std::env::var_os("MDPAD_LIBRARY_DIR") {
         return Ok(PathBuf::from(dir));
     }
+    // 书库沿用旧目录（老用户下载的书都在这里，改了会找不到书），本次不迁移。
     app.path()
         .document_dir()
         .map(|dir| dir.join("MDPad"))
@@ -848,7 +849,7 @@ mod tests {
         let count = std::fs::read_dir(&images).map(|dir| dir.count()).unwrap_or(0);
         println!("图片 {} 张，失败 {} 张，正文 {} 字", count, fetched.skipped, text.chars().count());
         assert!(count > 0, "这篇文章有图，应该至少落一张");
-        // 相对路径能对上磁盘上的文件，MDPad 打开时才不会显示空图。
+        // 相对路径能对上磁盘上的文件，MarkCune 打开时才不会显示空图。
         for line in text.lines().filter(|line| line.starts_with("![](")) {
             let path = line.trim_start_matches("![](").trim_end_matches(')');
             assert!(fetched.root.join(path).is_file(), "找不到 {path}");

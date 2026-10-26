@@ -1,4 +1,4 @@
-// Minimal CDP harness for driving the MDPad editor in headless Chrome.
+// Minimal CDP harness for driving the MarkCune editor in headless Chrome.
 import { spawn } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 

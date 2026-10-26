@@ -48,7 +48,7 @@ TIDY_API_KEY=sk-xxxx node gateway/tidy-gateway.mjs
 **调试**：应用允许明文的本机地址，直接给环境变量即可，不用重新打包：
 
 ```bash
-MDPAD_TIDY_URL=http://127.0.0.1:8787/tidy open /Applications/MDPad.app
+MDPAD_TIDY_URL=http://127.0.0.1:8787/tidy open /Applications/MarkCune.app
 ```
 
 **发布**：地址需要在打包时固定进去（`src-tauri/src/ai.rs` 读的是构建期常量）。
@@ -71,7 +71,7 @@ TIDY_API_KEY=x TIDY_BASE_URL=http://127.0.0.1:8792/v1 \
   TIDY_MODEL=mock-model PORT=8793 node gateway/tidy-gateway.mjs &  # 网关，8793
 
 # 打开应用让它走这条链路（调试期用环境变量即可，不必重新打包）
-MDPAD_TIDY_URL=http://127.0.0.1:8793/tidy <MDPad 可执行文件> 某个没排版的.md
+MDPAD_TIDY_URL=http://127.0.0.1:8793/tidy <MarkCune 可执行文件> 某个没排版的.md
 ```
 
 整理完提示会写「已AI 整理」，文件里会出现 `###` 这类**规则不可能产生**的标记——这才是模型真的生效过的证据

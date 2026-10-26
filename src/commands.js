@@ -61,7 +61,7 @@ export const COMMANDS = [
   { id: 'help', group: '设置与帮助', title: '键盘快捷键与功能…', keywords: '帮助 help 快捷键 shortcuts 功能一览 手册 说明' },
   { id: 'check-update', group: '设置与帮助', title: '检查更新…', keywords: '更新 update 检查升级 版本' },
   { id: 'changelog', group: '设置与帮助', title: '更新日志', keywords: '更新日志 changelog 版本历史 release' },
-  { id: 'website', group: '设置与帮助', title: 'MDPad 官网', keywords: '官网 website 主页 下载 homepage' },
+  { id: 'website', group: '设置与帮助', title: 'MarkCune 官网', keywords: '官网 website 主页 下载 homepage' },
 ];
 
 export const commandById = Object.fromEntries(COMMANDS.map((c) => [c.id, c]));

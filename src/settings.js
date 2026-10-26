@@ -88,7 +88,7 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice,
         <h3>关于</h3>
         <div class="settings-row">
           <div class="label">
-            <b>MDPad <span class="version">…</span></b>
+            <b>MarkCune <span class="version">…</span></b>
             <em>本地写作，文件留在你自己的电脑上。</em>
             <em class="update-state"></em>
           </div>

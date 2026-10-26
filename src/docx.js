@@ -409,9 +409,9 @@ export async function buildDocx(doc, { image, title }) {
   const children = blocks(doc, ctx);
   if (!children.length) children.push(new Paragraph({ children: [new TextRun({ text: '' })] }));
   const document = new Document({
-    creator: 'MDPad',
+    creator: 'MarkCune',
     title: title || '未命名',
-    description: '由 MDPad 导出',
+    description: '由 MarkCune 导出',
     numbering: NUMBERING,
     styles: STYLES,
     sections: [

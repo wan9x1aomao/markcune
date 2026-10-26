@@ -335,7 +335,7 @@ pub async fn voice_stop(app: AppHandle) -> Result<String, String> {
         return Err("说话时间太短，点一下开始，说完再点一下".into());
     }
     if captured.iter().fold(0f32, |peak, sample| peak.max(sample.abs())) < SILENCE {
-        return Err("没有收到声音：检查系统设置里是否允许 MDPad 使用麦克风".into());
+        return Err("没有收到声音：检查系统设置里是否允许 MarkCune 使用麦克风".into());
     }
     let mono = resample(&captured, rate, TARGET_RATE);
     transcribe(&app, wav(&mono, TARGET_RATE), false).await

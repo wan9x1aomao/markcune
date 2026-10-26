@@ -31,6 +31,7 @@ import { initTheme, primeTheme, toggleTheme } from './theme.js';
 primeTheme();
 
 const AUTOSAVE_DELAY = 1000;
+// 过渡期：markcune.md 上线后替换（域名与站点就绪前继续指向旧地址，两行都先不动）。
 const CHANGELOG_URL = 'https://mdpad.app.workbuddy.host/#changelog';
 const HOMEPAGE_URL = 'https://mdpad.app.workbuddy.host';
 const isMac = navigator.userAgent.includes('Mac');
@@ -163,7 +164,7 @@ function updateTitle() {
   els.docName.textContent = name;
   // A pinned document often sits outside the open folder; the full path answers "where is this?".
   els.docName.title = app.doc.path ?? '';
-  api.setTitle(isMac ? name : `${name} - MDPad`);
+  api.setTitle(isMac ? name : `${name} - MarkCune`);
 }
 
 /** Closing needs the page's attention while something is unsaved or a draft exists. */

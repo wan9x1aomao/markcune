@@ -100,10 +100,10 @@ npx tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":true
 OUT="release/$VERSION"
 rm -rf "$OUT" && mkdir -p "$OUT"
 BUNDLE=src-tauri/target.noindex/release/bundle/macos
-MAC="MDPad-${VERSION}-macOS-arm64"
-cp "$BUNDLE/MDPad.app.tar.gz" "$OUT/$MAC.tar.gz"
-cp "$BUNDLE/MDPad.app.tar.gz.sig" "$OUT/$MAC.tar.gz.sig"
-scripts/make-dmg.sh "$BUNDLE/MDPad.app" "$OUT/$MAC.dmg"
+MAC="MarkCune-${VERSION}-macOS-arm64"
+cp "$BUNDLE/MarkCune.app.tar.gz" "$OUT/$MAC.tar.gz"
+cp "$BUNDLE/MarkCune.app.tar.gz.sig" "$OUT/$MAC.tar.gz.sig"
+scripts/make-dmg.sh "$BUNDLE/MarkCune.app" "$OUT/$MAC.dmg"
 
 echo "等待 Windows / Linux 打包完成…"
 if wait_for_run "$RUN"; then
@@ -127,20 +127,20 @@ for attempt in 1 2 3; do
 done
 [[ -n "$downloaded" ]] || { echo "没能下载 CI 产物，可手动执行：$GH release download v$VERSION -D $OUT --clobber"; exit 1; }
 
-WIN="MDPad-${VERSION}-windows-x64-setup.exe"
-LINUX="MDPad-${VERSION}-linux-x86_64.AppImage"
-DEB="MDPad-${VERSION}-linux-amd64.deb"
+WIN="MarkCune-${VERSION}-windows-x64-setup.exe"
+LINUX="MarkCune-${VERSION}-linux-x86_64.AppImage"
+DEB="MarkCune-${VERSION}-linux-amd64.deb"
 for file in "$WIN" "$WIN.sig" "$LINUX" "$LINUX.sig" "$DEB"; do
   [[ -f "$OUT/$file" ]] || { echo "缺少 $file"; exit 1; }
 done
 
 # The site serves each platform under one fixed name, overwritten on every release; release/<版本号>/
 # keeps the versioned names as an archive. Signatures cover file contents, so renaming keeps them valid.
-SITE_MAC_DMG="MDPad-macOS-arm64.dmg"
-SITE_MAC="MDPad-macOS-arm64.tar.gz"
-SITE_WIN="MDPad-windows-x64-setup.exe"
-SITE_LINUX="MDPad-linux-x86_64.AppImage"
-SITE_DEB="MDPad-linux-amd64.deb"
+SITE_MAC_DMG="MarkCune-macOS-arm64.dmg"
+SITE_MAC="MarkCune-macOS-arm64.tar.gz"
+SITE_WIN="MarkCune-windows-x64-setup.exe"
+SITE_LINUX="MarkCune-linux-x86_64.AppImage"
+SITE_DEB="MarkCune-linux-amd64.deb"
 
 # 3. One latest.json for every platform (non-ASCII escaped so any viewer shows it correctly).
 # Signatures come from the versioned files in $OUT; urls point at the fixed names on the site.

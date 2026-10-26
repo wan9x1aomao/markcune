@@ -39,7 +39,7 @@ fn create_window(app: &AppHandle, startup: Startup) {
 
     // Native file drops are off so HTML5 drag and drop (block handles, image drops) works on Windows too.
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
-        .title("MDPad")
+        .title("MarkCune")
         .inner_size(1100.0, 760.0)
         .min_inner_size(520.0, 360.0)
         .disable_drag_drop_handler();
@@ -201,18 +201,18 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::new(app)?;
 
     #[cfg(target_os = "macos")]
-    menu.append(&Submenu::with_items(app, "MDPad", true, &[
-        &PredefinedMenuItem::about(app, Some("关于 MDPad"), None)?,
+    menu.append(&Submenu::with_items(app, "MarkCune", true, &[
+        &PredefinedMenuItem::about(app, Some("关于 MarkCune"), None)?,
         &item("settings", "设置…", Some("CmdOrCtrl+,"))?,
         &separator()?,
         &item("check-update", "检查更新…", None)?,
         &item("changelog", "更新日志", None)?,
         &separator()?,
-        &PredefinedMenuItem::hide(app, Some("隐藏 MDPad"))?,
+        &PredefinedMenuItem::hide(app, Some("隐藏 MarkCune"))?,
         &PredefinedMenuItem::hide_others(app, Some("隐藏其他"))?,
         &PredefinedMenuItem::show_all(app, Some("全部显示"))?,
         &separator()?,
-        &item("quit", "退出 MDPad", Some("CmdOrCtrl+Q"))?,
+        &item("quit", "退出 MarkCune", Some("CmdOrCtrl+Q"))?,
     ])?)?;
 
     let file = Submenu::with_items(app, "文件", true, &[
@@ -300,7 +300,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     menu.append(&Submenu::with_items(app, "帮助", true, &[
         &item("help", "键盘快捷键与功能…", None)?,
         &item("changelog", "更新日志", None)?,
-        &item("website", "MDPad 官网", None)?,
+        &item("website", "MarkCune 官网", None)?,
     ])?)?;
 
     Ok(menu)
@@ -895,7 +895,7 @@ fn main() {
             update::restart_to_update,
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build MDPad")
+        .expect("failed to build MarkCune")
         .run(|app, event| match event {
             RunEvent::Ready => {
                 #[cfg(target_os = "macos")]

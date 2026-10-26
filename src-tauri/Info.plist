@@ -10,6 +10,6 @@
 	</array>
 	<!-- 没有这一条，macOS 会在第一次录音时直接结束进程；有了它才会弹权限对话框。 -->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>MDPad 需要麦克风，把你说的话转成文字。</string>
+	<string>MarkCune 需要麦克风，把你说的话转成文字。</string>
 </dict>
 </plist>

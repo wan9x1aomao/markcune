@@ -254,7 +254,7 @@ fi
 mkdir -p "$OUT_DIR"
 DEB_SRC="$(ls "$BUNDLE_DIR"/deb/*.deb 2>/dev/null | head -1)"
 [ -n "$DEB_SRC" ] || die "没生成 deb"
-DEB_OUT="$OUT_DIR/MDPad-$VERSION-linux-$ARCH-glibc$GLIBC.deb"
+DEB_OUT="$OUT_DIR/MarkCune-$VERSION-linux-$ARCH-glibc$GLIBC.deb"
 cp "$DEB_SRC" "$DEB_OUT"
 
 if [ "$RELAX_DEPS" -eq 1 ]; then
@@ -273,7 +273,7 @@ fi
 
 if [ "$WANT_APPIMAGE" -eq 1 ]; then
 	APP_SRC="$(ls "$BUNDLE_DIR"/appimage/*.AppImage 2>/dev/null | head -1)"
-	[ -n "$APP_SRC" ] && cp "$APP_SRC" "$OUT_DIR/MDPad-$VERSION-linux-$ARCH-glibc$GLIBC.AppImage"
+	[ -n "$APP_SRC" ] && cp "$APP_SRC" "$OUT_DIR/MarkCune-$VERSION-linux-$ARCH-glibc$GLIBC.AppImage"
 fi
 
 # ---------- 汇报 ----------
@@ -289,7 +289,7 @@ cat <<'EOF'
 
 下一步：
   1) 拷到麒麟机器：scp dist/kylin/*.deb user@<麒麟机>:/tmp/
-  2) 在麒麟上装：  sudo dpkg -i /tmp/MDPad-*.deb
+  2) 在麒麟上装：  sudo dpkg -i /tmp/MarkCune-*.deb
   3) 如果报 "依赖关系不满足: libwebkit2gtk-4.1-0"，说明目标机缺 4.1 运行时——
      这是麒麟侧的问题，不是这个包的问题。要么补 4.1 的 deb（麒麟开发者社区 /
      信创适配库），要么用 --relax-deps 重打一个只在你确认库已存在时使用。

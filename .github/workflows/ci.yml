@@ -96,5 +96,12 @@ jobs:
       - name: Chrome 就位
         run: google-chrome --version || chromium --version || chromium-browser --version
 
+      # 官方镜像只带 emoji 字体，没有中文字体：正文会排成豆腐块，坐标类断言
+      # （浮动条贴右边、表格列宽）跟着偏。装一个体积小的中文字体就够。
+      - name: 中文字体
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-wqy-zenhei
+
       - name: 界面与 AI 逐项测试
         run: npm run test:browser

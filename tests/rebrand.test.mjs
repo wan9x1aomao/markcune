@@ -14,11 +14,17 @@ const cargoLock = read('src-tauri/Cargo.lock');
 
 // 4.0.0 is the rename release; a half-bumped version means one platform ships another number.
 const cargoVersion = cargo.match(/^version = "([^"]+)"/m)?.[1];
-const lockVersion = cargoLock.match(/name = "mdpad"\nversion = "([^"]+)"/)?.[1];
+// Git for Windows checks text out as CRLF. The mdpad stanza is two adjacent lines, so normalize first.
+const mdpadLockVersion = (lockText) =>
+  lockText.replace(/\r\n/g, '\n').match(/name = "mdpad"\nversion = "([^"]+)"/)?.[1];
+const lockVersion = mdpadLockVersion(cargoLock);
 assert.equal(pkg.name, 'markcune');
 assert.equal(pkg.version, tauri.version, 'package.json 与 tauri.conf.json 版本不一致');
 assert.equal(pkg.version, cargoVersion, 'package.json 与 Cargo.toml 版本不一致');
 assert.equal(pkg.version, lockVersion, 'package.json 与 Cargo.lock 版本不一致');
+const crlfLock = cargoLock.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+assert.match(crlfLock, /name = "mdpad"\r\nversion = "/);
+assert.equal(mdpadLockVersion(crlfLock), pkg.version, 'Cargo.lock 为 CRLF 时版本应与 package.json 一致');
 assert.equal(npmLock.version, pkg.version, 'package-lock.json 版本没跟上');
 assert.equal(npmLock.packages[''].name, 'markcune');
 

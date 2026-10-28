@@ -675,6 +675,65 @@ pub fn saved_drafts(app: &AppHandle) -> Vec<(String, String)> {
     drafts
 }
 
+const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+/// Splits concatenated PNG files by walking their chunks (signature, IHDR first, up to IEND).
+/// The page can write only PNG through export_image, whatever it sends.
+pub fn split_pngs(bytes: &[u8], expected: usize) -> Result<Vec<&[u8]>, String> {
+    let invalid = || "图片数据无效".to_string();
+    let mut parts = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        let start = at;
+        if bytes.get(at..at + 8) != Some(&PNG_SIGNATURE[..]) {
+            return Err(invalid());
+        }
+        at += 8;
+        let mut first = true;
+        loop {
+            let head = bytes.get(at..at + 8).ok_or_else(invalid)?;
+            let length = u32::from_be_bytes([head[0], head[1], head[2], head[3]]) as usize;
+            let kind = &head[4..8];
+            if first && kind != b"IHDR" {
+                return Err(invalid());
+            }
+            first = false;
+            at = at.checked_add(12).and_then(|n| n.checked_add(length)).ok_or_else(invalid)?;
+            if at > bytes.len() {
+                return Err(invalid());
+            }
+            if kind == b"IEND" {
+                break;
+            }
+        }
+        parts.push(&bytes[start..at]);
+        if parts.len() > expected {
+            return Err(invalid());
+        }
+    }
+    if parts.len() != expected || expected == 0 {
+        return Err(invalid());
+    }
+    Ok(parts)
+}
+
+/// The chosen path with `.png` added unless it already ends that way (GTK adds no extension).
+pub fn png_target(path: PathBuf) -> PathBuf {
+    let is_png = path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("png"));
+    if is_png {
+        return path;
+    }
+    let mut name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    name.push(".png");
+    path.with_file_name(name)
+}
+
+/// `name-1.png … name-N.png` next to the chosen file.
+pub fn part_paths(path: &Path, count: usize) -> Vec<PathBuf> {
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "未命名".into());
+    (1..=count).map(|i| path.with_file_name(format!("{stem}-{i}.png"))).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -791,5 +850,50 @@ mod tests {
         assert_eq!(out, "![a](assets/a%20b.png) ![s](../../shared.png) ![w](https://x.y/z.png) ![m](missing.png)");
         assert_eq!(std::fs::read(new.join("assets/a b.png")).unwrap(), b"img");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn tiny_png(extra: &[u8]) -> Vec<u8> {
+        let mut out = PNG_SIGNATURE.to_vec();
+        for (kind, data) in [(&b"IHDR"[..], &[0u8; 13][..]), (&b"IDAT"[..], extra), (&b"IEND"[..], &[][..])] {
+            out.extend((data.len() as u32).to_be_bytes());
+            out.extend(kind);
+            out.extend(data);
+            out.extend([0u8; 4]);
+        }
+        out
+    }
+
+    #[test]
+    fn splits_concatenated_pngs_and_rejects_anything_else() {
+        let (a, b) = (tiny_png(b"abc"), tiny_png(b""));
+        let both = [a.clone(), b.clone()].concat();
+        let parts = split_pngs(&both, 2).unwrap();
+        assert_eq!(parts, [&a[..], &b[..]]);
+        assert_eq!(split_pngs(&a, 1).unwrap().len(), 1);
+        // 段数与声明不符
+        assert!(split_pngs(&both, 1).is_err());
+        assert!(split_pngs(&a, 2).is_err());
+        assert!(split_pngs(&[], 0).is_err());
+        // 缺 IEND
+        assert!(split_pngs(&a[..a.len() - 12], 1).is_err());
+        // 签名错误 / 首块不是 IHDR / 非 PNG
+        let mut bad = a.clone();
+        bad[1] = b'X';
+        assert!(split_pngs(&bad, 1).is_err());
+        let mut no_ihdr = a.clone();
+        no_ihdr[12..16].copy_from_slice(b"IDAT");
+        assert!(split_pngs(&no_ihdr, 1).is_err());
+        assert!(split_pngs(b"<html></html>", 1).is_err());
+        // 尾部多余字节
+        assert!(split_pngs(&[a.clone(), vec![1, 2, 3]].concat(), 1).is_err());
+    }
+
+    #[test]
+    fn png_targets_and_part_names() {
+        assert_eq!(png_target(PathBuf::from("/x/a")), PathBuf::from("/x/a.png"));
+        assert_eq!(png_target(PathBuf::from("/x/a.PNG")), PathBuf::from("/x/a.PNG"));
+        assert_eq!(png_target(PathBuf::from("/x/a.jpg")), PathBuf::from("/x/a.jpg.png"));
+        let parts = part_paths(Path::new("/x/笔记.png"), 3);
+        assert_eq!(parts, ["/x/笔记-1.png", "/x/笔记-2.png", "/x/笔记-3.png"].map(PathBuf::from));
     }
 }

@@ -38,6 +38,7 @@ export const COMMANDS = [
   { id: 'export-html', group: '导出', title: '导出为网页…', keywords: '导出 网页 html web 单文件 export' },
   { id: 'export-word', group: '导出', title: '导出为 Word…', keywords: '导出 word docx 文档 export' },
   { id: 'export-pdf', group: '导出', title: '导出为 PDF…', keywords: '导出 pdf 打印 print export' },
+  { id: 'export-image', group: '导出', title: '导出为图片…', keywords: '导出 图片 长图 png 截图 分享 image picture screenshot export' },
 
   // ---- 显示
   { id: 'toggle-source', group: '显示', title: '源码模式', keys: 'Mod+/', keywords: '源码 source markdown 原文' },

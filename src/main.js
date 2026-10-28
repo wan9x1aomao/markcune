@@ -1,5 +1,5 @@
 import './style.css';
-import { api, appWindow } from './bridge.js';
+import { api, appWindow, isTauri, saveImageParts } from './bridge.js';
 import { ai, onAiChange } from './ai-core.js';
 import { installReview } from './ai-review.js';
 import { installAiActions, skillCommands } from './ai-skills.js';
@@ -19,7 +19,7 @@ import { installShortcuts } from './shortcuts.js';
 import { createSidebar } from './sidebar.js';
 import { readTableWidths, restoreTableWidths } from './table.js';
 import { createUpdater } from './update.js';
-import { formatKeys, prompt, showMenu, toast } from './ui.js';
+import { formatKeys, hideToast, prompt, showMenu, toast } from './ui.js';
 import { createVoiceInput } from './voice.js';
 import { openVoiceSettings } from './voice-settings.js';
 import { createTidyHint, tidyDocument } from './tidy-ui.js';
@@ -940,6 +940,15 @@ async function exportDocument() {
 
 const exportTitle = () => (app.doc.path ? splitExtension(basename(app.doc.path))[0] : '未命名');
 const exportDiagram = async (code) => (await import('./diagram.js')).renderMermaid(code, 'light');
+/** Pictures draw Mermaid labels as plain SVG text; the default labels are the fallback. */
+const imageDiagram = async (code) => {
+  const { renderMermaid } = await import('./diagram.js');
+  try {
+    return await renderMermaid(code, 'light', { htmlLabels: false });
+  } catch {
+    return renderMermaid(code, 'light');
+  }
+};
 
 /** The exported page as a string (images and math fonts embedded). */
 async function buildExportHtml() {
@@ -997,6 +1006,60 @@ async function exportWord() {
   }
 }
 
+/** The exported picture (PNG data, possibly in several segments), built from the same render as the HTML export. */
+async function buildExportImage(options = {}) {
+  const doc = await exportDocument();
+  const { buildImage } = await import('./export-image.js');
+  return buildImage(doc, {
+    image: async (src) => {
+      const url = await resolveImage(src);
+      return (await embedImage(url)) ?? url;
+    },
+    diagram: imageDiagram,
+    ...options,
+  });
+}
+
+let exportingImage = false;
+
+async function exportImage() {
+  if (exportingImage) return toast('正在导出图片，请稍候');
+  exportingImage = true;
+  try {
+    const { isBlankDoc } = await import('./export-image.js');
+    if (isBlankDoc(await exportDocument())) return toast('文档是空的，没有可导出的内容');
+    toast('正在生成图片…', 60000);
+    let result;
+    try {
+      result = await buildExportImage();
+    } catch (error) {
+      return toast(`导出失败：${error?.message ?? error}`);
+    }
+    if (result.tooLong) return toast('文档太长，无法导出为图片，请改用“导出为 PDF”');
+    let written;
+    try {
+      written = await saveImageParts(result.parts.map((part) => part.bytes), `${exportTitle()}.png`);
+    } catch (error) {
+      return toast(`导出失败：${error}`);
+    }
+    if (!written) return hideToast(); // Cancelled: nothing to say, as with the other exports.
+    const count = result.parts.length;
+    const downloaded = !isTauri();
+    let message =
+      count > 1
+        ? `${downloaded ? '已下载' : '已导出为'} ${count} 张图片${downloaded ? '' : '（文档较长，已按段落分开）'}`
+        : downloaded
+          ? '已下载图片'
+          : result.reduced
+            ? `已导出为图片（文档较长，已按 ${result.scale} 倍清晰度输出）`
+            : '已导出为图片';
+    if (result.failed) message += `，有 ${result.failed} 张图片无法载入，已用占位框代替`;
+    toast(message);
+  } finally {
+    exportingImage = false;
+  }
+}
+
 /** Fills the print-only container with the fully rendered document. */
 async function preparePrintDocument() {
   const doc = await exportDocument();
@@ -1038,6 +1101,7 @@ const actions = {
   'export-html': exportHtml,
   'export-word': exportWord,
   'export-pdf': exportPdf,
+  'export-image': exportImage,
   tidy: () => tidyHint.run(),
   'ai-settings': () => openAiSettings(),
   settings: () =>
@@ -1146,6 +1210,7 @@ function showMore(anchor) {
       item('export-html'),
       item('export-word'),
       item('export-pdf'),
+      item('export-image'),
       'separator',
       item('reveal'),
       ...(app.doc.path
@@ -1369,4 +1434,4 @@ setTimeout(() => updater.check(true), 5000);
 // Lets tests/scenarios.sh drive the editor through ProseMirror's own input handling.
 window.__mdpadDebug = app;
 // Lets tests check the export output without a save dialog.
-window.__mdpadExport = { html: buildExportHtml, print: preparePrintDocument, docx: buildExportDocx };
+window.__mdpadExport = { html: buildExportHtml, print: preparePrintDocument, docx: buildExportDocx, image: buildExportImage };

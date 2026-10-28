@@ -115,6 +115,14 @@ const layoutOf = (blocks, width = 760) => ({ width, height: blocks.at(-1).bottom
   const bridge = read('src/bridge.js');
   assert.match(bridge, /exportImage:[\s\S]{0,120}invoke\('export_image'/);
 
+  // WebKit（macOS / Linux）在 foreignObject 里不给定位元素套用 SVG 自身的缩放/平移，
+  // 公式、代码块会错位成空白；所以 SVG 内不能有 viewBox/transform，2× 只在 canvas 上做。
+  const exporter = read('src/export-image.js');
+  const svgFn = exporter.slice(exporter.indexOf('function svgSource('), exporter.indexOf('async function rasterize('));
+  assert.ok(svgFn.length > 0, '找不到 svgSource');
+  assert.doesNotMatch(svgFn, /viewBox|transform/, 'svgSource 不能在 SVG 内缩放/平移（WebKit 错位）');
+  assert.match(svgFn, /margin-top:-\$\{part\.y\}px/, '分段偏移应使用负 margin');
+
   for (const file of ['src/image-plan.js', 'src/export-image.js', 'tests/export-image.test.mjs']) {
     assert.doesNotMatch(read(file), new RegExp('MD' + 'Pad'), `${file} 出现旧品牌名`);
   }

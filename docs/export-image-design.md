@@ -167,7 +167,7 @@ exportDocument()                      // main.js 现有：取富文本 / 分屏�
 
 1. **不碰编辑器 DOM。** 代码块高亮由 `highlight()` 直接用 lezer 解析文档文本生成，与 Milkdown 的 CodeMirror 懒挂载 / 占位块（`lazy.js`、3.5.6 修过的等高占位）无关；200 块以上大文档的虚拟渲染也不影响导出。**不调用** `editor.renderAll(true)`。
 2. **同一份版式。** 图片看起来就是“导出为网页”在 760px 宽下的样子，差别只在 §4.8 的少量“图片专用规则”。
-3. **SVG 以目标像素尺寸声明。** `<svg width="W×s" height="H×s" viewBox="0 y W h">`，让引擎按矢量直接栅格化到 2x，而不是先 1x 再 `drawImage` 放大（会糊）。分段时只改 `viewBox` 的 `y` / `h`，同一份 SVG 文本复用。
+3. **SVG 以 1x 声明，2x 在 canvas 上做。** `<svg width="W" height="h">`，分段偏移用包裹层的 `margin-top:-y`，再 `drawImage` 到 `W×s × h×s` 的画布。（实现修订：原方案用 `viewBox` 让引擎直接按 2x 栅格化并平移分段，但 Playwright WebKit 实测发现 WebKit 对 `foreignObject` 内自成图层的定位元素——KaTeX、代码块、任务列表复选框——**不套用** SVG 自身的缩放/平移，会按 1x 画在错误位置、留下空白块。改为 SVG 内无任何变换后两引擎均正确；WebKit/Chromium 都按矢量直接栅格化到目标画布尺寸，文字仍清晰，Chromium 输出与原方案逐字节一致。`tests/export-image.test.mjs` 有防回退断言。）
 4. **序列化。** `new XMLSerializer().serializeToString(wrapper)`，`wrapper` 是 `xmlns="http://www.w3.org/1999/xhtml"` 的 `<div>`，内含 `<style>`（`documentCss()` + 图片专用规则 + `katexCss()`）和 `<article class="mdpad-export">`。SVG 文本用 `data:image/svg+xml;charset=utf-8,` + `encodeURIComponent` 交给 `<img>`（WebKit 对 `blob:` SVG 的 `foreignObject` 偶有 taint 问题，data URL 最稳；CSP `img-src` 已放行 `data:` 与 `blob:`）。
 5. **新文件**：`src/export-image.js`（DOM 相关，动态 `import()` 懒加载，与 `export.js` / `docx.js` 一样不进首屏包）和 `src/image-plan.js`（零依赖纯函数，Node 可直接单测）。
 

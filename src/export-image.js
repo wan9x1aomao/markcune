@@ -166,17 +166,25 @@ const escapeXml = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 // eslint-disable-next-line no-control-regex
 const stripControls = (text) => text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]/g, '');
 
-function svgSource(inner, width, pageHeight, scale, part) {
+/**
+ * One segment as an SVG image at 1× (CSS px). The 2× comes from drawing it onto a larger canvas, and
+ * the segment offset is a negative margin, not a viewBox: WebKit (macOS, Linux) paints positioned
+ * content inside a foreignObject (KaTeX, code blocks, task checkboxes) without the SVG's own
+ * scale/translate, so any transform inside the SVG puts those pieces in the wrong place.
+ */
+function svgSource(css, markup, width, scale, part) {
   const outHeight = Math.ceil(part.height * scale);
   const outWidth = Math.round(width * scale);
+  const height = outHeight / scale;
+  const inner = `<div xmlns="${XHTML}" style="margin-top:-${part.y}px"><style>${escapeXml(css)}</style>${markup}</div>`;
   return {
     outWidth,
     outHeight,
     url:
       'data:image/svg+xml;charset=utf-8,' +
       encodeURIComponent(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${outWidth}" height="${outHeight}" viewBox="0 ${part.y} ${width} ${outHeight / scale}">` +
-          `<foreignObject x="0" y="0" width="${width}" height="${pageHeight}">${inner}</foreignObject></svg>`,
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+          `<foreignObject x="0" y="0" width="${width}" height="${height}">${inner}</foreignObject></svg>`,
       ),
   };
 }
@@ -258,11 +266,10 @@ export async function buildImage(doc, { image, diagram, limits = {} } = {}) {
     scope = { ...scope, maxSide: Math.floor(scope.maxSide / 2), maxArea: Math.floor(scope.maxArea / 2) };
   }
 
-  const inner = `<div xmlns="${XHTML}"><style>${escapeXml(css)}</style>${layout.markup}</div>`;
   const parts = [];
   try {
     for (const [i, part] of plan.parts.entries()) {
-      const source = svgSource(inner, PAGE_WIDTH, layout.height, plan.scale, part);
+      const source = svgSource(css, layout.markup, PAGE_WIDTH, plan.scale, part);
       const marks = [];
       if (part.hardCut) marks.push(Math.floor(source.outHeight) - 1);
       if (i > 0 && plan.parts[i - 1].hardCut) marks.push(0);

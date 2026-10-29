@@ -39,7 +39,12 @@ assert.ok(refs.size > 0, '应有条款引用');
 for (const ref of refs) assert.ok(bodies.has(ref), `条款 [${ref}] 没有对应正文`);
 
 // 两家 md 必须一模一样：仓库里给人看的那份和应用里发出去的那份不能分叉。
-assert.equal(notices.trim(), body.trim(), 'THIRD-PARTY-NOTICES.md 与 src/licenses-text.js 内容应一致');
+// Windows checkout may turn the .md into CRLF; the generated JS string stays LF.
+assert.equal(
+  notices.replace(/\r\n/g, '\n').trim(),
+  body.replace(/\r\n/g, '\n').trim(),
+  'THIRD-PARTY-NOTICES.md 与 src/licenses-text.js 内容应一致',
+);
 
 // 入口接线：设置里有按钮、命令注册表里有 id、actions 里有实现。
 assert.ok(read('src/settings.js').includes('opt-licenses'), '设置面板应有开源许可入口');

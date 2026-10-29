@@ -66,8 +66,24 @@ VERSION="$VERSION" node -e '
   }'
 sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
 (cd src-tauri && cargo update -p mdpad --offline >/dev/null 2>&1 || true)
+
+# 1.5 许可清单的标题里印着版本号，必须跟着这一版一起重生成。
+#     漏了这步，CI 的 npm test 会在 licenses.test.mjs 上失败（三个平台一起红）；
+#     就算侥幸绕过，面板里也会写着上一版的版本号。生成器读 package.json，所以只能排在 bump 之后。
+echo "生成第三方许可清单…"
+if ! npm run licenses >/dev/null; then
+  echo "生成许可清单失败，已停止发布"
+  exit 1
+fi
+if ! node tests/licenses.test.mjs; then
+  echo "许可清单与当前版本对不上，已停止发布"
+  exit 1
+fi
+echo
+
 if [[ -n "$(git status --porcelain)" ]]; then
-  git add -A package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+  git add -A package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock \
+    src/licenses-text.js THIRD-PARTY-NOTICES.md
   git commit -q -m "发布 v$VERSION"
 fi
 git push -q

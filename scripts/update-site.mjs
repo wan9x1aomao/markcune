@@ -120,7 +120,10 @@ function applyPage(html, ctx) {
 
 // ---------------------------------------------------------------- changelog
 
-const changelog = join(dirname(fileURLToPath(import.meta.url)), '..', 'CHANGELOG.md');
+// Tests set UPDATE_SITE_CHANGELOG to a fixture. A Windows checkout is often CRLF; a trailing
+// \r makes /$/ miss every heading, so the rendered log is empty while the rest of the page updates.
+const changelog = process.env.UPDATE_SITE_CHANGELOG
+  || join(dirname(fileURLToPath(import.meta.url)), '..', 'CHANGELOG.md');
 const escape = (text) => text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 // Backticks in CHANGELOG.md mean inline code; without this they show up as literal ` marks.
 // Runs of two or more backticks are fence notation (```html) and must stay as typed, so the
@@ -137,7 +140,7 @@ const newer = (a, b) => {
  * on the card; when it is missing, the first bullet doubles as the one-line description.
  */
 const releases = [];
-for (const line of readFileSync(changelog, 'utf8').split('\n')) {
+for (const line of readFileSync(changelog, 'utf8').replace(/\r\n?/g, '\n').split('\n')) {
   const heading = line.match(/^##\s+(\d+\.\d+\.\d+)\s*(?:·\s*(.+))?$/);
   if (heading) {
     releases.push({ version: heading[1], date: (heading[2] ?? '').trim(), summary: '', items: [] });

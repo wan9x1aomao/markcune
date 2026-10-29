@@ -140,7 +140,7 @@ function writeSite(dir, pages) {
   for (const [name, html] of Object.entries(pages)) writeFileSync(join(dir, `${name}.html`), html);
 }
 
-function run(site, version, bins) {
+function run(site, version, bins, env = {}) {
   return spawnSync(process.execPath, [
     script,
     site,
@@ -149,7 +149,7 @@ function run(site, version, bins) {
     `windows=${bins.windows}`,
     `linux=${bins.linux}`,
     `deb=${bins.deb}`,
-  ], { encoding: 'utf8' });
+  ], { encoding: 'utf8', env: { ...process.env, ...env } });
 }
 
 function listedMissing(stderr, file) {
@@ -224,6 +224,21 @@ try {
   assert.doesNotMatch(guide, /OLDLOG/);
   assert.doesNotMatch(guide, /cl-more/);
   assert.doesNotMatch(index, /<!-- changelog:start -->/);
+
+  // Windows git checkouts rewrite CHANGELOG.md as CRLF. The rendered block must match the LF run.
+  const crlfLog = join(root, 'CHANGELOG.crlf.md');
+  writeFileSync(crlfLog, changelog.replace(/\r?\n/g, '\r\n'));
+  assert.ok(readFileSync(crlfLog, 'utf8').includes('\r\n'));
+  const crlfDir = join(root, 'crlf');
+  writeSite(crlfDir, markedPages());
+  const crlfRun = run(crlfDir, newest, bins, { UPDATE_SITE_CHANGELOG: crlfLog });
+  assert.equal(crlfRun.status, 0, crlfRun.stderr);
+  assert.equal(crlfRun.stderr, '');
+  const crlfGuide = readFileSync(join(crlfDir, 'guide.html'), 'utf8');
+  const block = (html) => html.match(/<!-- changelog:start -->([\s\S]*?)<!-- changelog:end -->/)[1];
+  assert.equal(block(crlfGuide), block(guide));
+  assert.doesNotMatch(crlfGuide, /\r/);
+  assert.match(crlfGuide, new RegExp(`class="lg-version">${newest}<`));
 
   const again = run(markedDir, newest, bins);
   assert.equal(again.status, 0, again.stderr);

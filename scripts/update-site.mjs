@@ -1,16 +1,23 @@
 // Updates the official site for a release: download links, version labels, sizes and SHA-256.
 // Usage: node scripts/update-site.mjs <site dir> <version> mac=<file> windows=<file> linux=<file> deb=<file>
-// Elements are found by data-mdpad markers in index.html (link-<platform>, version, size-<platform>, sha-<platform>).
+//
+// After the 2026-10-29 redesign the markers are split across pages. Each page has its own
+// required set — compare.html is left alone (its only data-mdpad="version" is a JS selector).
+//   index.html  links, version, size-<platform>-approx
+//   guide.html  links, version, size-<platform>, sha-<platform>, changelog:start/end
+// Platform keys match release.sh: mac, windows, linux (AppImage), deb.
 // Downloads live under one fixed name per platform (overwritten each release), so links never carry a version.
 import { createHash } from 'node:crypto';
-import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const [site, version, ...pairs] = process.argv.slice(2);
+if (!site || !version) {
+  console.error('用法：node scripts/update-site.mjs <官网目录> <版本号> mac=<文件> windows=<文件> linux=<文件> deb=<文件>');
+  process.exit(1);
+}
 const files = Object.fromEntries(pairs.map((pair) => pair.split('=')));
-const file = join(site, 'index.html');
-let html = readFileSync(file, 'utf8');
 
 // Fixed download names, keyed by the data-mdpad link marker. Keep in sync with scripts/release.sh.
 const LINKS = {
@@ -19,34 +26,96 @@ const LINKS = {
   'link-linux': 'MarkCune-linux-amd64.deb',
   'link-linux-appimage': 'MarkCune-linux-x86_64.AppImage',
 };
-const seen = new Set();
-html = html.replace(/<a\b[^>]*\bdata-mdpad="(link-[a-z-]+)"[^>]*>/g, (tag, marker) => {
-  const name = LINKS[marker];
-  if (!name) return tag;
-  seen.add(marker);
-  const href = `href="downloads/${name}"`;
-  return /\shref="[^"]*"/.test(tag) ? tag.replace(/(\s)href="[^"]*"/, `$1${href}`) : tag.replace(/^<a\b/, `<a ${href}`);
-});
-for (const marker of Object.keys(LINKS)) {
-  if (!seen.has(marker)) console.warn(`update-site: 页面里没有 data-mdpad="${marker}" 的下载链接`);
+const PLATFORMS = ['mac', 'windows', 'linux', 'deb'];
+const LINK_MARKERS = Object.keys(LINKS);
+const PAGES = [
+  {
+    file: 'index.html',
+    markers: [...LINK_MARKERS, 'version', ...PLATFORMS.map((platform) => `size-${platform}-approx`)],
+  },
+  {
+    file: 'guide.html',
+    markers: [
+      ...LINK_MARKERS,
+      'version',
+      ...PLATFORMS.map((platform) => `size-${platform}`),
+      ...PLATFORMS.map((platform) => `sha-${platform}`),
+      'changelog:start',
+      'changelog:end',
+    ],
+  },
+];
+
+// Tag name must follow "<" so a "<" inside a <script> (for example "a < b" before a
+// querySelector('[data-mdpad="version"]')) cannot be mistaken for an element.
+function markedOpen(marker) {
+  return `<[a-zA-Z][\\w:-]*\\b[^>]*\\bdata-mdpad="${marker}"[^>]*>`;
 }
 
-html = html
-  // Any other mention of a versioned file (unmarked buttons, install commands) becomes the fixed name too.
-  .replace(/MarkCune-\d+\.\d+\.\d+-(macOS-arm64\.dmg|macOS-arm64\.tar\.gz|windows-x64-setup\.exe|linux-amd64\.deb|linux-x86_64\.AppImage)/g, 'MarkCune-$1')
-  .replace(/<b>v\d+\.\d+\.\d+<\/b>/g, `<b>v${version}</b>`)
-  // Hero pill reads "<b>品牌</b> v3.5.5 · macOS / …". It must stay plain text: .pill is an
-  // inline-flex box with gap, so wrapping the number in a <span> would split the text into
-  // extra flex items and change the spacing. Replace the digits only.
-  .replace(/(class="pill"><b>[^<]*<\/b> v)\d+\.\d+\.\d+/g, `$1${version}`)
-  .replace(/(data-mdpad="version">)[^<]*/g, `$1${version}`);
+function replaceText(html, marker, hit, render) {
+  return html.replace(new RegExp(`(${markedOpen(marker)})([^<]*)`, 'g'), (_, open, current) => {
+    hit.add(marker);
+    return `${open}${render(current)}`;
+  });
+}
 
-for (const [platform, path] of Object.entries(files)) {
-  const size = `${(statSync(path).size / 1024 / 1024).toFixed(1)} MB`;
-  const sha = createHash('sha256').update(readFileSync(path)).digest('hex');
+// "约" stays only when this element's own text already has it. The combined Linux pill is
+// `约 <span data-mdpad="size-deb-approx">6.7 MB</span> / <span ...>81.4 MB</span>`: 约 sits
+// outside the marker, so those spans must stay a bare size. Guide size-* is the same.
+function sizeText(current, size) {
+  return current.trimStart().startsWith('约') ? `约 ${size}` : size;
+}
+
+function applyPage(html, ctx) {
+  const hit = new Set();
+  html = html.replace(/<a\b[^>]*\bdata-mdpad="(link-[a-z-]+)"[^>]*>/g, (tag, marker) => {
+    const name = LINKS[marker];
+    if (!name) return tag;
+    hit.add(marker);
+    const href = `href="downloads/${name}"`;
+    return /\shref="[^"]*"/.test(tag) ? tag.replace(/(\s)href="[^"]*"/, `$1${href}`) : tag.replace(/^<a\b/, `<a ${href}`);
+  });
+
   html = html
-    .replace(new RegExp(`(data-mdpad="size-${platform}">)[^<]*`, 'g'), `$1${size}`)
-    .replace(new RegExp(`(data-mdpad="sha-${platform}"><b>SHA-256</b> )[^<]*`, 'g'), `$1${sha}`);
+    // Any other mention of a versioned file (unmarked buttons, install commands) becomes the fixed name too.
+    .replace(/MarkCune-\d+\.\d+\.\d+-(macOS-arm64\.dmg|macOS-arm64\.tar\.gz|windows-x64-setup\.exe|linux-amd64\.deb|linux-x86_64\.AppImage)/g, 'MarkCune-$1')
+    .replace(/<b>v\d+\.\d+\.\d+<\/b>/g, `<b>v${ctx.version}</b>`)
+    // Hero pill reads "<b>品牌</b> v3.5.5 · macOS / …". It must stay plain text: .pill is an
+    // inline-flex box with gap, so wrapping the number in a <span> would split the text into
+    // extra flex items and change the spacing. Replace the digits only.
+    .replace(/(class="pill"><b>[^<]*<\/b> v)\d+\.\d+\.\d+/g, `$1${ctx.version}`);
+
+  // Keep a leading "v" already on the element (index badge "v4.0.1") and leave it off where
+  // the current text has none (guide "当前最新版本：4.0.1").
+  html = replaceText(html, 'version', hit, (current) => `${current.startsWith('v') ? 'v' : ''}${ctx.version}`);
+
+  for (const platform of PLATFORMS) {
+    const { size, sha } = ctx.platforms[platform];
+    html = replaceText(html, `size-${platform}`, hit, (current) => sizeText(current, size));
+    html = replaceText(html, `size-${platform}-approx`, hit, (current) => sizeText(current, size));
+    // <code data-mdpad="sha-mac">HEX</code>. The attribute may sit anywhere in the tag;
+    // the old "<b>SHA-256</b>" prefix is not part of the redesigned markup.
+    html = replaceText(html, `sha-${platform}`, hit, () => sha);
+  }
+
+  let paired = false;
+  html = html.replace(/(<!-- changelog:start -->)[\s\S]*?(<!-- changelog:end -->)/g, (_, start, end) => {
+    paired = true;
+    return `${start}${ctx.log}${end}`;
+  });
+  if (paired) {
+    hit.add('changelog:start');
+    hit.add('changelog:end');
+  } else {
+    const hasStart = html.includes('<!-- changelog:start -->');
+    const hasEnd = html.includes('<!-- changelog:end -->');
+    if (hasStart && !hasEnd) hit.add('changelog:start');
+    if (hasEnd && !hasStart) hit.add('changelog:end');
+  }
+  // The previous renderer left a "展开其余 N 个版本" button outside the markers; the new block
+  // carries its own <details> controls, so a leftover button would duplicate them.
+  html = html.replace(/<button class="cl-more"[^>]*>[^<]*<\/button>\s*/g, '');
+  return { html, hit };
 }
 
 // ---------------------------------------------------------------- changelog
@@ -206,10 +275,56 @@ function renderLog(shown) {
     </div>`;
 }
 
+const dropped = releases.filter((r) => newer(r.version, version));
+if (dropped.length) {
+  console.warn(
+    `update-site: CHANGELOG 中有比 ${version} 更新的条目，已跳过：${dropped.map((r) => r.version).join(', ')}`,
+  );
+}
 const shown = releases.filter((r) => !newer(r.version, version));
-html = html.replace(/(<!-- changelog:start -->)[\s\S]*?(<!-- changelog:end -->)/, `$1${renderLog(shown)}$2`);
-// The previous renderer left a "展开其余 N 个版本" button outside the markers; the new block
-// carries its own <details> controls, so a leftover button would duplicate them.
-html = html.replace(/<button class="cl-more"[^>]*>[^<]*<\/button>\s*/g, '');
 
-writeFileSync(file, html);
+const platforms = {};
+for (const platform of PLATFORMS) {
+  const path = files[platform];
+  if (!path) {
+    console.error(`update-site: 缺少参数 ${platform}=<文件>`);
+    process.exit(1);
+  }
+  let data;
+  try {
+    data = readFileSync(path);
+  } catch (err) {
+    console.error(`update-site: 无法读取 ${platform} 文件 ${path}：${err.message}`);
+    process.exit(1);
+  }
+  platforms[platform] = {
+    size: `${(statSync(path).size / 1024 / 1024).toFixed(1)} MB`,
+    sha: createHash('sha256').update(data).digest('hex'),
+  };
+}
+
+const ctx = { version, platforms, log: renderLog(shown) };
+const pending = [];
+const errors = [];
+for (const page of PAGES) {
+  const path = join(site, page.file);
+  if (!existsSync(path)) {
+    errors.push(`update-site: 找不到页面 ${page.file}`);
+    continue;
+  }
+  const { html, hit } = applyPage(readFileSync(path, 'utf8'), ctx);
+  const missing = page.markers.filter((marker) => !hit.has(marker));
+  if (missing.length) {
+    errors.push(`update-site: 以下标记在 ${page.file} 中找不到：${missing.join(', ')}`);
+    continue;
+  }
+  pending.push({ path, html });
+}
+if (errors.length) {
+  for (const line of errors) console.error(line);
+  if (errors.some((line) => line.includes('找不到：'))) {
+    console.error('页面结构可能已改动，请先核对标记再发版。');
+  }
+  process.exit(1);
+}
+for (const page of pending) writeFileSync(page.path, page.html);

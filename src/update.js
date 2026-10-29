@@ -46,9 +46,9 @@ export function createUpdater(el, { api, toast, beforeRestart }) {
     }
     const first = info.notes?.split('\n').find((line) => line.trim())?.trim();
     // `latest.json` notes conventionally start with the version ("3.5.3：…"); the banner already
-    // names it, so strip the duplicate instead of printing "MDPad 3.5.4 已发布：3.5.4：…".
+    // names it, so strip the duplicate instead of printing "MarkCune 3.5.4 已发布：3.5.4：…".
     const notes = first?.replace(/^\d+\.\d+\.\d+\s*[：:]\s*/, '');
-    show(`MDPad ${info.version} 已发布${notes ? `：${notes}` : '。'}`, [
+    show(`MarkCune ${info.version} 已发布${notes ? `：${notes}` : '。'}`, [
       ['立即更新', download, true],
       ['稍后', hide],
     ]);

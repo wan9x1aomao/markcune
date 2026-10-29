@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <title>MDPad AI lab</title>
+    <title>MarkCune AI lab</title>
     <style>
       html,
       body {
@@ -63,8 +63,8 @@
           window[`_${id}`] = callback;
           return id;
         },
-        async invoke(cmd, args) {
-          window.__stub.calls.push([cmd, args]);
+        async invoke(cmd, args, options) {
+          window.__stub.calls.push([cmd, args, options]);
           if (cmd === 'ai_status') return window.__stub.status;
           if (cmd === 'ai_configure') {
             // Echo what was sent, the way the shell reports the new state back.
@@ -99,6 +99,7 @@
             if (window.__stub.voiceFail) throw window.__stub.voiceFail;
             return 'Key 可用 · FunAudioLLM/SenseVoiceSmall';
           }
+          if (cmd === 'export_image') return Number(options?.headers?.['x-parts'] ?? 1);
           return {};
         },
       };

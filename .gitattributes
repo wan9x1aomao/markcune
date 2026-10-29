@@ -1,0 +1,2 @@
+# tests/rebrand.test.mjs matches adjacent lines in this lockfile. Keep LF on Windows.
+src-tauri/Cargo.lock text eol=lf

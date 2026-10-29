@@ -47,8 +47,10 @@ async function highlight(code, language) {
 /**
  * Renders a ProseMirror document to HTML.
  * Options: image(src) → Promise<url> for the exported page; diagram(code) → Promise<svg>.
+ * missingImage(src, alt) → Element: when given, an image that resolves to nothing (image() returns
+ * null or throws) is replaced by it instead of keeping its original address.
  */
-export async function renderDocument(doc, { image, diagram }) {
+export async function renderDocument(doc, { image, diagram, missingImage }) {
   const state = { math: false };
 
   function inline(node) {
@@ -180,7 +182,9 @@ export async function renderDocument(doc, { image, diagram }) {
     [...container.querySelectorAll('img[data-src]')].map(async (img) => {
       const src = img.getAttribute('data-src');
       img.removeAttribute('data-src');
-      img.setAttribute('src', (await image(src).catch(() => null)) ?? src);
+      const resolved = await image(src).catch(() => null);
+      if (resolved == null && missingImage) img.replaceWith(missingImage(src, img.getAttribute('alt') ?? ''));
+      else img.setAttribute('src', resolved ?? src);
     }),
   );
   return { element: container, math: state.math };
@@ -272,6 +276,18 @@ const printRules = (prefix) => `
   ${prefix}${SCOPE} thead { display: table-header-group; }
   ${prefix}${SCOPE} a { border-bottom: 0; }`;
 
+/** Rules for the exported picture (`scope` as for documentCss): fixed 760px page, nothing clipped. */
+export function imageRules(scope = SCOPE) {
+  return `
+${scope} { width: 760px; max-width: none; margin: 0; }
+${scope} figure.code pre { white-space: pre-wrap; word-break: break-all; overflow: visible; }
+${scope} figure.code { overflow: visible; }
+${scope} th, ${scope} td { overflow-wrap: anywhere; }
+${scope} table { overflow: visible; }
+${scope} .math-block { overflow: visible; }
+${scope} .image-missing { margin: 1.2em 0; padding: 1.2em 1em; border: 1.5px dashed #c5c9d2; border-radius: 8px; background: #f6f7f9; color: #8a909c; text-align: center; font-size: 0.9em; }`;
+}
+
 /** In the app: only the print container is printed. */
 const PRINT_CSS = `
 #print-root { display: none; }
@@ -283,7 +299,7 @@ ${printRules('#print-root ')}
 }`;
 
 /** KaTeX's stylesheet with its woff2 fonts inlined, so exported math looks right anywhere. */
-async function katexCss() {
+export async function katexCss() {
   const rules = [];
   const fonts = [];
   for (const sheet of document.styleSheets) {

@@ -57,15 +57,17 @@ echo
 # 1. One version everywhere, committed so GitHub Actions builds exactly this code.
 VERSION="$VERSION" node -e '
   const fs = require("fs");
-  for (const file of ["package.json", "src-tauri/tauri.conf.json"]) {
+  for (const file of ["package.json", "src-tauri/tauri.conf.json", "package-lock.json"]) {
     const json = JSON.parse(fs.readFileSync(file, "utf8"));
     json.version = process.env.VERSION;
+    // package-lock.json 里还有一个 packages[""].version，tests/rebrand.test.mjs 会核对。
+    if (file === "package-lock.json") json.packages[""].version = process.env.VERSION;
     fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
   }'
 sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
 (cd src-tauri && cargo update -p mdpad --offline >/dev/null 2>&1 || true)
 if [[ -n "$(git status --porcelain)" ]]; then
-  git add -A package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+  git add -A package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
   git commit -q -m "发布 v$VERSION"
 fi
 git push -q
@@ -100,10 +102,10 @@ npx tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":true
 OUT="release/$VERSION"
 rm -rf "$OUT" && mkdir -p "$OUT"
 BUNDLE=src-tauri/target.noindex/release/bundle/macos
-MAC="MDPad-${VERSION}-macOS-arm64"
-cp "$BUNDLE/MDPad.app.tar.gz" "$OUT/$MAC.tar.gz"
-cp "$BUNDLE/MDPad.app.tar.gz.sig" "$OUT/$MAC.tar.gz.sig"
-scripts/make-dmg.sh "$BUNDLE/MDPad.app" "$OUT/$MAC.dmg"
+MAC="MarkCune-${VERSION}-macOS-arm64"
+cp "$BUNDLE/MarkCune.app.tar.gz" "$OUT/$MAC.tar.gz"
+cp "$BUNDLE/MarkCune.app.tar.gz.sig" "$OUT/$MAC.tar.gz.sig"
+scripts/make-dmg.sh "$BUNDLE/MarkCune.app" "$OUT/$MAC.dmg"
 
 echo "等待 Windows / Linux 打包完成…"
 if wait_for_run "$RUN"; then
@@ -127,23 +129,24 @@ for attempt in 1 2 3; do
 done
 [[ -n "$downloaded" ]] || { echo "没能下载 CI 产物，可手动执行：$GH release download v$VERSION -D $OUT --clobber"; exit 1; }
 
-WIN="MDPad-${VERSION}-windows-x64-setup.exe"
-LINUX="MDPad-${VERSION}-linux-x86_64.AppImage"
-DEB="MDPad-${VERSION}-linux-amd64.deb"
+WIN="MarkCune-${VERSION}-windows-x64-setup.exe"
+LINUX="MarkCune-${VERSION}-linux-x86_64.AppImage"
+DEB="MarkCune-${VERSION}-linux-amd64.deb"
 for file in "$WIN" "$WIN.sig" "$LINUX" "$LINUX.sig" "$DEB"; do
   [[ -f "$OUT/$file" ]] || { echo "缺少 $file"; exit 1; }
 done
 
 # The site serves each platform under one fixed name, overwritten on every release; release/<版本号>/
 # keeps the versioned names as an archive. Signatures cover file contents, so renaming keeps them valid.
-SITE_MAC_DMG="MDPad-macOS-arm64.dmg"
-SITE_MAC="MDPad-macOS-arm64.tar.gz"
-SITE_WIN="MDPad-windows-x64-setup.exe"
-SITE_LINUX="MDPad-linux-x86_64.AppImage"
-SITE_DEB="MDPad-linux-amd64.deb"
+SITE_MAC_DMG="MarkCune-macOS-arm64.dmg"
+SITE_MAC="MarkCune-macOS-arm64.tar.gz"
+SITE_WIN="MarkCune-windows-x64-setup.exe"
+SITE_LINUX="MarkCune-linux-x86_64.AppImage"
+SITE_DEB="MarkCune-linux-amd64.deb"
 
 # 3. One latest.json for every platform (non-ASCII escaped so any viewer shows it correctly).
 # Signatures come from the versioned files in $OUT; urls point at the fixed names on the site.
+# 这份清单是给新站 / 后续自动更新用的：MANUAL_UPGRADE=1 时只留在 release/ 里，不复制到旧站。
 VERSION="$VERSION" NOTES="$NOTES" BASE="$DOWNLOAD_BASE_URL" OUT="$OUT" \
   MAC="$MAC.tar.gz" WIN="$WIN" LINUX="$LINUX" \
   SITE_MAC="$SITE_MAC" SITE_WIN="$SITE_WIN" SITE_LINUX="$SITE_LINUX" node -e '
@@ -168,7 +171,24 @@ echo
 echo "已生成 ${OUT}："
 ls -lh "$OUT" | tail -n +2
 
-if [[ -n "$SITE_DIR" ]]; then
+if [[ "${MANUAL_UPGRADE:-0}" == "1" ]]; then
+  echo
+  echo "MANUAL_UPGRADE=1：本次按手动升级发布，旧站保持不动。"
+  echo "  ${SITE_DIR:-旧官网目录} 不写入任何文件，旧站 latest.json 继续是 3.5.6，"
+  echo "  3.5.6 客户端不会收到更新提示，也不会自动装到 4.0.0。"
+  echo
+  echo "新官网就绪后，把这些文件按固定名放到新站 downloads/："
+  echo "  $MAC.dmg → $SITE_MAC_DMG"
+  echo "  $MAC.tar.gz → $SITE_MAC"
+  echo "  $WIN → $SITE_WIN"
+  echo "  $LINUX → $SITE_LINUX"
+  echo "  $DEB → $SITE_DEB"
+  echo "  再把 ${OUT}/latest.json 放到新站更新地址（${UPDATE_ENDPOINT}）。"
+  echo
+  echo "下载页必须写清：macOS 先删掉旧的 MDPad.app；Windows 先卸载旧版 MDPad 再装；"
+  echo "Linux 的 .deb 会自动替换旧包，AppImage 手动删掉旧文件。"
+  echo "新站上线前不要放出这份 latest.json，也不要把 4.0.0 的包挂到旧站。"
+elif [[ -n "$SITE_DIR" ]]; then
   mkdir -p "$SITE_DIR/downloads"
   cp "$OUT/$MAC.dmg"    "$SITE_DIR/downloads/$SITE_MAC_DMG"
   cp "$OUT/$MAC.tar.gz" "$SITE_DIR/downloads/$SITE_MAC"

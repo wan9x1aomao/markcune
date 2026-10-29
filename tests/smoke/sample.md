@@ -1,4 +1,4 @@
-# MDPad 测试
+# MarkCune 测试
 
 这是一段**粗体**、*斜体*、`行内代码`和[链接](https://example.com)。
 

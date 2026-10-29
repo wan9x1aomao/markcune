@@ -1,18 +1,18 @@
-# MDPad 编辑器
+# MarkCune 编辑器
 
-[![CI](https://github.com/wan9x1aomao/mdpad/actions/workflows/ci.yml/badge.svg)](https://github.com/wan9x1aomao/mdpad/actions/workflows/ci.yml)
+[![CI](https://github.com/wan9x1aomao/markcune/actions/workflows/ci.yml/badge.svg)](https://github.com/wan9x1aomao/markcune/actions/workflows/ci.yml)
 
-轻量、免费的本地 Markdown 编辑器。打开就能写字，写下的每个字都留在你自己的硬盘上 —— 不登录、不联网、不上传。
+MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编辑器。打开就能打字，打下的每个字都留在你自己的硬盘上 —— 不登录、不联网、不上传。
 
-**官网：<https://mdpad.app.workbuddy.host/>** ｜ 免费开源（MIT）｜ macOS / Windows / Linux
+**官网：<https://mdpad.app.workbuddy.host/>**（过渡期，markcune.md 上线后切换）｜ 免费开源（MIT）｜ macOS / Windows / Linux
 
-> 名称说明：本项目是带 AI 续写与改写的桌面编辑器，与 GitHub 上同名的终端工具 [`lpalbou/mdpad`](https://github.com/lpalbou/mdpad)、[`radueduard97/MdPad`](https://github.com/radueduard97/MdPad) 及其他同名仓库**无关**。中文语境请称「**MDPad 编辑器**」。
+> 名称说明：MarkCune 曾用名 MDPad 编辑器，中文语境称「MarkCune 编辑器」；官网域名仍是过渡期地址，功能与本地数据都与旧版一致。
 
-![MDPad 编辑器界面](docs/screenshot.png)
+![MarkCune 编辑器界面](docs/screenshot.png)
 
 ## 下载
 
-安装包在官网：**<https://mdpad.app.workbuddy.host/>**
+安装包在官网：**<https://mdpad.app.workbuddy.host/>**（过渡期，markcune.md 上线后切换）
 
 | 平台 | 要求 |
 |---|---|
@@ -20,7 +20,9 @@
 | Windows | 10 / 11，使用系统自带的 WebView2 |
 | Linux | 需要 WebKitGTK 4.1（`.deb` 与 `.AppImage` 都提供） |
 
-历史版本从 [`v3.2.1`](https://github.com/wan9x1aomao/mdpad/tags) 起都打了 tag，每个 tag 就是那个版本的源码快照。
+> 从 3.5.x 升级：4.0.0 不通过自动更新推送，请先卸载旧版 MDPad，再下载安装 MarkCune；设置、AI Key、草稿和书库都会保留。macOS 记得删掉旧的 `MDPad.app`，Windows 先在「应用」里卸载旧版。
+
+历史版本从 [`v3.2.1`](https://github.com/wan9x1aomao/markcune/tags) 起都打了 tag，每个 tag 就是那个版本的源码快照。
 
 ## 功能
 
@@ -57,7 +59,7 @@ npm run dev:web    # 只在浏览器里调前端（vite）
 打包：
 
 ```bash
-npm run build       # macOS：src-tauri/target.noindex/release/bundle/macos/MDPad.app
+npm run build       # macOS：src-tauri/target.noindex/release/bundle/macos/MarkCune.app
 npm run build:win   # Windows：NSIS 安装包
 ```
 
@@ -95,7 +97,7 @@ tests/scenarios.sh                         # 文件操作场景，仅 macOS
 默认关闭。要打开，`⌘K` → **AI 设置…**（也在右上角 `⋯` 菜单里），挑一个服务商、填自己的 Key、点「测试连接」确认能用。内置 DeepSeek、通义千问、Kimi、智谱、OpenAI 和本地 Ollama 的预设，也可以用任意 OpenAI 兼容地址。
 
 - **Key 只在这台电脑上**：存在应用自己的配置文件里，界面读不回来（只在已保存时显示「留空不修改」），提示词写在 Rust 侧，渲染层无法改写或看到
-- **文字直接发给你填的那个地址**，MDPad 不做中转；用谁的服务、数据到哪儿去，由你决定
+- **文字直接发给你填的那个地址**，MarkCune 不做中转；用谁的服务、数据到哪儿去，由你决定
 - **没配 Key 时所有入口都不出现**：没有灰字、没有选区旁的按钮、命令面板和斜杠菜单里也没有改写命令，不会留个点不动的空壳
 - **只有你点「采纳」才会改文档**：提议以「原文划掉 + 新文绿字」的对照呈现，`Esc` 或「拒绝」不留任何痕迹；采纳与拒绝都是一次撤销的事。短的改动就地对照，长改写整块排在段落下——两段长句挤在一行谁都读不下去
 
@@ -115,7 +117,7 @@ tests/scenarios.sh                         # 文件操作场景，仅 macOS
 scripts/release.sh <版本号> "更新说明"
 ```
 
-本地打 macOS 包 → 触发 GitHub Actions 打 Windows / Linux → 收产物、生成 `latest.json`、更新官网目录。需要签名私钥（`~/.tauri/mdpad.key`）和已登录的 `gh`，配置写在 `scripts/release.conf`。**这个脚本只服务于本仓库的发布流程，不是安装或构建 MDPad 的方式**；从源码构建请用上面的 `npm run build`。
+本地打 macOS 包 → 触发 GitHub Actions 打 Windows / Linux → 收产物、生成 `latest.json`、更新官网目录。需要签名私钥（`~/.tauri/mdpad.key`）和已登录的 `gh`，配置写在 `scripts/release.conf`。**这个脚本只服务于本仓库的发布流程，不是安装或构建 MarkCune 的方式**；从源码构建请用上面的 `npm run build`。
 
 ## 目录
 

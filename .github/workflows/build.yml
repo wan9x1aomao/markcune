@@ -36,7 +36,7 @@ jobs:
             exit 1
           fi
           if [ "$EXISTING" = "missing" ]; then
-            gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "MDPad $VERSION" --notes "构建产物，由 scripts/release.sh 收集后发布到官网。"
+            gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "MarkCune $VERSION" --notes "构建产物，由 scripts/release.sh 收集后发布到官网。"
           fi
 
   build:
@@ -115,13 +115,13 @@ jobs:
           mkdir -p out
           if [ "${{ matrix.platform }}" = windows ]; then
             npx tauri build --bundles nsis --config "$CONFIG"
-            cp $BUNDLE/nsis/*-setup.exe "out/MDPad-$VERSION-windows-x64-setup.exe"
-            cp $BUNDLE/nsis/*-setup.exe.sig "out/MDPad-$VERSION-windows-x64-setup.exe.sig"
+            cp $BUNDLE/nsis/*-setup.exe "out/MarkCune-$VERSION-windows-x64-setup.exe"
+            cp $BUNDLE/nsis/*-setup.exe.sig "out/MarkCune-$VERSION-windows-x64-setup.exe.sig"
           else
             npx tauri build --bundles appimage,deb --config "$CONFIG"
-            cp $BUNDLE/appimage/*.AppImage "out/MDPad-$VERSION-linux-x86_64.AppImage"
-            cp $BUNDLE/appimage/*.AppImage.sig "out/MDPad-$VERSION-linux-x86_64.AppImage.sig"
-            cp $BUNDLE/deb/*.deb "out/MDPad-$VERSION-linux-amd64.deb"
+            cp $BUNDLE/appimage/*.AppImage "out/MarkCune-$VERSION-linux-x86_64.AppImage"
+            cp $BUNDLE/appimage/*.AppImage.sig "out/MarkCune-$VERSION-linux-x86_64.AppImage.sig"
+            cp $BUNDLE/deb/*.deb "out/MarkCune-$VERSION-linux-amd64.deb"
           fi
           ls -la out
 

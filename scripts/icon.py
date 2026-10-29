@@ -1,4 +1,4 @@
-"""Renders the bright MDPad app icon to src-tauri/app-icon.png (+ the full-bleed macOS version).
+"""Renders the bright MarkCune app icon to src-tauri/app-icon.png (+ the full-bleed macOS version).
 
 The design is drawn on the old 1024 grid (100px of clear space) and then scaled up to the
 macOS icon grid the system's own icons use — see BODY below.

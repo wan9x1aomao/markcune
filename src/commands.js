@@ -38,6 +38,7 @@ export const COMMANDS = [
   { id: 'export-html', group: '导出', title: '导出为网页…', keywords: '导出 网页 html web 单文件 export' },
   { id: 'export-word', group: '导出', title: '导出为 Word…', keywords: '导出 word docx 文档 export' },
   { id: 'export-pdf', group: '导出', title: '导出为 PDF…', keywords: '导出 pdf 打印 print export' },
+  { id: 'export-image', group: '导出', title: '导出为图片…', keywords: '导出 图片 长图 png 截图 分享 image picture screenshot export' },
 
   // ---- 显示
   { id: 'toggle-source', group: '显示', title: '源码模式', keys: 'Mod+/', keywords: '源码 source markdown 原文' },
@@ -61,7 +62,7 @@ export const COMMANDS = [
   { id: 'help', group: '设置与帮助', title: '键盘快捷键与功能…', keywords: '帮助 help 快捷键 shortcuts 功能一览 手册 说明' },
   { id: 'check-update', group: '设置与帮助', title: '检查更新…', keywords: '更新 update 检查升级 版本' },
   { id: 'changelog', group: '设置与帮助', title: '更新日志', keywords: '更新日志 changelog 版本历史 release' },
-  { id: 'website', group: '设置与帮助', title: 'MDPad 官网', keywords: '官网 website 主页 下载 homepage' },
+  { id: 'website', group: '设置与帮助', title: 'MarkCune 官网', keywords: '官网 website 主页 下载 homepage' },
 ];
 
 export const commandById = Object.fromEntries(COMMANDS.map((c) => [c.id, c]));

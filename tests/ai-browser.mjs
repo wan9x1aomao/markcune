@@ -2140,6 +2140,234 @@ try {
     && codeTorn.heights[0] === codeFar.heights[0],
   JSON.stringify({ before: codeFar, after: codeTorn }));
 
+  // ============================== 导出图片 ==============================
+  // 整条流水线在 Chromium 里跑真的：渲染 → 离屏量尺寸 → SVG foreignObject → canvas → PNG。
+  // WebKit 两端（macOS / Linux）没法在这里测，见 docs/export-image-design.md §7.4。
+  await fresh();
+  const IMG_FENCE = '```';
+  const IMAGE_DOC = [
+    '# 导出图片测试标题',
+    '',
+    '正文里有一段**加粗**和 `行内代码`，还有 [链接](https://example.com)，行内公式 $E=mc^2$ 也在。',
+    '',
+    `${IMG_FENCE}js`,
+    'const answer = 42;',
+    'function hello() { return "你好"; }',
+    IMG_FENCE,
+    '',
+    '| 列一 | 列二 |',
+    '| --- | --- |',
+    '| 格一 | 格二 |',
+    '',
+    '- [x] 已完成的事',
+    '- [ ] 未完成的事',
+    '',
+    `${IMG_FENCE}latex`,
+    '\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}',
+    IMG_FENCE,
+    '',
+    `${IMG_FENCE}mermaid`,
+    'graph TD',
+    '  A[开始] --> B[结束]',
+    IMG_FENCE,
+    '',
+    '![本地图](__DATA_URL__)',
+    '',
+  ].join('\n');
+  const imgSnapshot = () => run(`(() => {
+    const root = document.getElementById('root');
+    const sel = window.__lab.view.state.selection;
+    return JSON.stringify({ md: window.__lab.md(), from: sel.from, to: sel.to, scroll: root.scrollTop });
+  })()`);
+  const png = (part) => Buffer.from(part.base64, 'base64');
+  const pngSize = (buffer) => ({ width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) });
+  const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  await run(`(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 200; canvas.height = 100;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#d33'; ctx.fillRect(0, 0, 200, 100);
+    const md = ${JSON.stringify(IMAGE_DOC)}.replace('__DATA_URL__', canvas.toDataURL('image/png'));
+    window.__lab.setDoc(md);
+    await new Promise((r) => setTimeout(r, 500));
+    document.getElementById('root').scrollTop = 0;
+  })()`);
+  const beforeImage = await imgSnapshot();
+  const shot = await run(`(async () => {
+    const result = await window.__lab.image();
+    const article = new DOMParser().parseFromString(result.html, 'text/html').querySelector('article');
+    const kids = [...article.children];
+    return {
+      ...result,
+      mathIndex: kids.findIndex((el) => el.classList.contains('math-block')),
+      diagramIndex: kids.findIndex((el) => el.matches('figure.diagram')),
+      imageIndex: kids.findIndex((el) => el.querySelector('img') || el.matches('img')),
+      kidCount: kids.length,
+      hasKatex: !!article.querySelector('.katex'),
+    };
+  })()`);
+  const afterImage = await imgSnapshot();
+  const first = shot.parts?.[0] ? png(shot.parts[0]) : Buffer.alloc(0);
+
+  check('导出图片', 'I1 综合文档得到一张 2× 的 PNG（宽 1520，高 = 测量高 × 2）',
+    shot.parts?.length === 1 && first.subarray(0, 8).equals(PNG_SIGNATURE)
+    && pngSize(first).width === 1520 && pngSize(first).height === Math.ceil(shot.layout.height * 2)
+    && pngSize(first).height > 0 && shot.scale === 2 && shot.reduced === false && shot.failed === 0,
+    JSON.stringify({ parts: shot.parts?.length, size: shot.parts?.[0] && pngSize(first), layout: shot.layout?.height, scale: shot.scale, failed: shot.failed }));
+  check('导出图片', 'I1 渲染含公式、代码高亮、流程图', shot.hasKatex && shot.html.includes('tok-keyword')
+    && shot.mathIndex >= 0 && shot.diagramIndex >= 0, JSON.stringify({ math: shot.mathIndex, diagram: shot.diagramIndex }));
+  check('导出图片', 'I2 图片里有内容：非白像素 > 1%，标题、块级公式、流程图区域都有墨迹',
+    shot.parts?.[0]?.nonWhite > 0.01 && shot.blockInk?.[0] > 0.005
+    && shot.blockInk?.[shot.mathIndex] > 0.003 && shot.blockInk?.[shot.diagramIndex] > 0.003,
+    JSON.stringify({ nonWhite: shot.parts?.[0]?.nonWhite, h1: shot.blockInk?.[0], math: shot.blockInk?.[shot.mathIndex], diagram: shot.blockInk?.[shot.diagramIndex] }));
+  check('导出图片', 'I2 本地图（data URL）被画进去', shot.imageIndex >= 0 && shot.blockInk?.[shot.imageIndex] > 0.1,
+    JSON.stringify({ at: shot.imageIndex, ink: shot.blockInk?.[shot.imageIndex] }));
+  check('导出图片', 'I4 导出不改变文档、选区、滚动，也不残留离屏元素',
+    beforeImage === afterImage && shot.leftovers === 0, `leftovers=${shot.leftovers}`);
+
+  // I3 懒渲染：末尾的代码块还没挂载 CodeMirror，导出照样完整高亮
+  await run(`(async () => {
+    const fence = String.fromCharCode(96).repeat(3);
+    const paragraphs = Array.from({ length: 230 }, (_, i) => '第 ' + (i + 1) + ' 段文字，用来把文档撑长。').join('\\n\\n');
+    window.__lab.setDoc(paragraphs + '\\n\\n' + fence + 'js\\nconst lastBlock = 1;\\n' + fence + '\\n');
+    await new Promise((r) => setTimeout(r, 800));
+    document.getElementById('root').scrollTop = 0;
+    await new Promise((r) => setTimeout(r, 300));
+  })()`);
+  const lazyMounted = await run(`(() => {
+    const blocks = [...document.querySelectorAll('.milkdown-code-block')];
+    return blocks.length ? !!blocks.at(-1).querySelector('.cm-editor') : 'none';
+  })()`);
+  const lazyShot = await run(`(async () => {
+    const r = await window.__lab.image();
+    return { html: r.html, parts: r.parts.length, scale: r.scale, reduced: r.reduced };
+  })()`);
+  check('导出图片', 'I3 远离视口、未挂载 CodeMirror 的代码块也完整高亮',
+    lazyMounted === false && /tok-keyword[^>]*>const/.test(lazyShot.html) && lazyShot.html.includes('lastBlock'),
+    `mounted=${lazyMounted} parts=${lazyShot.parts} scale=${lazyShot.scale}`);
+
+  // I5 小上限：降倍数或分段，每段不超过上限
+  await run(`(async () => {
+    const paragraphs = Array.from({ length: 160 }, (_, i) => '第 ' + (i + 1) + ' 段文字，用来把文档撑长一些。').join('\\n\\n');
+    window.__lab.setDoc(paragraphs + '\\n');
+    await new Promise((r) => setTimeout(r, 600));
+  })()`);
+  const longShot = await run(`window.__lab.image({ limits: { maxSide: 4000 } })`);
+  const longSizes = (longShot.parts ?? []).map((p) => pngSize(png(p)));
+  check('导出图片', 'I5 超出上限时降清晰度或分段，每段高 ≤ 上限、宽度一致',
+    (longShot.reduced || longShot.parts.length > 1) && longSizes.every((s) => s.height <= 4000)
+    && new Set(longSizes.map((s) => s.width)).size === 1 && !longShot.tooLong,
+    JSON.stringify({ parts: longShot.parts.length, scale: longShot.scale, reduced: longShot.reduced, sizes: longSizes, layout: longShot.layout.height }));
+  const splitShot = await run(`window.__lab.image({ limits: { maxSide: 2000, maxParts: 10 } })`);
+  const splitSizes = (splitShot.parts ?? []).map((p) => pngSize(png(p)));
+  check('导出图片', 'I5 分段时各段首尾相接，总高等于文档高',
+    splitShot.parts.length > 1 && splitSizes.every((s) => s.height <= 2000)
+    && splitSizes.reduce((sum, s) => sum + s.height, 0) >= splitShot.layout.height * splitShot.scale - splitShot.parts.length
+    && splitShot.scale === 1,
+    JSON.stringify({ parts: splitShot.parts.length, sizes: splitSizes, layout: splitShot.layout.height }));
+  const tooLongShot = await run(`window.__lab.image({ limits: { maxSide: 1000, maxParts: 2 } })`);
+  check('导出图片', 'I5 段数超过上限时返回 tooLong，不出图', tooLongShot.tooLong === true && tooLongShot.parts.length === 0);
+
+  // I6 远程图片失败：占位框 + 计数，不卡住
+  await run(`(async () => {
+    window.__lab.setDoc('开头一段。\\n\\n![示例图](https://example.invalid/a.png)\\n\\n结尾一段。\\n');
+    await new Promise((r) => setTimeout(r, 400));
+  })()`);
+  const remoteStart = Date.now();
+  const remote = await run(`(async () => {
+    const r = await window.__lab.image();
+    return { failed: r.failed, html: r.html, parts: r.parts.length, nonWhite: r.parts[0]?.nonWhite };
+  })()`);
+  check('导出图片', 'I6 远程图片加载失败：仍出图、failed=1、有占位框、耗时 < 20 秒',
+    remote.parts === 1 && remote.failed === 1 && remote.html.includes('image-missing')
+    && remote.html.includes('图片无法导出：示例图') && Date.now() - remoteStart < 20000,
+    JSON.stringify({ failed: remote.failed, ms: Date.now() - remoteStart }));
+
+  // I7 空文档
+  await run(`window.__lab.setDoc('')`);
+  await sleep(300);
+  const blank = await run(`(async () => {
+    const { isBlankDoc } = await import('/export-image.js');
+    try { await window.__lab.image(); return { thrown: null, blank: isBlankDoc(window.__lab.view.state.doc) }; }
+    catch (error) { return { thrown: error.message, blank: isBlankDoc(window.__lab.view.state.doc) }; }
+  })()`);
+  check('导出图片', 'I7 空文档不出图，提示“文档是空的，没有可导出的内容”',
+    blank.blank === true && blank.thrown === '文档是空的，没有可导出的内容', JSON.stringify(blank));
+
+  // I8 写盘接线（Tauri 环境）：一次 IPC，原始字节 + 文件名与段数头
+  const saveWiring = await run(`(async () => {
+    window.isTauri = true;
+    try {
+      const { saveImageParts } = await import('/bridge.js');
+      window.__t.reset();
+      const a = new Uint8Array([1, 2, 3]);
+      const b = new Uint8Array([4, 5]);
+      const written = await saveImageParts([a], '测试.png');
+      const writtenTwo = await saveImageParts([a, b], '测试.png');
+      const calls = window.__stub.calls.filter((c) => c[0] === 'export_image');
+      return {
+        written, writtenTwo, count: calls.length,
+        bytes: calls.map((c) => c[1] instanceof Uint8Array),
+        joined: Array.from(calls[1][1]),
+        headers: calls.map((c) => c[2]?.headers),
+      };
+    } finally { delete window.isTauri; }
+  })()`);
+  check('导出图片', 'I8 Tauri 下经 export_image 写盘：Uint8Array 请求体、x-file-name、x-parts',
+    saveWiring.count === 2 && saveWiring.bytes.every(Boolean) && saveWiring.written === 1 && saveWiring.writtenTwo === 2
+    && saveWiring.headers[0]['x-file-name'] === encodeURIComponent('测试.png') && saveWiring.headers[0]['x-parts'] === '1'
+    && saveWiring.headers[1]['x-parts'] === '2' && saveWiring.joined.join() === '1,2,3,4,5',
+    JSON.stringify(saveWiring));
+
+  // I9 非 Tauri：浏览器下载
+  const download = await run(`(async () => {
+    const { saveImageParts } = await import('/bridge.js');
+    const original = HTMLAnchorElement.prototype.click;
+    const clicks = [];
+    HTMLAnchorElement.prototype.click = function () { clicks.push({ download: this.download, href: this.href }); };
+    try {
+      const one = await saveImageParts([new Uint8Array([1])], '测试.png');
+      const many = await saveImageParts([new Uint8Array([1]), new Uint8Array([2])], '测试.png');
+      return { one, many, clicks, ipc: window.__stub.calls.filter((c) => c[0] === 'export_image').length };
+    } finally { HTMLAnchorElement.prototype.click = original; }
+  })()`);
+  check('导出图片', 'I9 非 Tauri 环境回退为下载：文件名 .png、blob: 地址、多段为 -1 -2',
+    download.one === 1 && download.many === 2 && download.clicks.length === 3
+    && download.clicks[0].download === '测试.png' && download.clicks[0].href.startsWith('blob:')
+    && download.clicks[1].download === '测试-1.png' && download.clicks[2].download === '测试-2.png'
+    && download.ipc === 2, JSON.stringify(download));
+
+  // I10 可发现性
+  await fresh();
+  const imageDiscover = await run(`(async () => {
+    const { paletteCommands } = await import('/discovery.js');
+    const { openPalette } = await import('/palette.js');
+    const { openHelp } = await import('/help.js');
+    const labels = () => [...document.querySelectorAll('.palette .result .label')].map((el) => el.textContent);
+    openPalette({ mode: 'all', commands: paletteCommands(() => {}), recent: [], files: async () => [] });
+    await new Promise((r) => setTimeout(r, 80));
+    const found = {};
+    for (const word of ['png', '长图', '图片']) {
+      const input = document.querySelector('.palette input');
+      input.value = word;
+      input.dispatchEvent(new Event('input'));
+      await new Promise((r) => setTimeout(r, 60));
+      found[word] = labels().includes('导出为图片…');
+    }
+    document.querySelector('.overlay.palette-overlay')?.remove();
+    openHelp({ run: () => {} });
+    await new Promise((r) => setTimeout(r, 60));
+    const group = [...document.querySelectorAll('.help-group')].find((g) => g.querySelector('h3')?.textContent === '导出');
+    const rows = group ? [...group.querySelectorAll('.help-row .label')].map((el) => el.textContent) : [];
+    document.querySelector('.overlay.help-overlay')?.remove();
+    return { found, rows };
+  })()`);
+  check('导出图片', 'I10 命令面板搜 png / 长图 / 图片 都能找到，帮助面板「导出」组收录',
+    Object.values(imageDiscover.found).every(Boolean) && imageDiscover.rows.includes('导出为图片…')
+    && imageDiscover.rows.indexOf('导出为图片…') === imageDiscover.rows.indexOf('导出为 PDF…') + 1,
+    JSON.stringify(imageDiscover));
+
   // ============================== 汇总 ==============================
   const failed = results.filter((r) => !r.pass);
   console.log(`\n${results.length - failed.length}/${results.length} 通过`);

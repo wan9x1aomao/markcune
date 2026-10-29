@@ -1,16 +1,16 @@
 {
-  "name": "mdpad",
-  "version": "3.5.6",
-  "description": "MDPad 编辑器 · 免费开源的本地 Markdown 所见即所得编辑器",
+  "name": "markcune",
+  "version": "4.0.0",
+  "description": "MarkCune 编辑器 · 免费开源的本地 Markdown 所见即所得编辑器",
   "license": "MIT",
   "author": "wan9x1aomao",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wan9x1aomao/mdpad.git"
+    "url": "git+https://github.com/wan9x1aomao/markcune.git"
   },
   "homepage": "https://mdpad.app.workbuddy.host",
   "bugs": {
-    "url": "https://github.com/wan9x1aomao/mdpad/issues"
+    "url": "https://github.com/wan9x1aomao/markcune/issues"
   },
   "keywords": [
     "markdown",
@@ -27,7 +27,7 @@
     "build": "tauri build --bundles app",
     "build:debug": "tauri build --debug --bundles app",
     "build:win": "tauri build --bundles nsis",
-    "test": "node tests/tidy.test.mjs && node tests/ai.test.mjs && node tests/gateway.test.mjs && node tests/notices.test.mjs && node tests/changelog.test.mjs",
+    "test": "node tests/tidy.test.mjs && node tests/ai.test.mjs && node tests/gateway.test.mjs && node tests/notices.test.mjs && node tests/changelog.test.mjs && node tests/rebrand.test.mjs && node tests/export-image.test.mjs",
     "test:browser": "node tests/ai-browser.mjs"
   },
   "devDependencies": {

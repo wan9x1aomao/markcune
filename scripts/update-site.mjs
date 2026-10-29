@@ -14,10 +14,10 @@ let html = readFileSync(file, 'utf8');
 
 // Fixed download names, keyed by the data-mdpad link marker. Keep in sync with scripts/release.sh.
 const LINKS = {
-  'link-mac': 'MDPad-macOS-arm64.dmg',
-  'link-windows': 'MDPad-windows-x64-setup.exe',
-  'link-linux': 'MDPad-linux-amd64.deb',
-  'link-linux-appimage': 'MDPad-linux-x86_64.AppImage',
+  'link-mac': 'MarkCune-macOS-arm64.dmg',
+  'link-windows': 'MarkCune-windows-x64-setup.exe',
+  'link-linux': 'MarkCune-linux-amd64.deb',
+  'link-linux-appimage': 'MarkCune-linux-x86_64.AppImage',
 };
 const seen = new Set();
 html = html.replace(/<a\b[^>]*\bdata-mdpad="(link-[a-z-]+)"[^>]*>/g, (tag, marker) => {
@@ -33,7 +33,7 @@ for (const marker of Object.keys(LINKS)) {
 
 html = html
   // Any other mention of a versioned file (unmarked buttons, install commands) becomes the fixed name too.
-  .replace(/MDPad-\d+\.\d+\.\d+-(macOS-arm64\.dmg|macOS-arm64\.tar\.gz|windows-x64-setup\.exe|linux-amd64\.deb|linux-x86_64\.AppImage)/g, 'MDPad-$1')
+  .replace(/MarkCune-\d+\.\d+\.\d+-(macOS-arm64\.dmg|macOS-arm64\.tar\.gz|windows-x64-setup\.exe|linux-amd64\.deb|linux-x86_64\.AppImage)/g, 'MarkCune-$1')
   .replace(/<b>v\d+\.\d+\.\d+<\/b>/g, `<b>v${version}</b>`)
   // Hero pill reads "<b>品牌</b> v3.5.5 · macOS / …". It must stay plain text: .pill is an
   // inline-flex box with gap, so wrapping the number in a <span> would split the text into

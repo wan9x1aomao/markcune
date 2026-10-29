@@ -137,6 +137,56 @@ window.__lab = {
     for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
     return { size: bytes.length, base64: btoa(binary) };
   },
+  /**
+   * Builds the picture export and hands it back with what a test needs to judge it: each segment as
+   * base64, how much of it is not white, and (single segment) how much ink sits in each top-level block.
+   */
+  image: async (options = {}) => {
+    const { buildImage } = await import('./export-image.js');
+    const { renderMermaid } = await import('./diagram.js');
+    const result = await buildImage(editor.view.state.doc, {
+      image: async (src) => src,
+      diagram: (code) => renderMermaid(code, 'light', { htmlLabels: false }),
+      ...options,
+    });
+    const inkOf = (data, from, to) => {
+      let ink = 0;
+      for (let i = from * 4; i < to * 4; i += 4) if (data[i] < 245 || data[i + 1] < 245 || data[i + 2] < 245) ink++;
+      return to > from ? ink / (to - from) : 0;
+    };
+    const parts = [];
+    let blockInk = [];
+    for (const part of result.parts) {
+      const bitmap = await createImageBitmap(new Blob([part.bytes], { type: 'image/png' }));
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(bitmap, 0, 0);
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      if (result.parts.length === 1) {
+        blockInk = result.layout.blocks.map((b) => {
+          const from = Math.max(0, Math.floor(b.top * result.scale)) * canvas.width;
+          const to = Math.min(canvas.height, Math.ceil(b.bottom * result.scale)) * canvas.width;
+          return inkOf(data, from, to);
+        });
+      }
+      let binary = '';
+      for (let i = 0; i < part.bytes.length; i += 0x8000) binary += String.fromCharCode(...part.bytes.subarray(i, i + 0x8000));
+      parts.push({ width: part.width, height: part.height, base64: btoa(binary), nonWhite: inkOf(data, 0, canvas.width * canvas.height) });
+    }
+    return {
+      scale: result.scale,
+      reduced: result.reduced,
+      failed: result.failed,
+      tooLong: result.tooLong,
+      html: result.html,
+      layout: result.layout,
+      parts,
+      blockInk,
+      leftovers: document.querySelectorAll('[data-export-image-host]').length,
+    };
+  },
   ctx: () => {
     const c = contextOf(editor.view);
     return { enabled: c.enabled, empty: c.empty, atEnd: c.atEnd, paragraph: c.paragraph, composing: c.isComposing, cooldown: c.cooldown, chars: c.chars, pos: c.pos, version: c.version };

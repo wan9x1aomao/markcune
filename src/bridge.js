@@ -1,7 +1,8 @@
 // Calls into the Tauri shell (src-tauri/src).
-import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
+export { isTauri };
 export const appWindow = getCurrentWebviewWindow();
 
 export const api = {
@@ -44,6 +45,9 @@ export const api = {
   print: () => invoke('print_page'),
   exportHtml: (html, name) => invoke('export_html', { html, name }),
   exportDocx: (bytes, name) => invoke('export_docx', bytes, { headers: { 'x-file-name': encodeURIComponent(name) } }),
+  /** `bytes`: the PNGs back to back; `parts` how many there are. Resolves with the files written (0 = cancelled). */
+  exportImage: (bytes, name, parts) =>
+    invoke('export_image', bytes, { headers: { 'x-file-name': encodeURIComponent(name), 'x-parts': String(parts) } }),
   rememberPosition: (path, position) => invoke('remember_position', { path, position }),
   setSetting: (key, value) => invoke('set_setting', { key, value }),
   aiAvailable: () => invoke('ai_available'),
@@ -72,3 +76,29 @@ export const api = {
   /** Listens for an event sent to this window. */
   on: (event, fn) => appWindow.listen(event, ({ payload }) => fn(payload)),
 };
+
+/**
+ * Saves the exported PNGs (each a Uint8Array): through the shell's save dialog in the app, as
+ * browser downloads elsewhere (dev server, tests). Resolves with how many files were written.
+ */
+export async function saveImageParts(parts, name) {
+  if (isTauri()) {
+    const bytes = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+    let at = 0;
+    for (const part of parts) {
+      bytes.set(part, at);
+      at += part.length;
+    }
+    return api.exportImage(bytes, name, parts.length);
+  }
+  const stem = name.replace(/\.png$/i, '');
+  parts.forEach((part, i) => {
+    const url = URL.createObjectURL(new Blob([part], { type: 'image/png' }));
+    const link = Object.assign(document.createElement('a'), { href: url, download: parts.length > 1 ? `${stem}-${i + 1}.png` : name });
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  });
+  return parts.length;
+}

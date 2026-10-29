@@ -4,7 +4,7 @@ version = "4.0.0"
 description = "本地 Markdown 所见即所得编辑器"
 authors = ["wan9x1aomao"]
 license = "MIT"
-repository = "https://github.com/wan9x1aomao/mdpad"
+repository = "https://github.com/wan9x1aomao/markcune"
 homepage = "https://mdpad.app.workbuddy.host"
 # 这是个应用而不是库，避免误发到 crates.io。
 publish = false

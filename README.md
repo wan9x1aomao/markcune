@@ -1,12 +1,12 @@
 # MarkCune 编辑器
 
-[![CI](https://github.com/wan9x1aomao/mdpad/actions/workflows/ci.yml/badge.svg)](https://github.com/wan9x1aomao/mdpad/actions/workflows/ci.yml)
+[![CI](https://github.com/wan9x1aomao/markcune/actions/workflows/ci.yml/badge.svg)](https://github.com/wan9x1aomao/markcune/actions/workflows/ci.yml)
 
 MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编辑器。打开就能打字，打下的每个字都留在你自己的硬盘上 —— 不登录、不联网、不上传。
 
 **官网：<https://mdpad.app.workbuddy.host/>**（过渡期，markcune.md 上线后切换）｜ 免费开源（MIT）｜ macOS / Windows / Linux
 
-> 名称说明：MarkCune 曾用名 MDPad 编辑器，中文语境称「MarkCune 编辑器」；旧仓库地址与旧域名属于过渡期保留，功能与本地数据都与旧版一致。
+> 名称说明：MarkCune 曾用名 MDPad 编辑器，中文语境称「MarkCune 编辑器」；官网域名仍是过渡期地址，功能与本地数据都与旧版一致。
 
 ![MarkCune 编辑器界面](docs/screenshot.png)
 
@@ -22,7 +22,7 @@ MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编�
 
 > 从 3.5.x 升级：4.0.0 不通过自动更新推送，请先卸载旧版 MDPad，再下载安装 MarkCune；设置、AI Key、草稿和书库都会保留。macOS 记得删掉旧的 `MDPad.app`，Windows 先在「应用」里卸载旧版。
 
-历史版本从 [`v3.2.1`](https://github.com/wan9x1aomao/mdpad/tags) 起都打了 tag，每个 tag 就是那个版本的源码快照。
+历史版本从 [`v3.2.1`](https://github.com/wan9x1aomao/markcune/tags) 起都打了 tag，每个 tag 就是那个版本的源码快照。
 
 ## 功能
 

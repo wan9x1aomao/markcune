@@ -57,7 +57,7 @@
 ## 5. 这次先不动的过渡项
 
 - **域名**：`markcune.com / .md / .app / .cn` 待注册；注册并部署前，README / 应用里的官网链接继续指向旧地址，并注明“过渡期”。
-- **GitHub 仓库**：仍是 `wan9x1aomao/mdpad`；改名后旧地址会自动跳转，但要在域名与站点就绪后再做。
+- **GitHub 仓库**：已改为 `wan9x1aomao/markcune`。旧地址自动跳转到新仓库，不必等域名与站点就绪。
 - **图标 / 字标**：MarkCune 的视觉应从“楔形刻痕 / 文本光标”出发，不用毛笔与墨痕；本次只改原型，正式图标另起一轮。
 - **升级方式（已定 B）**：4.0.0 不推自动更新，旧站 `latest.json` 停在 3.5.6；官网手动下载并提示先卸载旧版。发版流程见 [多平台更名清单](rebrand-platforms.md) 第 6 节。
 - **书库目录**：新用户仍落在 `~/Documents/MDPad/`；是否改成 `~/Documents/MarkCune/` 并做复制式迁移，放到升级 spike 里一起决定。
@@ -94,5 +94,5 @@
    - Linux：`.deb` 自动替换旧包，菜单只有一项；AppImage 手动删旧文件。
 2. **域名与站点**：注册 `markcune.com / .md / .app / .cn`；新站上线后把 README、`src/main.js` 里的旧地址切过去，旧域名 301。
 3. **图标与字标**：以“楔形刻痕 / 文字光标”为起点做正式图标，跑 `npx tauri icon` 重新生成全套并替换 `docs/screenshot.png`。
-4. **GitHub 仓库改名**：站点与域名就绪后再改，旧地址要能跳转。
+4. **GitHub 仓库改名**：已完成，仓库为 `wan9x1aomao/markcune`，旧地址自动跳转。
 5. **发布说明**：按 press 模板写更名公告，第一段保留“MarkCune（原 MDPad 编辑器）”。

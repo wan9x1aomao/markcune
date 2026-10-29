@@ -11,6 +11,7 @@ import { openHelp } from './help.js';
 import { createRichEditor } from './editor.js';
 import { createFindbar } from './findbar.js';
 import { icons } from './icons.js';
+import { openLicenses } from './licenses.js';
 import { downloadNotice } from './notices.js';
 import { createOutline } from './outline.js';
 import { openPalette } from './palette.js';
@@ -1139,6 +1140,7 @@ const actions = {
   changelog: () => api.openUrl(CHANGELOG_URL),
   website: () => api.openUrl(HOMEPAGE_URL),
   help: () => openHelp({ run, onClose: () => app.editor?.focus() }),
+  licenses: () => openLicenses({ onClose: () => app.editor?.focus() }),
   // Handled by the shell (native menu items on macOS).
   'zoom-in': () => api.nativeAction('zoom-in'),
   'zoom-out': () => api.nativeAction('zoom-out'),

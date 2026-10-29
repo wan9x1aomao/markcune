@@ -131,6 +131,10 @@ tests/           单测与冒烟 / 场景测试
 
 ## 许可证
 
-[MIT](LICENSE)。用到的第三方库：Milkdown（MIT）、Tauri（MIT / Apache-2.0）、CodeMirror（MIT）、KaTeX（MIT）、Mermaid（MIT）。
+[MIT](LICENSE)。安装包里用到的第三方组件、各自的版权行与许可原文见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)；应用内「设置 › 关于 › 开源许可」看的是同一份，因为 MIT / Apache-2.0 要求的是**随副本**带上声明，而不是只在仓库里放个文件。
+
+这份清单是算出来的，不是手写的：`npm run licenses` 从 `node_modules` 里实际 import 的包和 `cargo metadata` 的解析图收集组件，再按许可正文去重。**发版前跑一次并提交**，加了依赖却不跑，等于漏掉新组件的署名。
+
+主要组件：Milkdown（MIT）、Tauri（MIT / Apache-2.0）、CodeMirror（MIT）、KaTeX（MIT）、Mermaid（MIT）、docx（MIT）。
 
 欢迎 issue 和 PR。提 PR 前请先跑一遍 `npm test` 和 `cargo test`。

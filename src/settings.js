@@ -95,6 +95,7 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice,
           <div class="buttons">
             <button class="text-button opt-update" type="button">检查更新</button>
             <button class="text-button opt-changelog" type="button">更新日志</button>
+            <button class="text-button opt-licenses" type="button">开源许可</button>
           </div>
         </div>
       </section>
@@ -223,6 +224,11 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice,
   $('.opt-changelog').addEventListener('click', () => {
     close();
     run('changelog');
+  });
+  // 开源许可：清单随安装包分发，所以入口必须在应用里，而不是只在网页上给个链接。
+  $('.opt-licenses').addEventListener('click', () => {
+    close();
+    run('licenses');
   });
 
   const onKey = (event) => {

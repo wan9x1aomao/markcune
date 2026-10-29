@@ -1,6 +1,6 @@
 [package]
 name = "mdpad"
-version = "4.0.0"
+version = "4.0.1"
 description = "本地 Markdown 所见即所得编辑器"
 authors = ["wan9x1aomao"]
 license = "MIT"

@@ -23,6 +23,11 @@ export function toast(message, duration = 2400) {
   toastTimer = setTimeout(() => el.classList.remove('show'), duration);
 }
 
+export function hideToast() {
+  clearTimeout(toastTimer);
+  document.getElementById('toast').classList.remove('show');
+}
+
 let closeOpenMenu = null;
 
 /**

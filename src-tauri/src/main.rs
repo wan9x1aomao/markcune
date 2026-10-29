@@ -232,6 +232,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         &item("export-html", "导出为网页…", None)?,
         &item("export-word", "导出为 Word…", None)?,
         &item("export-pdf", "导出为 PDF…", None)?,
+        &item("export-image", "导出为图片…", None)?,
         &separator()?,
         &item("close", "关闭窗口", Some("CmdOrCtrl+W"))?,
     ])?;
@@ -501,6 +502,53 @@ async fn export_docx(window: WebviewWindow, request: Request<'_>) -> Result<bool
     let target = target.into_path().map_err(|_| "无法使用所选位置".to_string())?;
     files::atomic_write(&target, bytes)?;
     Ok(true)
+}
+
+/// Saves an exported PNG, or several (one per segment) when the document is too tall for one image.
+/// The request body is the PNGs back to back; the target comes only from the save dialog.
+#[tauri::command]
+async fn export_image(window: WebviewWindow, request: Request<'_>) -> Result<u32, String> {
+    const MAX_BYTES: usize = 512 * 1024 * 1024;
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err("图片数据无效".into());
+    };
+    let header = |key: &str| request.headers().get(key).and_then(|value| value.to_str().ok());
+    let count: usize = header("x-parts").and_then(|v| v.parse().ok()).unwrap_or(1);
+    if bytes.len() > MAX_BYTES || count == 0 || count > 100 {
+        return Err("图片数据无效".into());
+    }
+    let pngs = files::split_pngs(bytes, count)?;
+    let name = header("x-file-name")
+        .map(|value| percent_decode_str(value).decode_utf8_lossy().into_owned())
+        .unwrap_or_else(|| "未命名.png".into());
+    let directory = with_win(window.app_handle(), window.label(), |w| {
+        w.doc.as_ref().and_then(|d| d.parent().map(Path::to_path_buf)).or(w.root.clone())
+    })
+    .flatten();
+    let mut dialog = window.dialog().file().add_filter("PNG 图片", &["png"]).set_parent(&window).set_file_name(name);
+    if let Some(dir) = directory {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(chosen) = dialog.blocking_save_file() else { return Ok(0) };
+    let chosen = chosen.into_path().map_err(|_| "无法使用所选位置".to_string())?;
+    let renamed = files::png_target(chosen.clone());
+    let targets = if count == 1 { vec![renamed.clone()] } else { files::part_paths(&renamed, count) };
+    // The dialog already asked about the name as typed; ask again only for what it did not cover.
+    let existing = targets.iter().filter(|t| t.exists() && (count > 1 || **t != chosen)).count();
+    if existing > 0 {
+        let message = if count == 1 {
+            "已存在同名图片，要替换吗？".to_string()
+        } else {
+            format!("将替换已有的 {existing} 张同名图片，要继续吗？")
+        };
+        if !confirm(window.clone(), "导出为图片".into(), message, "替换".into()).await {
+            return Ok(0);
+        }
+    }
+    for (target, png) in targets.iter().zip(pngs) {
+        files::atomic_write(target, png)?;
+    }
+    Ok(count as u32)
 }
 
 #[tauri::command]
@@ -853,6 +901,7 @@ fn main() {
             print_page,
             export_html,
             export_docx,
+            export_image,
             remember_position,
             set_setting,
             ai::ai_available,

@@ -2548,15 +2548,11 @@ body.ai-pending .ai-pick {
 }
 .export-drawer header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
   padding: 0 4px;
-}
-.export-heading {
-  min-width: 0;
-  flex: 1;
 }
 .export-drawer h2 {
   margin: 0;
@@ -2565,22 +2561,12 @@ body.ai-pending .ai-pick {
   letter-spacing: -0.02em;
   line-height: 1.25;
 }
-.export-doc {
-  margin: 4px 0 0;
-  color: var(--text-faint);
-  font-size: 12px;
-  line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .export-close {
   display: grid;
   place-items: center;
   flex: none;
   width: 28px;
   height: 28px;
-  margin-top: -2px;
   border-radius: 8px;
   color: var(--text-muted);
   transition: background var(--t-small) var(--ease), color var(--t-small) var(--ease);

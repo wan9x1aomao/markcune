@@ -40,10 +40,9 @@ function rowTitle(title) {
 
 /**
  * Opens the export drawer. `run(id)` is the same command runner the menus use.
- * `documentTitle` is the current note name, shown under the heading when present.
  * Returns a close function. Nothing is focused on open — a focus ring there reads as a bug.
  */
-export function openExportDrawer({ run, documentTitle, onClose } = {}) {
+export function openExportDrawer({ run, onClose } = {}) {
   document.querySelector('.overlay.export-overlay')?.remove();
 
   const overlay = document.createElement('div');
@@ -51,21 +50,11 @@ export function openExportDrawer({ run, documentTitle, onClose } = {}) {
   overlay.innerHTML = `
     <div class="export-drawer" role="dialog" aria-modal="true" aria-label="导出">
       <header>
-        <div class="export-heading">
-          <h2>导出</h2>
-          <p class="export-doc" hidden></p>
-        </div>
+        <h2>导出</h2>
         <button class="export-close" type="button" aria-label="关闭">${CLOSE}</button>
       </header>
       <div class="export-list"></div>
     </div>`;
-
-  const doc = overlay.querySelector('.export-doc');
-  const name = String(documentTitle ?? '').trim();
-  if (name) {
-    doc.hidden = false;
-    doc.textContent = name;
-  }
 
   const list = overlay.querySelector('.export-list');
   for (const format of FORMATS) {

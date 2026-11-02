@@ -1105,7 +1105,7 @@ const actions = {
   'export-pdf': exportPdf,
   'export-image': exportImage,
   // 菜单栏和「···」都只留这一项；四种格式在抽屉里，行为和文案不变。
-  export: () => openExportDrawer({ run, onClose: () => app.editor?.focus() }),
+  export: () => openExportDrawer({ run, documentTitle: exportTitle(), onClose: () => app.editor?.focus() }),
   tidy: () => tidyHint.run(),
   'ai-settings': () => openAiSettings(),
   settings: () =>

@@ -115,6 +115,7 @@ const layoutOf = (blocks, width = 760) => ({ width, height: blocks.at(-1).bottom
   const drawer = read('src/export-menu.js');
   assert.match(drawer, /export-html[\s\S]*export-word[\s\S]*export-pdf[\s\S]*export-image/);
   assert.match(drawer, /command\.title/);
+  assert.doesNotMatch(drawer, /\.focus\(\)/, '打开抽屉时不要把焦点放在第一行');
 
   const bridge = read('src/bridge.js');
   assert.match(bridge, /exportImage:[\s\S]{0,120}invoke\('export_image'/);

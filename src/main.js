@@ -25,6 +25,7 @@ import { createVoiceInput } from './voice.js';
 import { openVoiceSettings } from './voice-settings.js';
 import { createTidyHint, tidyDocument } from './tidy-ui.js';
 import { openSettings } from './settings.js';
+import { openExportDrawer } from './export-menu.js';
 import { initTheme, primeTheme, toggleTheme } from './theme.js';
 
 // Before anything is painted: the shell answers asynchronously, and a dark-mode user should not see
@@ -1103,6 +1104,8 @@ const actions = {
   'export-word': exportWord,
   'export-pdf': exportPdf,
   'export-image': exportImage,
+  // 菜单栏和「···」都只留这一项；四种格式在抽屉里，行为和文案不变。
+  export: () => openExportDrawer({ run, onClose: () => app.editor?.focus() }),
   tidy: () => tidyHint.run(),
   'ai-settings': () => openAiSettings(),
   settings: () =>
@@ -1209,10 +1212,7 @@ function showMore(anchor) {
       item('toggle-split', app.split),
       item('toggle-focus', app.focus),
       'separator',
-      item('export-html'),
-      item('export-word'),
-      item('export-pdf'),
-      item('export-image'),
+      { label: '导出…', run: () => run('export') },
       'separator',
       item('reveal'),
       ...(app.doc.path

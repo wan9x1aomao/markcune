@@ -1815,6 +1815,12 @@ h3 .md-marker {
     transform: translateY(-6px);
   }
 }
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
 @keyframes rise {
   from {
     opacity: 0;
@@ -2513,6 +2519,66 @@ body.ai-pending .ai-pick {
 .settings-close:hover {
   background: var(--hover);
   color: var(--text);
+}
+
+/* 导出：从右缘滑入的抽屉。视觉和设置面板同一套（底、阴影、圆角、关闭钮），只是贴边。 */
+.overlay.export-overlay {
+  justify-content: flex-end;
+  align-items: stretch;
+  padding: 0;
+}
+.export-drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(320px, 92vw);
+  height: 100%;
+  padding: 18px 16px 24px;
+  border-radius: 18px 0 0 18px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-pop);
+  animation: drawer-in var(--t-med) var(--ease);
+  font-size: 13px;
+  color: var(--text);
+}
+.export-drawer header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 8px;
+}
+.export-drawer h2 {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 600;
+}
+.export-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--text-faint);
+  font-size: 17px;
+  line-height: 1;
+}
+.export-close:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.export-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.export-row {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  text-align: left;
+  font-size: 13.5px;
+}
+.export-row:hover,
+.export-row:focus-visible {
+  background: var(--hover);
 }
 
 /* 键盘快捷键与功能: the same panel language as settings, but dense and two columns — it is a

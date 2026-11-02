@@ -1,7 +1,7 @@
 # 导出为图片 · 设计文档
 
 > 分支：`feature/export-image`（基于 `rebrand/markcune`，4.0.0）
-> 状态：设计稿，**尚未实现**。本文只定方案，不含功能代码。
+> 状态：**已实现并随 4.0.0 发布**（2026-10-29）。本文保留设计过程；实现见 `src/export-image.js`、`src/image-plan.js` 与 Rust 命令 `export_image`。
 > 命令 id：`export-image`；界面标题：**导出为图片…**
 
 ---

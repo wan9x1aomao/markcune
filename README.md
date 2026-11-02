@@ -20,9 +20,9 @@ MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编�
 | Windows | 10 / 11，使用系统自带的 WebView2 |
 | Linux | 需要 WebKitGTK 4.1（`.deb` 与 `.AppImage` 都提供） |
 
-> 从 3.5.x 升级：4.0.0 不通过自动更新推送，请先卸载旧版 MDPad，再下载安装 MarkCune；设置、AI Key、草稿和书库都会保留。macOS 记得删掉旧的 `MDPad.app`，Windows 先在「应用」里卸载旧版。
+> 从 3.5.x 升级：自动更新已恢复，3.5.6 客户端会收到 4.0.1。由于更名后目录名不同，macOS 更新后仍是 `MDPad.app` 里装着 MarkCune 的内容，建议删掉旧 `MDPad.app` 后重装官网 DMG；Windows 与 Linux 可能残留旧版安装项，按官网说明清理即可。设置、AI Key、草稿和书库都会保留。
 
-历史版本从 [`v3.2.1`](https://github.com/wan9x1aomao/markcune/tags) 起都打了 tag，每个 tag 就是那个版本的源码快照。
+历史版本从 [`v3.2.1`](https://github.com/wan9x1aomao/markcune/tags) 起都打了 tag，每个 tag 就是那个版本的源码快照。GitHub Releases 只保留早期版本的安装包；4.0 起的安装包以官网为准，源码仍按 tag 归档。
 
 ## 功能
 
@@ -68,7 +68,7 @@ Linux 的 `.deb` / `.AppImage` 与 Windows 的 `.exe` 由 GitHub Actions 构建�
 ## 测试
 
 ```bash
-npm test                                   # 纯逻辑单测（整理、AI 触发规则、网关协议、下载回执、更新日志格式）
+npm test                                   # 纯逻辑单测（整理、AI 触发规则、网关协议、下载回执、通知、更新日志、更名/版本一致性、图片导出、许可清单、官网更新脚本）
 npm run test:browser                       # 界面与 AI 的逐项测试，真编辑器 + 无头 Chrome（需 Chrome；CI 也会跑）
 (cd src-tauri && cargo test)               # Rust 单测（文件操作、链接识别、解压、AI 输出清洗）
 npx tauri build --debug --no-bundle
@@ -87,6 +87,8 @@ tests/scenarios.sh                         # 文件操作场景，仅 macOS
 更新地址在**打包时**通过 `MDPAD_UPDATE_ENDPOINT` 注入（`src-tauri/src/update.rs` 用 `option_env!` 读取）。不设这个变量编出来的包不会检查更新，从源码自己构建可以直接用。签名公钥写在 `src-tauri/tauri.conf.json`，私钥不进仓库。
 
 检查更新在启动时、窗口回到前台时进行；应用一直留在前台时也会定时复查，频率上限为每 30 分钟一次。旧的 6 小时静默期会让早上检查过的机器整天看不到下午发布的版本，所以改短了。
+
+4.0.0 发布时曾按「手动升级」方案暂停过自动更新；2026-10-29 新官网就绪后已恢复，`scripts/release.conf` 的 `MANUAL_UPGRADE` 为 0，3.5.6 客户端会正常收到 4.0.x。
 
 ## 一键整理的网关（可选）
 
@@ -118,6 +120,8 @@ scripts/release.sh <版本号> "更新说明"
 ```
 
 本地打 macOS 包 → 触发 GitHub Actions 打 Windows / Linux → 收产物、生成 `latest.json`、更新官网目录。需要签名私钥（`~/.tauri/mdpad.key`）和已登录的 `gh`，配置写在 `scripts/release.conf`。**这个脚本只服务于本仓库的发布流程，不是安装或构建 MarkCune 的方式**；从源码构建请用上面的 `npm run build`。
+
+官网目录（`SITE_DIR`）建议用 git 管理：发版脚本会直接改写页面和 `latest.json`，有提交历史才能在改版出错时回滚；`downloads/` 里的安装包体积大、可重新生成，不入库。
 
 ## 目录
 

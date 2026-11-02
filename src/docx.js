@@ -24,6 +24,7 @@ import {
   TextRun,
   WidthType,
 } from 'docx';
+import { EXPORT_CREDIT } from './export-footer.js';
 
 const MONO = 'Consolas';
 const CODE_FILL = 'F7F8FA';
@@ -408,6 +409,7 @@ export async function buildDocx(doc, { image, title }) {
   const ctx = { images, nextInstance: 1, bold: false };
   const children = blocks(doc, ctx);
   if (!children.length) children.push(new Paragraph({ children: [new TextRun({ text: '' })] }));
+  children.push(...exportCreditParagraphs());
   const document = new Document({
     creator: 'MarkCune',
     title: title || '未命名',
@@ -423,4 +425,19 @@ export async function buildDocx(doc, { image, title }) {
   });
   const blob = await Packer.toBlob(document);
   return new Uint8Array(await blob.arrayBuffer());
+}
+
+/** 跟网页导出同一句署名：先一条横线，再写在文末，不插进正文。 */
+function exportCreditParagraphs() {
+  return [
+    new Paragraph({
+      children: [new TextRun({ text: '' })],
+      spacing: { before: 280, after: 120 },
+      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'E6E7EB', space: 1 } },
+    }),
+    new Paragraph({
+      spacing: { before: 200 },
+      children: [new TextRun({ text: EXPORT_CREDIT, color: MUTED, size: 18 })],
+    }),
+  ];
 }

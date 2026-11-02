@@ -6,6 +6,7 @@ import { languages } from '@codemirror/language-data';
 import { highlightCode } from '@lezer/highlight';
 import katex from 'katex';
 import { exportHighlighter, tokenCss } from './code-theme.js';
+import { exportCreditHtml } from './export-footer.js';
 
 const SCOPE = '.mdpad-export';
 const MATH_LANGUAGES = new Set(['latex', 'tex', 'katex', 'math']);
@@ -175,7 +176,8 @@ export async function renderDocument(doc, { image, diagram, missingImage }) {
 
   const container = document.createElement('article');
   container.className = 'mdpad-export';
-  container.innerHTML = await children(doc);
+  // 署名跟在全文最后，和正文隔一条横线。网页、PDF、长图都走这里。
+  container.innerHTML = `${await children(doc)}\n${exportCreditHtml()}`;
 
   // Resolve images last, all at once.
   await Promise.all(
@@ -232,6 +234,7 @@ ${scope} li.task.done > div { color: #8a909c; text-decoration: line-through; }
 ${scope} blockquote { margin: 0 0 1em; padding: 0.1em 0 0.1em 1em; border-left: 3px solid #d6dcf5; color: #5d6370; }
 ${scope} blockquote > :last-child { margin-bottom: 0; }
 ${scope} hr { border: 0; height: 1px; background: #e6e7eb; margin: 2em 0; }
+${scope} .export-credit { margin: 0; color: #8a909c; font-size: 0.92em; }
 ${scope} table { width: 100%; margin: 0.4em 0 1.4em; border-collapse: separate; border-spacing: 0; border: 1px solid #e3e5ea; border-radius: 10px; overflow: hidden; font-size: 0.93em; }
 ${scope} th, ${scope} td { padding: 0.55em 0.9em; border-bottom: 1px solid #e3e5ea; text-align: left; vertical-align: top; }
 ${scope} th + th, ${scope} td + td { border-left: 1px solid #eef0f3; }

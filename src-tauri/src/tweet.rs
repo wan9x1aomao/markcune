@@ -59,7 +59,7 @@ pub fn parse(json: &str) -> Result<Post, String> {
     if let Some(article) = tweet.get("article").filter(|value| value.get("content").is_some()) {
         let title = text_at(article, &["title"]);
         let media = media_map(article);
-        let (body, images) = blocks_to_markdown(article, &media);
+        let (body, images) = with_cover(article, blocks_to_markdown(article, &media));
         return Ok(Post {
             title: if title.is_empty() { format!("@{handle} 的长文") } else { title },
             handle,
@@ -188,18 +188,100 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
-fn media_map(article: &Value) -> Vec<(String, String)> {    let mut out = Vec::new();
-    if let Some(list) = article.get("media_entities").and_then(Value::as_array) {
-        for item in list {
-            let id = text_at(item, &["media_id"]);
-            let url = text_at(item, &["media_info", "original_img_url"]);
-            let url = if url.is_empty() { text_at(item, &["media_info", "preview_image", "original_img_url"]) } else { url };
-            if !id.is_empty() && !url.is_empty() {
-                out.push((id, url));
-            }
+/// 封面不在正文块里，但也是这篇文章的图。已经作为正文插图出现过的不再重复。
+fn with_cover(article: &Value, (body, mut images): (String, Vec<String>)) -> (String, Vec<String>) {
+    let cover = cover_url(article);
+    if cover.is_empty() || images.iter().any(|url| url == &cover) || images.len() >= MAX_IMAGES {
+        return (body, images);
+    }
+    let index = images.len();
+    images.push(cover);
+    let body = if body.trim().is_empty() {
+        format!("![]({IMAGE_PREFIX}{index})")
+    } else {
+        format!("![]({IMAGE_PREFIX}{index})\n\n{body}")
+    };
+    (body, images)
+}
+
+fn cover_url(article: &Value) -> String {
+    let url = text_at(article, &["cover_media", "media_info", "original_img_url"]);
+    if !url.is_empty() {
+        return url;
+    }
+    text_at(article, &["cover_media", "media_info", "preview_image", "original_img_url"])
+}
+
+fn media_map(article: &Value) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let Some(list) = article.get("media_entities").and_then(Value::as_array) else {
+        return out;
+    };
+    for item in list {
+        // media_id 有时是字符串，有时是数字。只认字符串的话这张图会被静默丢掉。
+        let id = scalar_at(item, &["media_id"]);
+        let url = text_at(item, &["media_info", "original_img_url"]);
+        let url = if url.is_empty() {
+            text_at(item, &["media_info", "preview_image", "original_img_url"])
+        } else {
+            url
+        };
+        if !id.is_empty() && !url.is_empty() {
+            out.push((id, url));
         }
     }
     out
+}
+
+/// `entityRanges.key` 对的是 entityMap 的 key，不是数组下标。
+///
+/// 镜像服务把 Draft.js 的对象收成 `{key, value}` 数组后，下标和 key 经常对不上。
+/// 按下标取会把图片和代码块对调，打开来就像这篇文章的图没保存下来。
+fn lookup_entity<'a>(entity_map: &'a Value, key: &Value) -> Option<&'a Value> {
+    let wanted = json_scalar(key);
+    if wanted.is_empty() {
+        return None;
+    }
+    match entity_map {
+        Value::Array(items) => items
+            .iter()
+            .find(|item| json_scalar(item.get("key").unwrap_or(&Value::Null)) == wanted)
+            .or_else(|| wanted.parse::<usize>().ok().and_then(|index| items.get(index))),
+        Value::Object(map) => map.get(&wanted),
+        _ => None,
+    }
+}
+
+/// 数组项是 `{key, value: {type, data}}`；对象项有时直接就是 `{type, data}`。
+fn entity_body(entity: &Value) -> &Value {
+    if entity.get("type").and_then(Value::as_str).is_some() {
+        entity
+    } else {
+        entity.get("value").unwrap_or(entity)
+    }
+}
+
+fn json_scalar(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.trim().to_string(),
+        Value::Number(number) => number
+            .as_u64()
+            .map(|n| n.to_string())
+            .or_else(|| number.as_i64().map(|n| n.to_string()))
+            .unwrap_or_else(|| number.to_string()),
+        _ => String::new(),
+    }
+}
+
+fn scalar_at(value: &Value, path: &[&str]) -> String {
+    let mut cursor = value;
+    for key in path {
+        match cursor.get(*key) {
+            Some(next) => cursor = next,
+            None => return String::new(),
+        }
+    }
+    json_scalar(cursor)
 }
 
 /// Draft.js 的块 → Markdown。
@@ -210,12 +292,7 @@ fn blocks_to_markdown(article: &Value, media: &[(String, String)]) -> (String, V
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let entities: Vec<Value> = article
-        .get("content")
-        .and_then(|content| content.get("entityMap"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let entity_map = article.get("content").and_then(|content| content.get("entityMap"));
 
     let mut images: Vec<String> = Vec::new();
     let mut out: Vec<String> = Vec::new();
@@ -254,9 +331,9 @@ fn blocks_to_markdown(article: &Value, media: &[(String, String)]) -> (String, V
             "blockquote" => out.push(format!("> {}", styled(text, block))),
             "atomic" => {
                 for range in block.get("entityRanges").and_then(Value::as_array).into_iter().flatten() {
-                    let index = range.get("key").and_then(Value::as_u64).unwrap_or(0) as usize;
-                    let Some(entity) = entities.get(index) else { continue };
-                    let value = entity.get("value").unwrap_or(&Value::Null);
+                    let Some(key) = range.get("key") else { continue };
+                    let Some(entity) = entity_map.and_then(|map| lookup_entity(map, key)) else { continue };
+                    let value = entity_body(entity);
                     match value.get("type").and_then(Value::as_str).unwrap_or_default() {
                         // X 的代码块本身就是一段 Markdown（带围栏），原样放进来即可。
                         "MARKDOWN" => {
@@ -273,7 +350,7 @@ fn blocks_to_markdown(article: &Value, media: &[(String, String)]) -> (String, V
                                 .cloned()
                                 .unwrap_or_default();
                             for item in items {
-                                let id = text_at(&item, &["mediaId"]);
+                                let id = scalar_at(&item, &["mediaId"]);
                                 let Some((_, url)) = media.iter().find(|(known, _)| *known == id) else { continue };
                                 let index = match images.iter().position(|seen| seen == url) {
                                     Some(at) => at,
@@ -555,5 +632,95 @@ mod tests {
         let post = parse(&article_json()).unwrap();
         let text = document(&post, &|_| "https://pbs.twimg.com/media/a.jpg".into());
         assert!(text.contains("](https://pbs.twimg.com/media/a.jpg)"));
+    }
+
+    #[test]
+    fn an_image_is_taken_from_the_entity_key_not_its_array_slot() {
+        // 真实响应里 entityMap[0] 常常是代码块，而第一段 atomic 的 key 是 0，
+        // 那张图在数组靠后的位置。按下标取会在「先上结果」前面放进 git clone。
+        let json = r#"{
+          "code": 200,
+          "tweet": {
+            "url": "https://x.com/demo/status/7",
+            "text": "x",
+            "author": {"screen_name": "demo", "name": "演示"},
+            "article": {
+              "title": "先上结果",
+              "content": {
+                "blocks": [
+                  {"type": "atomic", "text": " ", "entityRanges": [{"key": 0, "length": 1, "offset": 0}]},
+                  {"type": "unstyled", "text": "先上结果。", "entityRanges": []}
+                ],
+                "entityMap": [
+                  {"key": "12", "value": {"type": "MARKDOWN", "data": {"markdown": "```sh\ngit clone\n```"}}},
+                  {"key": "0", "value": {"type": "MEDIA", "data": {"mediaItems": [{"mediaId": "555"}]}}}
+                ]
+              },
+              "media_entities": [
+                {"media_id": "555", "media_info": {"original_img_url": "https://pbs.twimg.com/media/a.jpg"}}
+              ]
+            }
+          }
+        }"#;
+        let post = parse(json).unwrap();
+        assert_eq!(post.images, vec!["https://pbs.twimg.com/media/a.jpg".to_string()]);
+        let text = document(&post, &|index| format!("images/{}.jpg", index + 1));
+        let image_at = text.find("![](images/1.jpg)").expect(&text);
+        let sentence_at = text.find("先上结果。").expect(&text);
+        assert!(image_at < sentence_at, "{text}");
+        assert!(!text.contains("git clone"), "代码块不该占掉封面图的位置：{text}");
+    }
+
+    #[test]
+    fn a_numeric_media_id_and_an_object_entity_map_still_resolve() {
+        let json = r#"{
+          "code": 200,
+          "tweet": {
+            "text": "x",
+            "author": {"screen_name": "demo", "name": "演示"},
+            "article": {
+              "title": "数字编号",
+              "content": {
+                "blocks": [
+                  {"type": "atomic", "text": " ", "entityRanges": [{"key": "0", "length": 1, "offset": 0}]}
+                ],
+                "entityMap": {
+                  "0": {"type": "MEDIA", "data": {"mediaItems": [{"mediaId": 555}]}}
+                }
+              },
+              "media_entities": [
+                {"media_id": 555, "media_info": {"original_img_url": "https://pbs.twimg.com/media/n.jpg"}}
+              ]
+            }
+          }
+        }"#;
+        let post = parse(json).unwrap();
+        assert_eq!(post.images, vec!["https://pbs.twimg.com/media/n.jpg".to_string()]);
+    }
+
+    #[test]
+    fn the_cover_is_kept_when_no_block_points_at_it() {
+        let json = r#"{
+          "code": 200,
+          "tweet": {
+            "text": "x",
+            "author": {"screen_name": "demo", "name": "演示"},
+            "article": {
+              "title": "有封面",
+              "cover_media": {"media_id": "9", "media_info": {"original_img_url": "https://pbs.twimg.com/media/cover.jpg"}},
+              "content": {
+                "blocks": [
+                  {"type": "unstyled", "text": "正文", "entityRanges": []}
+                ],
+                "entityMap": []
+              },
+              "media_entities": []
+            }
+          }
+        }"#;
+        let post = parse(json).unwrap();
+        assert_eq!(post.images, vec!["https://pbs.twimg.com/media/cover.jpg".to_string()]);
+        let text = document(&post, &|_| "images/cover.jpg".into());
+        assert!(text.contains("![](images/cover.jpg)\n\n正文"), "{text}");
     }
 }

@@ -229,10 +229,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         &item("rename", "重命名…", None)?,
         &item("reveal", if mac { "在访达中显示" } else { "在资源管理器中显示" }, None)?,
         &separator()?,
-        &item("export-html", "导出为网页…", None)?,
-        &item("export-word", "导出为 Word…", None)?,
-        &item("export-pdf", "导出为 PDF…", None)?,
-        &item("export-image", "导出为图片…", None)?,
+        // One entry. The page opens the drawer; the four formats are not menu items.
+        &item("export", "导出…", None)?,
         &separator()?,
         &item("close", "关闭窗口", Some("CmdOrCtrl+W"))?,
     ])?;

@@ -99,18 +99,23 @@ const layoutOf = (blocks, width = 760) => ({ width, height: blocks.at(-1).bottom
   assert.doesNotMatch(line, /keys:/, '不设快捷键');
 
   const rust = read('src-tauri/src/main.rs');
-  assert.match(
-    rust,
-    /item\("export-pdf", "导出为 PDF…", None\)\?,\s*&item\("export-image", "导出为图片…", None\)\?/,
-    '原生菜单应在导出为 PDF 之后',
-  );
+  assert.match(rust, /item\("export", "导出…", None\)\?/, '原生菜单只留一个导出入口');
+  for (const id of ['export-html', 'export-word', 'export-pdf', 'export-image']) {
+    assert.doesNotMatch(rust, new RegExp(`item\\("${id}"`), `原生菜单不应再单列 ${id}`);
+  }
   assert.match(rust.slice(rust.indexOf('generate_handler!')), /export_image,/);
   assert.match(rust, /async fn export_image\(/);
 
   const main = read('src/main.js');
   assert.match(main, /'export-image': exportImage,/);
-  assert.match(main, /item\('export-pdf'\),\s*item\('export-image'\)/);
+  assert.match(main, /label: '导出…', run: \(\) => run\('export'\)/);
+  assert.doesNotMatch(main, /item\('export-html'\)/);
   assert.match(main, /image: buildExportImage/);
+
+  const drawer = read('src/export-menu.js');
+  assert.match(drawer, /export-html[\s\S]*export-word[\s\S]*export-pdf[\s\S]*export-image/);
+  assert.match(drawer, /command\.title/);
+  assert.doesNotMatch(drawer, /\.focus\(\)/, '打开抽屉时不要把焦点放在第一行');
 
   const bridge = read('src/bridge.js');
   assert.match(bridge, /exportImage:[\s\S]{0,120}invoke\('export_image'/);

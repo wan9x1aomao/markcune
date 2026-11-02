@@ -1815,6 +1815,12 @@ h3 .md-marker {
     transform: translateY(-6px);
   }
 }
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
 @keyframes rise {
   from {
     opacity: 0;
@@ -2513,6 +2519,164 @@ body.ai-pending .ai-pick {
 .settings-close:hover {
   background: var(--hover);
   color: var(--text);
+}
+
+/* 导出抽屉：贴右缘。打开时不把焦点放在第一行，避免一出来就套一圈粗焦点环。 */
+.overlay.export-overlay {
+  justify-content: flex-end;
+  align-items: stretch;
+  padding: 0;
+  background: rgba(22, 24, 32, 0.28);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+}
+:root[data-theme='dark'] .overlay.export-overlay {
+  background: rgba(0, 0, 0, 0.48);
+}
+.export-drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(360px, 92vw);
+  height: 100%;
+  padding: 20px 16px 28px;
+  border-radius: 16px 0 0 16px;
+  background: var(--surface);
+  box-shadow: -1px 0 0 var(--line), var(--shadow-pop);
+  animation: drawer-in 220ms var(--ease);
+  font-size: 13px;
+  color: var(--text);
+}
+.export-drawer header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 0 4px;
+}
+.export-drawer h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.export-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  transition: background var(--t-small) var(--ease), color var(--t-small) var(--ease);
+}
+.export-close svg {
+  width: 16px;
+  height: 16px;
+}
+.export-close:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.export-close:focus {
+  outline: none;
+}
+.export-close:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.export-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.export-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  text-align: left;
+  transition: background var(--t-small) var(--ease);
+}
+.export-row:hover {
+  background: var(--hover);
+}
+.export-row:active {
+  background: var(--active);
+}
+.export-row:focus {
+  outline: none;
+}
+.export-row:focus-visible {
+  outline: none;
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+.export-glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+.export-glyph svg {
+  width: 18px;
+  height: 18px;
+}
+.export-glyph.web {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.export-glyph.word {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-text);
+}
+.export-glyph.pdf {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+.export-glyph.image {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+}
+.export-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.export-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.export-desc {
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.export-chevron {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--text-faint);
+  opacity: 0.45;
+  transition: opacity var(--t-small) var(--ease), transform var(--t-small) var(--ease);
+}
+.export-chevron svg {
+  width: 16px;
+  height: 16px;
+}
+.export-row:hover .export-chevron,
+.export-row:focus-visible .export-chevron {
+  opacity: 0.9;
+  transform: translateX(2px);
 }
 
 /* 键盘快捷键与功能: the same panel language as settings, but dense and two columns — it is a

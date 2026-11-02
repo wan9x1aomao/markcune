@@ -3,10 +3,11 @@
 //! The user pastes a URL; we download it and drop it under the library folder (`~/Documents/MDPad/`)
 //! so the sidebar lists the whole book.
 //!
-//! A repository link is fetched as a zip archive rather than file by file: a book's images and the
-//! links between its chapters are relative paths, so downloading a single `.md` on its own would
-//! leave every one of them broken.
+//! A repository link is fetched as a zip archive rather than file by file: a book's chapters link to
+//! each other by relative paths, so only the archive keeps that structure. A single document still
+//! has its own images — relative, absolute, and lazy-loaded — downloaded beside it.
 
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -302,12 +303,29 @@ fn client() -> Result<reqwest::Client, String> {
         .map_err(|error| format!("无法准备网络请求：{error}"))
 }
 
+struct Download {
+    bytes: Vec<u8>,
+    content_type: String,
+}
+
 /// Downloads a URL, stopping as soon as it grows past `limit`.
 ///
 /// The cap has to be enforced while the bytes arrive, not before: GitHub's archive endpoint does
 /// not send a Content-Length, so "check the size first" is not an option there.
 async fn download(client: &reqwest::Client, url: &str, limit: u64) -> Result<Vec<u8>, Failure> {
-    let mut response = client.get(url).send().await.map_err(|error| Failure::Message(friendly(&error)))?;
+    Ok(download_limited(client, url, limit).await?.bytes)
+}
+
+async fn download_limited(
+    client: &reqwest::Client,
+    url: &str,
+    limit: u64,
+) -> Result<Download, Failure> {
+    let mut response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| Failure::Message(friendly(&error)))?;
     let status = response.status();
     if !status.is_success() {
         let text = match status.as_u16() {
@@ -316,7 +334,11 @@ async fn download(client: &reqwest::Client, url: &str, limit: u64) -> Result<Vec
             429 => "请求太频繁了，稍后再试".to_string(),
             code => format!("下载失败：HTTP {code}"),
         };
-        return Err(if status.as_u16() == 404 { Failure::NotFound(text) } else { Failure::Message(text) });
+        return Err(if status.as_u16() == 404 {
+            Failure::NotFound(text)
+        } else {
+            Failure::Message(text)
+        });
     }
     if let Some(total) = response.content_length() {
         if total > limit {
@@ -327,15 +349,31 @@ async fn download(client: &reqwest::Client, url: &str, limit: u64) -> Result<Vec
             )));
         }
     }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
 
     let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|error| Failure::Message(friendly(&error)))? {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| Failure::Message(friendly(&error)))?
+    {
         if body.len() as u64 + chunk.len() as u64 > limit {
-            return Err(Failure::Message(format!("内容超过 {} 的上限，已停止下载", size(limit))));
+            return Err(Failure::Message(format!(
+                "内容超过 {} 的上限，已停止下载",
+                size(limit)
+            )));
         }
         body.extend_from_slice(&chunk);
     }
-    Ok(body)
+    Ok(Download {
+        bytes: body,
+        content_type,
+    })
 }
 
 fn friendly(error: &reqwest::Error) -> String {
@@ -564,9 +602,11 @@ pub async fn open_from_url(app: AppHandle, url: String) -> Result<Fetched, Strin
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent).map_err(|error| format!("无法创建目录：{error}"))?;
             }
+            // 单篇 Markdown 里的图（相对路径、绝对地址、懒加载）落到文档旁边，引用改写成本地路径。
+            let (text, failed) = localize_images(&client, &text, &url, dest.parent().unwrap_or(&root), true, &[]).await;
             atomic_write(&dest, text.as_bytes())?;
             let title = dest.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-            Ok(Fetched { path: dest, root, kind: "file", title, files: 1, skipped: 0, replaced: false })
+            Ok(Fetched { path: dest, root, kind: "file", title, files: 1, skipped: failed, replaced: false })
         }
         Target::Repo { owner, repo, branch } => {
             let archive = fetch_archive(&client, &owner, &repo, branch.as_deref())
@@ -608,9 +648,12 @@ async fn post_to_library(
         // 图没下下来就把远程地址留着：能上外网的人照样看得见，正文也不会因此失败。
         None => post.images.get(index).cloned().unwrap_or_default(),
     });
+    // 正文里另写的图片（Markdown / HTML，含 srcset、data-src）不在媒体表里，这里补下。
+    // 媒体表里已经试过的地址不再试第二遍，失败张数也不会算两次。
+    let (text, extra_failed) = localize_images(client, &text, &post.url, &root, false, &post.images).await;
     let dest = root.join(post_file_name(&post.title, id));
     atomic_write(&dest, text.as_bytes())?;
-    Ok(Fetched { path: dest, root, kind: "tweet", title: post.title, files: 1, skipped: failed, replaced: false })
+    Ok(Fetched { path: dest, root, kind: "tweet", title: post.title, files: 1, skipped: failed + extra_failed, replaced: false })
 }
 
 /// 向镜像服务要一条帖子，并转成 Markdown。
@@ -648,15 +691,20 @@ async fn save_images(
             failed += 1;
             continue;
         }
-        match download(client, url, MAX_IMAGE_BYTES).await {
-            Ok(bytes) if !bytes.is_empty() => {
-                total += bytes.len() as u64;
+        match download_limited(client, url, MAX_IMAGE_BYTES).await {
+            Ok(payload) if !payload.bytes.is_empty() => {
+                // 网页或空响应当成没下到，别存成一张打不开的 .jpg。
+                let Some(ext) = image_ext_of(&payload.bytes, &payload.content_type) else {
+                    failed += 1;
+                    continue;
+                };
+                total += payload.bytes.len() as u64;
                 if std::fs::create_dir_all(dir).is_err() {
                     failed += 1;
                     continue;
                 }
-                let name = format!("{}{}", index + 1, image_extension(url));
-                match atomic_write(&dir.join(&name), &bytes) {
+                let name = format!("{}{}", index + 1, ext);
+                match atomic_write(&dir.join(&name), &payload.bytes) {
                     Ok(()) => saved[index] = Some(name),
                     Err(_) => failed += 1,
                 }
@@ -667,17 +715,527 @@ async fn save_images(
     (saved, failed)
 }
 
-/// 图片后缀，只认常见几种；X 的图片地址形如 `…/abc.jpg`，也可能带 `?name=large`。
-fn image_extension(url: &str) -> &'static str {
-    let path = url.split(['?', '#']).next().unwrap_or(url);
-    let ext = path.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
-    match ext.as_str() {
-        "png" => ".png",
-        "webp" => ".webp",
-        "gif" => ".gif",
-        _ => ".jpg",
+/// 一篇文档里最多跟着下多少张图。再多就留下原来的地址，避免一个页面把磁盘写满。
+const MAX_LOCAL_IMAGES: usize = 80;
+
+/// 正文里另写的图片（相对路径、绝对地址、`srcset`、懒加载 `data-src`）落到 `assets/`，
+/// 引用改成相对路径。`skip` 里的地址已经试过（比如帖子的媒体表），不再下第二次。
+///
+/// 返回改写后的正文，以及没能保存的张数。失败的引用保持原样。
+async fn localize_images(
+    client: &reqwest::Client,
+    text: &str,
+    base: &str,
+    dir: &Path,
+    allow_relative: bool,
+    skip: &[String],
+) -> (String, usize) {
+    let images = collect_remote_images(text, base, allow_relative);
+    if images.is_empty() {
+        return (text.to_string(), 0);
+    }
+    let mut paths: HashMap<String, String> = HashMap::new();
+    let mut attempted: HashSet<String> = HashSet::new();
+    let mut failed = 0usize;
+    let mut total = 0u64;
+    let mut saved = 0usize;
+    let assets = dir.join("assets");
+    for image in &images {
+        if skip.iter().any(|seen| same_url(seen, &image.resolved)) {
+            continue;
+        }
+        if !attempted.insert(image.resolved.clone()) {
+            continue;
+        }
+        if saved >= MAX_LOCAL_IMAGES || total >= MAX_IMAGES_TOTAL {
+            failed += 1;
+            continue;
+        }
+        match download_limited(client, &image.resolved, MAX_IMAGE_BYTES).await {
+            Ok(payload) if !payload.bytes.is_empty() => {
+                let Some(ext) = image_ext_of(&payload.bytes, &payload.content_type) else {
+                    failed += 1;
+                    continue;
+                };
+                if total + payload.bytes.len() as u64 > MAX_IMAGES_TOTAL {
+                    failed += 1;
+                    continue;
+                }
+                total += payload.bytes.len() as u64;
+                if std::fs::create_dir_all(&assets).is_err() {
+                    failed += 1;
+                    continue;
+                }
+                let name = format!("{}{ext}", saved + 1);
+                if atomic_write(&assets.join(&name), &payload.bytes).is_err() {
+                    failed += 1;
+                    continue;
+                }
+                saved += 1;
+                paths.insert(image.resolved.clone(), format!("assets/{name}"));
+            }
+            _ => failed += 1,
+        }
+    }
+    (apply_local_paths(text, &images, &paths), failed)
+}
+
+fn same_url(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    match (reqwest::Url::parse(a), reqwest::Url::parse(b)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
     }
 }
+
+struct RemoteImage {
+    start: usize,
+    end: usize,
+    /// `Some`：整段 `<img>` 换成 Markdown 图片；`None`：只替换 URL 那一段。
+    alt: Option<String>,
+    resolved: String,
+}
+
+fn collect_remote_images(text: &str, base: &str, allow_relative: bool) -> Vec<RemoteImage> {
+    let fences = fenced_spans(text);
+    let mut out = Vec::new();
+    let mut from = 0usize;
+    while from < text.len() {
+        let markdown = find_markdown_image(text, from);
+        let html = find_html_image(text, from);
+        let markdown_at = markdown.as_ref().map(|image| image.0);
+        let html_at = html.as_ref().map(|image| image.0);
+        let html_first = match (markdown_at, html_at) {
+            (Some(md), Some(tag)) => tag < md,
+            (None, Some(_)) => true,
+            _ => false,
+        };
+        if html_first {
+            let (start, end, url, alt) = html.unwrap();
+            if inside(&fences, start) {
+                from = fence_end(&fences, start).unwrap_or(end);
+                continue;
+            }
+            if let Some(resolved) = resolve_image_url(base, &url, allow_relative) {
+                out.push(RemoteImage {
+                    start,
+                    end,
+                    alt: Some(alt),
+                    resolved,
+                });
+            }
+            from = end;
+            continue;
+        }
+        let Some((bang, url_start, url_end, url)) = markdown else {
+            break;
+        };
+        if inside(&fences, bang) {
+            from = fence_end(&fences, bang).unwrap_or(bang + 2);
+            continue;
+        }
+        if let Some(resolved) = resolve_image_url(base, &url, allow_relative) {
+            out.push(RemoteImage {
+                start: url_start,
+                end: url_end,
+                alt: None,
+                resolved,
+            });
+        }
+        from = url_end.max(bang + 2);
+    }
+    out
+}
+
+fn apply_local_paths(
+    text: &str,
+    images: &[RemoteImage],
+    paths: &HashMap<String, String>,
+) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0usize;
+    for image in images {
+        let Some(local) = paths.get(&image.resolved) else {
+            continue;
+        };
+        if image.start < cursor || image.end > text.len() || image.start > image.end {
+            continue;
+        }
+        out.push_str(&text[cursor..image.start]);
+        match &image.alt {
+            Some(alt) => {
+                out.push_str("![");
+                out.push_str(&alt_for_md(alt));
+                out.push_str("](");
+                out.push_str(local);
+                out.push(')');
+            }
+            None => out.push_str(local),
+        }
+        cursor = image.end;
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
+fn alt_for_md(alt: &str) -> String {
+    alt.replace(['[', ']', '\n', '\r'], " ")
+}
+
+/// 把图片地址解析成可下载的 http(s) 链接。
+///
+/// `allow_relative` 为假时只收绝对地址（帖子正文里的 `images/1.jpg` 已经在本地，不能再拿帖子页面当基准去请求）。
+fn resolve_image_url(base: &str, raw: &str, allow_relative: bool) -> Option<String> {
+    let raw = decode_basic_entities(raw).trim().to_string();
+    if raw.is_empty()
+        || raw.starts_with('#')
+        || raw.starts_with("data:")
+        || raw.starts_with("blob:")
+        || raw.starts_with("javascript:")
+    {
+        return None;
+    }
+    let bytes = raw.as_bytes();
+    if bytes.len() >= 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && !raw.starts_with("http")
+    {
+        return None;
+    }
+    let absolute =
+        raw.starts_with("http://") || raw.starts_with("https://") || raw.starts_with("//");
+    if !absolute && !allow_relative {
+        return None;
+    }
+    let encoded = raw.replace(' ', "%20");
+    if encoded.starts_with("http://") || encoded.starts_with("https://") {
+        let url = reqwest::Url::parse(&encoded).ok()?;
+        return matches!(url.scheme(), "http" | "https").then(|| url.to_string());
+    }
+    if encoded.starts_with("//") {
+        let scheme = reqwest::Url::parse(base)
+            .ok()
+            .map(|url| url.scheme().to_string())
+            .unwrap_or_else(|| "https".into());
+        let url = reqwest::Url::parse(&format!("{scheme}:{encoded}")).ok()?;
+        return matches!(url.scheme(), "http" | "https").then(|| url.to_string());
+    }
+    let base = reqwest::Url::parse(base).ok()?;
+    let joined = base.join(&encoded).ok()?;
+    matches!(joined.scheme(), "http" | "https").then(|| joined.to_string())
+}
+
+fn decode_basic_entities(value: &str) -> String {
+    value
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+}
+
+/// `(图片语法起点, URL 起点, URL 终点, URL)`。终点不含右括号。
+fn find_markdown_image(text: &str, from: usize) -> Option<(usize, usize, usize, String)> {
+    let slice = text.get(from..)?;
+    let mut local_from = 0usize;
+    while let Some(i) = slice[local_from..].find("![") {
+        let start = from + local_from + i;
+        let Some(bracket) = text[start..].find("](") else {
+            local_from += i + 2;
+            continue;
+        };
+        let url_start = start + bracket + 2;
+        if text[start..url_start].contains("\n\n") {
+            local_from += i + 2;
+            continue;
+        }
+        let tail = &text[url_start..];
+        if let Some(inner) = tail.strip_prefix('<') {
+            let Some(end) = inner.find('>') else {
+                local_from += i + 2;
+                continue;
+            };
+            let url_begin = url_start + 1;
+            let url_end = url_begin + end;
+            return Some((
+                start,
+                url_begin,
+                url_end,
+                text[url_begin..url_end].to_string(),
+            ));
+        }
+        let mut depth = 0usize;
+        let mut end = tail.len();
+        for (k, c) in tail.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' if depth == 0 => {
+                    end = k;
+                    break;
+                }
+                ')' => depth -= 1,
+                c if c.is_whitespace() => {
+                    end = k;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let url_end = url_start + end;
+        return Some((
+            start,
+            url_start,
+            url_end,
+            text[url_start..url_end].to_string(),
+        ));
+    }
+    None
+}
+
+/// `(标签起点, 标签终点, 选中的 URL, alt)`。懒加载优先用 `data-src`，否则 `src`，再否则 `srcset` 里最大的那张。
+fn find_html_image(text: &str, from: usize) -> Option<(usize, usize, String, String)> {
+    let bytes = text.as_bytes();
+    let mut i = from;
+    while i + 4 <= bytes.len() {
+        if text.is_char_boundary(i)
+            && bytes[i] == b'<'
+            && bytes[i + 1].eq_ignore_ascii_case(&b'i')
+            && bytes[i + 2].eq_ignore_ascii_case(&b'm')
+            && bytes[i + 3].eq_ignore_ascii_case(&b'g')
+        {
+            let next = bytes.get(i + 4).copied().unwrap_or(b' ');
+            if next.is_ascii_whitespace() || next == b'/' || next == b'>' {
+                let tag_start = i;
+                let Some(rel) = text[tag_start..].find('>') else {
+                    return None;
+                };
+                let tag_end = tag_start + rel + 1;
+                let tag = &text[tag_start..tag_end];
+                if let Some(url) = chosen_img_url(tag) {
+                    let alt = attr_value(tag, "alt").unwrap_or("").to_string();
+                    return Some((tag_start, tag_end, url, alt));
+                }
+                i = tag_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+fn chosen_img_url(tag: &str) -> Option<String> {
+    let data_src = ["data-src", "data-original", "data-lazy-src"]
+        .into_iter()
+        .find_map(|name| attr_value(tag, name))
+        .map(decode_basic_entities);
+    let src = attr_value(tag, "src").map(decode_basic_entities);
+    let srcset = attr_value(tag, "srcset")
+        .or_else(|| attr_value(tag, "data-srcset"))
+        .and_then(|value| best_srcset(&decode_basic_entities(value)));
+    if let Some(url) = data_src
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| usable_url(url))
+    {
+        return Some(url.to_string());
+    }
+    if let Some(url) = src.as_deref().map(str::trim).filter(|url| usable_url(url)) {
+        return Some(url.to_string());
+    }
+    srcset
+        .filter(|url| usable_url(url.trim()))
+        .map(|url| url.trim().to_string())
+}
+
+fn usable_url(url: &str) -> bool {
+    let url = url.trim();
+    !url.is_empty()
+        && !url.starts_with("data:")
+        && !url.starts_with("blob:")
+        && !url.starts_with("javascript:")
+}
+
+fn best_srcset(value: &str) -> Option<String> {
+    let mut best: Option<(f64, String)> = None;
+    for part in value.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let mut bits = part.split_whitespace();
+        let Some(url) = bits.next() else { continue };
+        if !usable_url(url) {
+            continue;
+        }
+        let score = bits.next().map(descriptor_score).unwrap_or(0.0);
+        let replace = best
+            .as_ref()
+            .map(|(current, _)| score >= *current)
+            .unwrap_or(true);
+        if replace {
+            best = Some((score, url.to_string()));
+        }
+    }
+    best.map(|(_, url)| url)
+}
+
+fn descriptor_score(token: &str) -> f64 {
+    let token = token.trim();
+    if let Some(number) = token.strip_suffix("w").or_else(|| token.strip_suffix("W")) {
+        return number.parse::<f64>().unwrap_or(0.0);
+    }
+    if let Some(number) = token.strip_suffix("x").or_else(|| token.strip_suffix("X")) {
+        return number.parse::<f64>().unwrap_or(0.0) * 10_000.0;
+    }
+    0.0
+}
+
+fn attr_value<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let lower = tag.to_ascii_lowercase();
+    let needle = format!("{}=", name.to_ascii_lowercase());
+    let hay = lower.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    let mut from = 0usize;
+    while from + needle_bytes.len() <= hay.len() {
+        if hay[from..from + needle_bytes.len()].eq_ignore_ascii_case(needle_bytes) {
+            let boundary_ok = from == 0 || {
+                let prev = hay[from - 1];
+                !prev.is_ascii_alphanumeric() && prev != b'-' && prev != b':'
+            };
+            if boundary_ok {
+                return attr_unquote(&tag[from + needle_bytes.len()..]);
+            }
+        }
+        from += 1;
+    }
+    None
+}
+
+fn attr_unquote(tail: &str) -> Option<&str> {
+    let bytes = tail.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let quote = bytes[0];
+    if quote == b'"' || quote == b'\'' {
+        let rest = &tail[1..];
+        let end = rest.find(quote as char)?;
+        return Some(&rest[..end]);
+    }
+    let end = tail
+        .find(|c: char| c.is_whitespace() || c == '>')
+        .unwrap_or(tail.len());
+    Some(&tail[..end])
+}
+
+fn fenced_spans(text: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut offset = 0usize;
+    let mut open: Option<(usize, &'static str)> = None;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let marker = if trimmed.starts_with("```") {
+            Some("```")
+        } else if trimmed.starts_with("~~~") {
+            Some("~~~")
+        } else {
+            None
+        };
+        if let Some(marker) = marker {
+            if let Some((start, opened)) = open {
+                if opened == marker {
+                    spans.push((start, offset + line.len()));
+                    open = None;
+                }
+            } else {
+                open = Some((offset, marker));
+            }
+        }
+        offset += line.len();
+    }
+    if let Some((start, _)) = open {
+        spans.push((start, text.len()));
+    }
+    spans
+}
+
+fn inside(spans: &[(usize, usize)], index: usize) -> bool {
+    spans
+        .iter()
+        .any(|(start, end)| *start <= index && index < *end)
+}
+
+fn fence_end(spans: &[(usize, usize)], index: usize) -> Option<usize> {
+    spans
+        .iter()
+        .find(|(start, end)| *start <= index && index < *end)
+        .map(|(_, end)| *end)
+}
+
+fn looks_like_html(bytes: &[u8]) -> bool {
+    let head = bytes.get(..128).unwrap_or(bytes);
+    let text = String::from_utf8_lossy(head);
+    let trimmed = text.trim_start().to_ascii_lowercase();
+    trimmed.starts_with("<!doctype html") || trimmed.starts_with("<html")
+}
+
+fn sniff_image_ext(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some(".png");
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some(".jpg");
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some(".gif");
+    }
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return Some(".webp");
+    }
+    if bytes.starts_with(b"BM") {
+        return Some(".bmp");
+    }
+    let head = bytes.get(..512).unwrap_or(bytes);
+    let text = String::from_utf8_lossy(head)
+        .trim_start()
+        .to_ascii_lowercase();
+    if text.starts_with("<svg")
+        || (text.contains("<svg") && !text.starts_with("<!doctype") && !text.starts_with("<html"))
+    {
+        return Some(".svg");
+    }
+    None
+}
+
+fn ext_from_content_type(header: &str) -> Option<&'static str> {
+    let mime = header.split(';').next()?.trim().to_ascii_lowercase();
+    match mime.as_str() {
+        "image/jpeg" | "image/jpg" => Some(".jpg"),
+        "image/png" => Some(".png"),
+        "image/gif" => Some(".gif"),
+        "image/webp" => Some(".webp"),
+        "image/svg+xml" => Some(".svg"),
+        "image/bmp" | "image/x-ms-bmp" => Some(".bmp"),
+        "image/avif" => Some(".avif"),
+        "image/x-icon" | "image/vnd.microsoft.icon" => Some(".ico"),
+        _ if mime.starts_with("image/") => Some(".jpg"),
+        _ => None,
+    }
+}
+
+/// 魔数优先；`Content-Type` 说是图片但内容是网页时不保存。
+fn image_ext_of(bytes: &[u8], content_type: &str) -> Option<&'static str> {
+    if looks_like_html(bytes) {
+        return None;
+    }
+    sniff_image_ext(bytes).or_else(|| ext_from_content_type(content_type))
+}
+
 
 /// 帖子存成什么文件名：标题里的 `/:*?"<>|` 三平台都不能留，超长要截断。
 fn post_file_name(title: &str, id: &str) -> String {
@@ -1278,5 +1836,111 @@ mod tests {
         // With no README it should still find a document rather than give up.
         std::fs::remove_file(dir.join("README.md")).unwrap();
         assert_eq!(pick_entry(&dir).unwrap(), dir.join("chapter-09.md"));
+    }
+
+    fn sample_article() -> &'static str {
+        r#"
+# 标题
+
+![图](./pic.png)
+![远](https://cdn.example/a.jpg)
+![协议](//cdn.example/b.png)
+
+```
+![x](./not-this.png)
+```
+
+<img src="../img/c.webp" alt="近">
+<img src="data:image/gif;base64,AAAA" data-src="images/lazy.png" alt="懒">
+<img srcset="small.png 480w, large.png 800w" alt="组">
+<img src="https://cdn.example/a.jpg" alt="重复">
+"#
+    }
+
+    #[test]
+    fn article_images_cover_relative_absolute_srcset_and_lazy_src() {
+        let base = "https://example.com/notes/post.md";
+        let text = sample_article();
+        let found = collect_remote_images(text, base, true);
+        let urls: Vec<&str> = found.iter().map(|image| image.resolved.as_str()).collect();
+        assert_eq!(
+            urls,
+            vec![
+                "https://example.com/notes/pic.png",
+                "https://cdn.example/a.jpg",
+                "https://cdn.example/b.png",
+                "https://example.com/img/c.webp",
+                "https://example.com/notes/images/lazy.png",
+                "https://example.com/notes/large.png",
+                "https://cdn.example/a.jpg",
+            ]
+        );
+        assert!(
+            !urls.iter().any(|url| url.contains("not-this")),
+            "围栏里的示例不该下载"
+        );
+
+        let mut paths = std::collections::HashMap::new();
+        let mut n = 0usize;
+        for image in &found {
+            paths.entry(image.resolved.clone()).or_insert_with(|| {
+                n += 1;
+                format!("assets/{n}.png")
+            });
+        }
+        let out = apply_local_paths(text, &found, &paths);
+        assert!(out.contains("![图](assets/1.png)"), "{out}");
+        assert!(out.contains("![远](assets/2.png)"), "{out}");
+        assert!(out.contains("![协议](assets/3.png)"), "{out}");
+        assert!(out.contains("![x](./not-this.png)"), "{out}");
+        assert!(out.contains("![近](assets/4.png)"), "{out}");
+        assert!(out.contains("![懒](assets/5.png)"), "{out}");
+        assert!(out.contains("![组](assets/6.png)"), "{out}");
+        assert!(
+            out.contains("![重复](assets/2.png)"),
+            "同一张图只下一次：{out}"
+        );
+        assert!(!out.contains("data-src"), "{out}");
+        assert!(!out.contains("srcset"), "{out}");
+    }
+
+    #[test]
+    fn a_post_does_not_refetch_relative_paths_that_are_already_local() {
+        let text = sample_article();
+        let found = collect_remote_images(text, "https://x.com/demo/status/1", false);
+        let urls: Vec<&str> = found.iter().map(|image| image.resolved.as_str()).collect();
+        assert_eq!(
+            urls,
+            vec![
+                "https://cdn.example/a.jpg",
+                "https://cdn.example/b.png",
+                "https://cdn.example/a.jpg",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_image_keeps_its_original_reference() {
+        let text = "![图](./pic.png)\n";
+        let found = collect_remote_images(text, "https://example.com/notes/post.md", true);
+        let out = apply_local_paths(text, &found, &std::collections::HashMap::new());
+        assert_eq!(out, text);
+    }
+
+    #[test]
+    fn an_html_page_is_not_saved_as_a_picture() {
+        assert_eq!(
+            image_ext_of(b"<!DOCTYPE html><html></html>", "image/jpeg"),
+            None
+        );
+        assert_eq!(
+            image_ext_of(b"\x89PNG\r\n\x1a\nrest", "text/plain"),
+            Some(".png")
+        );
+        assert_eq!(image_ext_of(b"not really", "image/webp"), Some(".webp"));
+        assert_eq!(
+            image_ext_of(b"<svg xmlns='http://www.w3.org/2000/svg'></svg>", ""),
+            Some(".svg")
+        );
     }
 }

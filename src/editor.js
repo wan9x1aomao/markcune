@@ -31,6 +31,8 @@ import { codeTheme } from './code-theme.js';
 import { countMarkdownWords } from './count.js';
 import { chunkedParsing } from './parse.js';
 import { incrementalSerializer } from './serialize.js';
+
+const wordCounts = new WeakMap();
 import {
   findKey,
   findPlugin,
@@ -546,7 +548,14 @@ export async function createRichEditor(options) {
     /** Completion controls: accept / reject / has / now, or undefined if the feature failed to load. */
     ai: ghostControls(view),
     getMarkdown: () => serialize(view.state.doc),
-    getWordCount: () => countMarkdownWords(serialize(view.state.doc)),
+    getWordCount: () => {
+      const doc = view.state.doc;
+      const hit = wordCounts.get(doc);
+      if (hit !== undefined) return hit;
+      const count = countMarkdownWords(serialize(doc));
+      wordCounts.set(doc, count);
+      return count;
+    },
     /** The markdown of a snapshot (default: the current document), without blocking the page. */
     getMarkdownAsync: (snapshot = view.state.doc) => serializeAsync(snapshot),
     /** An immutable value identifying the current document, for matches(). */

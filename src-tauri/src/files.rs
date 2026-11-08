@@ -24,6 +24,97 @@ pub fn is_document(path: &Path) -> bool {
         .is_some_and(|ext| DOC_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
 }
 
+/// `dev` and `inode` (or the Windows volume serial and file index). Compared after canonicalize.
+pub fn file_identity(path: &Path) -> Option<(u64, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some((meta.dev(), meta.ino()))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        Some((meta.volume_serial_number() as u64, meta.file_index().unwrap_or(0)))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = meta;
+        None
+    }
+}
+
+fn canonical_dir(path: &Path) -> Option<PathBuf> {
+    let path = absolute(path);
+    let canon = std::fs::canonicalize(&path).ok()?;
+    canon.is_dir().then_some(canon)
+}
+
+fn canonical_file(path: &Path) -> Option<PathBuf> {
+    let path = absolute(path);
+    std::fs::canonicalize(&path).ok().filter(|real| real.is_file())
+}
+
+/// Component-wise, after both sides are canonical. A string prefix would treat `/docs-secret` as inside `/docs`.
+fn inside(root: &Path, path: &Path) -> bool {
+    path.starts_with(root)
+}
+
+pub fn grant_dir(app: &AppHandle, label: &str, path: &Path) {
+    let Some(real) = canonical_dir(path) else { return };
+    with_win(app, label, |w| {
+        if !w.allowed_dirs.iter().any(|dir| dir == &real) {
+            w.allowed_dirs.push(real);
+        }
+    });
+}
+
+pub fn grant_file(app: &AppHandle, label: &str, path: &Path) {
+    let Some(real) = canonical_file(path) else { return };
+    with_win(app, label, |w| {
+        if !w.allowed_files.iter().any(|file| file == &real) {
+            w.allowed_files.push(real.clone());
+        }
+        if let Some(parent) = real.parent() {
+            if parent.is_dir() && !w.allowed_dirs.iter().any(|dir| dir == parent) {
+                w.allowed_dirs.push(parent.to_path_buf());
+            }
+        }
+    });
+}
+
+fn remembered(app: &AppHandle, path: &Path) -> bool {
+    let state = app_state(app);
+    let store = state.store.lock().unwrap();
+    let listed = store
+        .recent_files
+        .iter()
+        .chain(store.pinned_files.iter())
+        .chain(store.recent_folders.iter());
+    listed.filter_map(|item| std::fs::canonicalize(item).ok()).any(|real| real == path)
+}
+
+/// The page may touch `path` when this window was given the file or its folder, or the user
+/// opened it before (recent / pinned). Anything else is refused, symlink and all.
+pub fn authorize(app: &AppHandle, label: &str, path: &Path) -> Result<PathBuf, String> {
+    let real = canonical_file(path).or_else(|| canonical_dir(path)).ok_or("文件或文件夹不存在")?;
+    let allowed = with_win(app, label, |w| {
+        w.allowed_files.iter().any(|file| file == &real)
+            || w.allowed_dirs.iter().any(|dir| inside(dir, &real))
+            || w.pending_image.as_ref().is_some_and(|image| image == &real)
+    })
+    .unwrap_or(false);
+    if allowed || remembered(app, &real) {
+        if real.is_file() {
+            grant_file(app, label, &real);
+        } else {
+            grant_dir(app, label, &real);
+        }
+        return Ok(real);
+    }
+    Err("没有打开这个位置的权限".into())
+}
+
 /// The extension a pasted image keeps, falling back to `png` for anything unrecognised —
 /// the name comes from the page, so it does not get to choose what lands in `assets/`.
 fn image_ext(name: &Path) -> String {
@@ -117,18 +208,29 @@ fn remember_document(app: &AppHandle, label: &str, path: &Path, content: &str) {
 #[tauri::command]
 pub fn read_document(window: WebviewWindow, path: PathBuf) -> Result<Opened, String> {
     let path = absolute(&path);
-    // 这条命令拿的是页面给的路径，读之前必须自己判一次：同目录的 list_dir / list_documents
-    // 早就按 is_document 过滤了，唯独「真正读内容」的这一条没过滤，等于给渲染层留下了
-    // 任意读本机 UTF-8 文件的口子（~/.ssh/id_rsa 这类）。渲染层一旦被攻破，这里就是最后一道门。
-    if !is_document(&path) {
-        return Err("只能打开 Markdown 或纯文本文件".into());
+    let linked = path.symlink_metadata().map(|meta| meta.file_type().is_symlink()).unwrap_or(false);
+    // Canonicalize before the extension check so `notes.md -> ~/.ssh/id_rsa` is not a document.
+    // The editor then keeps the real path: a later save cannot follow a swapped link.
+    let real = std::fs::canonicalize(&path).map_err(|e| describe(&e))?;
+    if !is_document(&real) {
+        return Err(if linked { "这个链接指向的不是文稿".into() } else { "只能打开 Markdown 或纯文本文件".into() });
     }
-    let bytes = std::fs::read(&path).map_err(|e| describe(&e))?;
-    let content = String::from_utf8(bytes).map_err(|_| "文件不是 UTF-8 编码的文本".to_string())?;
     let app = window.app_handle();
-    remember_document(app, window.label(), &path, &content);
-    let position = app_state(app).store.lock().unwrap().position(&path);
-    Ok(Opened { path, content, position, rewritten: false })
+    // A link that lives in a folder this window may browse may point at a real document elsewhere.
+    // The editor then holds the real file, so saving cannot follow a link that was swapped later.
+    if let Some(parent) = path.parent() {
+        if authorize(app, window.label(), parent).is_ok() {
+            grant_file(app, window.label(), &real);
+        }
+    }
+    let real = authorize(app, window.label(), &real)?;
+    let bytes = std::fs::read(&real).map_err(|e| describe(&e))?;
+    let content = String::from_utf8(bytes).map_err(|_| "文件不是 UTF-8 编码的文本".to_string())?;
+    let id = file_identity(&real);
+    remember_document(app, window.label(), &real, &content);
+    with_win(app, window.label(), |w| w.file_id = id);
+    let position = app_state(app).store.lock().unwrap().position(&real);
+    Ok(Opened { path: real, content, position, rewritten: false })
 }
 
 #[derive(Serialize)]
@@ -146,6 +248,11 @@ pub fn write_document(window: WebviewWindow, content: String, force: bool) -> Re
     let (path, version) = with_win(app, label, |w| (w.doc.clone(), w.version)).unwrap_or_default();
     let path = path.ok_or("文档还没有保存位置")?;
 
+    if let Some(expected) = with_win(app, label, |w| w.file_id).flatten() {
+        if path.exists() && file_identity(&path) != Some(expected) {
+            return Ok(WriteResult::Conflict { reason: "changed" });
+        }
+    }
     if !force {
         match std::fs::read(&path) {
             Ok(disk) => {
@@ -163,6 +270,7 @@ pub fn write_document(window: WebviewWindow, content: String, force: bool) -> Re
     with_win(app, label, |w| {
         w.version = Some(Version::of(content.as_bytes()));
         w.doc_canonical = std::fs::canonicalize(&path).ok();
+        w.file_id = file_identity(&path);
     });
     Ok(WriteResult::Saved)
 }
@@ -397,8 +505,16 @@ pub fn image_target(path: &Path) -> Option<PathBuf> {
 /// Lets the page display one local image. The asset protocol starts with an empty scope, so
 /// only images that documents actually reference become readable. Returns the path to load.
 #[tauri::command]
-pub fn allow_image(app: AppHandle, path: PathBuf) -> Option<PathBuf> {
+pub fn allow_image(window: WebviewWindow, path: PathBuf) -> Option<PathBuf> {
     let real = image_target(&path)?;
+    let app = window.app_handle();
+    let allowed = with_win(app, window.label(), |w| {
+        w.allowed_dirs.iter().any(|dir| inside(dir, &real)) || w.allowed_files.iter().any(|file| file == &real)
+    })
+    .unwrap_or(false);
+    if !allowed {
+        return None;
+    }
     app.asset_protocol_scope().allow_file(&real).ok()?;
     Some(real)
 }
@@ -467,13 +583,20 @@ pub fn save_image(window: WebviewWindow, request: Request<'_>) -> Result<String,
 /// Copies an image file into the document's assets/ folder (used by "替换" on an image).
 #[tauri::command]
 pub fn import_image(window: WebviewWindow, path: PathBuf) -> Result<String, String> {
-    let doc = with_win(window.app_handle(), window.label(), |w| w.doc.clone()).flatten();
-    let doc_dir = doc.as_ref().and_then(|d| d.parent()).ok_or("文档还没有保存位置")?;
-    if let Ok(inside) = path.strip_prefix(doc_dir) {
-        return Ok(encode_url(&inside.to_string_lossy().replace('\\', "/")));
+    let real = image_target(&path).ok_or("不是图片文件")?;
+    let app = window.app_handle();
+    let doc = with_win(app, window.label(), |w| w.doc.clone()).flatten();
+    let doc_dir = doc.as_ref().and_then(|d| d.parent()).and_then(|dir| std::fs::canonicalize(dir).ok()).ok_or("文档还没有保存位置")?;
+    let pending = with_win(app, window.label(), |w| w.pending_image.take()).flatten();
+    if !inside(&doc_dir, &real) && pending.as_ref() != Some(&real) {
+        return Err("请重新选择图片".into());
+    }
+    if let Ok(inside_path) = real.strip_prefix(&doc_dir) {
+        return Ok(encode_url(&inside_path.to_string_lossy().replace('\\', "/")));
     }
     let dir = doc_dir.join("assets");
     std::fs::create_dir_all(&dir).map_err(|e| describe(&e))?;
+    let path = real;
     let name = path.file_name().ok_or("图片路径无效")?.to_string_lossy().into_owned();
     let (stem, ext) = match name.rsplit_once('.') {
         Some((stem, ext)) => (stem.to_string(), format!(".{ext}")),
@@ -507,14 +630,26 @@ fn is_hidden(name: &str) -> bool {
 
 /// Folders and documents directly inside `path`, folders first.
 #[tauri::command]
-pub fn list_dir(path: PathBuf) -> Result<Vec<Entry>, String> {
+pub fn list_dir(window: WebviewWindow, path: PathBuf) -> Result<Vec<Entry>, String> {
+    let path = authorize(window.app_handle(), window.label(), &path)?;
+    if !path.is_dir() {
+        return Err("这是一个文件".into());
+    }
     let mut entries: Vec<Entry> = std::fs::read_dir(&path)
         .map_err(|e| describe(&e))?
         .filter_map(|entry| entry.ok())
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
             let path = entry.path();
-            let is_dir = entry.file_type().ok()?.is_dir();
+            let kind = entry.file_type().ok()?;
+            if kind.is_symlink() {
+                let Ok(target) = std::fs::canonicalize(&path) else { return None };
+                if !is_document(&target) {
+                    return None;
+                }
+                return Some(Entry { name, path, is_dir: false });
+            }
+            let is_dir = kind.is_dir();
             if (is_dir && is_hidden(&name)) || (!is_dir && (name.starts_with('.') || !is_document(&path))) {
                 return None;
             }
@@ -527,7 +662,11 @@ pub fn list_dir(path: PathBuf) -> Result<Vec<Entry>, String> {
 
 /// Every document under `root` (bounded), for quick open.
 #[tauri::command]
-pub async fn list_documents(root: PathBuf) -> Vec<PathBuf> {
+pub async fn list_documents(window: WebviewWindow, root: PathBuf) -> Vec<PathBuf> {
+    let Ok(root) = authorize(window.app_handle(), window.label(), &root) else { return Vec::new() };
+    if !root.is_dir() {
+        return Vec::new();
+    }
     let mut found = Vec::new();
     let mut stack = vec![(root, 0usize)];
     while let Some((dir, depth)) = stack.pop() {
@@ -551,9 +690,15 @@ pub async fn list_documents(root: PathBuf) -> Vec<PathBuf> {
 }
 
 #[tauri::command]
-pub fn set_root(window: WebviewWindow, path: Option<PathBuf>) {
+pub fn set_root(window: WebviewWindow, path: Option<PathBuf>) -> Result<(), String> {
     let app = window.app_handle();
-    let path = path.map(|p| absolute(&p));
+    let path = match path {
+        Some(path) => Some(authorize(app, window.label(), &path)?),
+        None => None,
+    };
+    if path.as_ref().is_some_and(|path| !path.is_dir()) {
+        return Err("不是文件夹".into());
+    }
     with_win(app, window.label(), |w| {
         w.root_canonical = path.as_ref().and_then(|p| std::fs::canonicalize(p).ok());
         w.root = path.clone();
@@ -562,11 +707,16 @@ pub fn set_root(window: WebviewWindow, path: Option<PathBuf>) {
         app_state(app).store.lock().unwrap().add_recent_folder(path);
     }
     watch::update(app, window.label());
+    Ok(())
 }
 
 /// Creates "未命名.md" (or "未命名 2.md", …) in `dir`.
 #[tauri::command]
-pub fn create_document(dir: PathBuf) -> Result<PathBuf, String> {
+pub fn create_document(window: WebviewWindow, dir: PathBuf) -> Result<PathBuf, String> {
+    let dir = authorize(window.app_handle(), window.label(), &dir)?;
+    if !dir.is_dir() {
+        return Err("不是文件夹".into());
+    }
     for i in 1.. {
         let name = if i == 1 { "未命名.md".to_string() } else { format!("未命名 {i}.md") };
         let path = dir.join(name);
@@ -583,12 +733,16 @@ pub fn create_document(dir: PathBuf) -> Result<PathBuf, String> {
 #[tauri::command]
 pub fn rename_path(window: WebviewWindow, path: PathBuf, name: String) -> Result<PathBuf, String> {
     let name = name.trim();
-    if name.is_empty() {
+    if name.is_empty() || name == "." || name == ".." {
         return Err("名称不能为空".into());
     }
     if name.contains(['/', '\\', ':']) {
         return Err("名称不能包含 / \\ :".into());
     }
+    let path = absolute(&path);
+    let parent = path.parent().ok_or("无法重命名")?;
+    // Authorize the folder, not the canonical target: renaming a symlink must rename the link.
+    authorize(window.app_handle(), window.label(), parent)?;
     let mut target = path.with_file_name(name);
     if path.is_file() && target.extension().is_none() {
         if let Some(ext) = path.extension() {
@@ -759,6 +913,25 @@ mod tests {
         assert_eq!(image_ext(Path::new("x")), "png");
         assert_eq!(image_ext(Path::new("x.tar.gz")), "png");
         assert_eq!(image_ext(Path::new("x.")), "png");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_is_a_document_only_when_its_target_is() {
+        let base = std::env::temp_dir().join(format!("mdpad-doc-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let secret = base.join("id_rsa");
+        let real = base.join("notes.md");
+        std::fs::write(&secret, "KEY").unwrap();
+        std::fs::write(&real, "# hi\n").unwrap();
+        std::os::unix::fs::symlink(&secret, base.join("leak.md")).unwrap();
+        std::os::unix::fs::symlink(&real, base.join("alias.md")).unwrap();
+        let leak = std::fs::canonicalize(base.join("leak.md")).unwrap();
+        let alias = std::fs::canonicalize(base.join("alias.md")).unwrap();
+        assert!(!is_document(&leak), "a link named .md must not open a non-document");
+        assert!(is_document(&alias));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

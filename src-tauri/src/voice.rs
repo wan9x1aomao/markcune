@@ -290,7 +290,9 @@ pub fn voice_configure(app: AppHandle, base_url: Option<String>, model: Option<S
     {
         let state = app_state(&app);
         let mut store = state.store.lock().unwrap();
-        put(&mut store, KEY_BASE, base_url);
+        if base_url.as_ref().is_none_or(|base| base.trim().is_empty() || crate::ai::acceptable_endpoint(base)) {
+            put(&mut store, KEY_BASE, base_url);
+        }
         put(&mut store, KEY_MODEL, model);
         put(&mut store, KEY_SECRET, api_key);
         store.save();
@@ -404,6 +406,9 @@ async fn transcribe(app: &AppHandle, audio: Vec<u8>, allow_empty: bool) -> Resul
         }
     })?;
 
+    if !crate::ai::acceptable_endpoint(&base) {
+        return Err("服务地址只支持 https，或本机/局域网 IP 的 http".into());
+    }
     let url = format!("{}/audio/transcriptions", base.trim_end_matches('/'));
     let part = reqwest::multipart::Part::bytes(audio)
         .file_name("speech.wav")

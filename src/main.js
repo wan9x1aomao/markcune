@@ -93,6 +93,10 @@ const app = {
   recentFiles: [],
   /** [{path, name, dir, exists}] — bookmarks drawn above the tree; see src-tauri/src/pinned.rs. */
   pinned: [],
+  /** Remote images stay unloaded until this document is explicitly allowed to fetch them. */
+  allowRemoteImages: false,
+  /** Bumps on every edit so a disk reload cannot replace keystrokes that landed during the check. */
+  revision: 0,
 };
 
 // Table widths: markdown has no column-width field, but dragging a column should survive mode
@@ -171,8 +175,14 @@ function updateTitle() {
 
 /** Closing needs the page's attention while something is unsaved or a draft exists. */
 function updateGuard() {
+  // Any open document or draft holds the close long enough to flush the reading position.
+  // A clean file used to close immediately, and the last scroll was lost when the webview died first.
   const guard =
-    app.pending || app.status === 'error' || app.status === 'conflict' || (!app.doc.path && app.hasDraftContent);
+    !!app.doc.path ||
+    app.pending ||
+    app.status === 'error' ||
+    app.status === 'conflict' ||
+    (!app.doc.path && app.hasDraftContent);
   if (guard !== app.guard) {
     app.guard = guard;
     api.setCloseGuard(guard);
@@ -226,6 +236,16 @@ async function resolveConflict(choice) {
 // Editor lifecycle
 
 const IMAGE_URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+const REMOTE_IMAGE = /^(https?:)?\/\//i;
+const REMOTE_PLACEHOLDER =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="88"><rect width="100%" height="100%" rx="8" fill="#f4f5f7"/><text x="24" y="52" font-family="sans-serif" font-size="15" fill="#8a909c">网络图片未加载</text></svg>',
+  );
+
+function isRemoteImage(url) {
+  return typeof url === 'string' && REMOTE_IMAGE.test(url.trim());
+}
 const WINDOWS_ABSOLUTE = /^[a-z]:[\\/]/i;
 
 function normalizePath(path) {
@@ -246,7 +266,11 @@ const grantedImages = new Map();
  * shown only after the shell confirms they are real images (see allow_image).
  */
 function resolveImage(url) {
-  if (url.startsWith('//') || (IMAGE_URL_SCHEME.test(url) && !WINDOWS_ABSOLUTE.test(url))) return url;
+  if (isRemoteImage(url)) {
+    if (!app.allowRemoteImages) return REMOTE_PLACEHOLDER;
+    return url.startsWith('//') ? `https:${url}` : url;
+  }
+  if (IMAGE_URL_SCHEME.test(url) && !WINDOWS_ABSOLUTE.test(url)) return url;
   let target;
   try {
     target = decodeURI(url);
@@ -271,6 +295,32 @@ function resolveImage(url) {
     grantedImages.set(target, granted);
   }
   return grantedImages.get(target);
+}
+
+async function exportImageSource(src) {
+  if (isRemoteImage(src)) {
+    if (!app.allowRemoteImages) return REMOTE_PLACEHOLDER;
+    try {
+      return await api.fetchRemoteImage(src.startsWith('//') ? `https:${src}` : src);
+    } catch {
+      return REMOTE_PLACEHOLDER;
+    }
+  }
+  const url = await resolveImage(src);
+  return (await embedImage(url)) ?? url;
+}
+
+function refreshRemoteImages() {
+  const editor = app.editor;
+  if (!editor?.getMarkdown) return;
+  const position = editor.getPosition?.();
+  const markdown = editor.getMarkdown();
+  editor.setMarkdown(markdown);
+  if (position) editor.setPosition?.(position);
+  if (app.preview) {
+    previewMarkdown = markdown;
+    app.preview.setMarkdown(markdown);
+  }
 }
 
 async function embedImage(src) {
@@ -407,7 +457,8 @@ function scheduleWordCount() {
 }
 
 function onChange() {
-  if (!app.editor) return;
+  if (!app.editor || app.reloading) return;
+  app.revision += 1;
   scheduleWordCount();
   if (document.body.classList.contains('empty')) setEmpty(false);
   app.pending = true;
@@ -533,16 +584,20 @@ async function saveAs() {
   return true;
 }
 
-async function reloadFromDisk() {
+async function reloadFromDisk(seenRevision = app.revision) {
   const position = app.editor?.getPosition();
   try {
     const opened = await api.readDocument(app.doc.path);
+    if (seenRevision !== app.revision) return showConflict('changed');
+    app.reloading = true;
     app.doc.raw = opened.content;
     app.doc.saved = null;
     app.pending = false;
     await mountEditor(opened.content, position);
+    app.reloading = false;
     setStatus('saved');
   } catch (error) {
+    app.reloading = false;
     toast(`无法重新载入：${error}`);
   }
 }
@@ -596,6 +651,7 @@ async function openFileNow(path, keepRoot = false) {
   }
   if (app.doc.draftId) await api.draftDelete();
   app.doc = { path: opened.path, draftId: null, raw: opened.content, snapshot: null, saved: null };
+  app.allowRemoteImages = false;
   app.hasDraftContent = false;
   app.pending = false;
   hideBanner();
@@ -629,10 +685,30 @@ async function openFromUrl() {
     okLabel: '下载并打开',
   });
   if (!url?.trim()) return;
+  const allowHosts = [];
+  const download = async () => {
+    try {
+      return await api.openFromUrl(url.trim(), allowHosts);
+    } catch (error) {
+      const text = String(error);
+      const marker = 'NEED_PRIVATE\t';
+      const at = text.indexOf(marker);
+      if (at < 0 || allowHosts.length >= 3) throw error;
+      const host = text.slice(at + marker.length).split(/\s/)[0];
+      const ok = await api.confirm(
+        '允许这一次访问本机或局域网',
+        `「${host}」不在公网上。只在这一次下载里允许它，跳到别的内网地址还会再问。`,
+        '允许这一次',
+      );
+      if (!ok) throw new Error('已取消');
+      allowHosts.push(host);
+      return download();
+    }
+  };
   try {
     // Two steps on purpose: point the sidebar at the book first, then open the entry document —
     // opening would otherwise narrow the folder down to wherever that one file happens to live.
-    const result = await withProgress(() => api.openFromUrl(url.trim()));
+    const result = await withProgress(download);
     if (result.root) await setRoot(result.root);
     await openFile(result.path);
     toast(downloadNotice(result));
@@ -905,10 +981,18 @@ function refreshOutline() {
 }
 
 let previewTimer;
+let previewMarkdown = '';
 function schedulePreview() {
-  if (!app.preview) return;
+  if (!app.preview || !app.editor) return;
   clearTimeout(previewTimer);
-  previewTimer = setTimeout(() => app.preview?.setMarkdown(app.editor.getMarkdown()), 250);
+  const snapshot = app.editor.snapshot();
+  previewTimer = setTimeout(async () => {
+    if (!app.preview || !app.editor) return;
+    const markdown = await app.editor.getMarkdownAsync(snapshot);
+    if (!app.editor.matches(snapshot) || markdown === previewMarkdown) return;
+    previewMarkdown = markdown;
+    app.preview.setMarkdown(markdown);
+  }, 250);
 }
 
 let scrollTimer;
@@ -957,10 +1041,7 @@ async function buildExportHtml() {
   const doc = await exportDocument();
   const { buildHtml } = await import('./export.js');
   return buildHtml(doc, exportTitle(), {
-    image: async (src) => {
-      const url = await resolveImage(src);
-      return (await embedImage(url)) ?? url;
-    },
+    image: exportImageSource,
     diagram: exportDiagram,
   });
 }
@@ -986,10 +1067,7 @@ async function buildExportDocx() {
   const { buildDocx } = await import('./docx.js');
   return buildDocx(doc, {
     title: exportTitle(),
-    image: async (src) => {
-      const url = await resolveImage(src);
-      return (await embedImage(url)) ?? url;
-    },
+    image: exportImageSource,
   });
 }
 
@@ -1013,10 +1091,7 @@ async function buildExportImage(options = {}) {
   const doc = await exportDocument();
   const { buildImage } = await import('./export-image.js');
   return buildImage(doc, {
-    image: async (src) => {
-      const url = await resolveImage(src);
-      return (await embedImage(url)) ?? url;
-    },
+    image: exportImageSource,
     diagram: imageDiagram,
     ...options,
   });
@@ -1066,22 +1141,40 @@ async function exportImage() {
 async function preparePrintDocument() {
   const doc = await exportDocument();
   const { preparePrint } = await import('./export.js');
-  await preparePrint(doc, { image: async (src) => resolveImage(src), diagram: exportDiagram });
+  return preparePrint(doc, { image: exportImageSource, diagram: exportDiagram });
 }
 
 async function exportPdf() {
-  try {
-    await preparePrintDocument();
-  } catch (error) {
-    toast(`导出失败：${error}`);
-    return;
-  }
-  // The print dialog suggests the page title as the PDF's name.
   const previousTitle = document.title;
-  document.title = exportTitle();
-  toast('在打印窗口中选择“存储为 PDF”', 4000);
-  await api.print();
-  setTimeout(() => (document.title = previousTitle), 1000);
+  let restore = () => {};
+  try {
+    const height = await preparePrintDocument();
+    if (!height) throw new Error('没有排出可打印的页面');
+    document.documentElement.classList.add('printing');
+    document.title = exportTitle();
+    restore = () => {
+      document.documentElement.classList.remove('printing');
+      document.title = previousTitle;
+      window.removeEventListener('afterprint', restore);
+    };
+    // The dialog captures this layout. Restoring on afterprint (and when focus returns, which is
+    // how some webviews report a closed dialog) puts the editor back. A short timer would hide
+    // the article again before WebKit had paginated it.
+    window.addEventListener('afterprint', restore);
+    window.addEventListener(
+      'focus',
+      () => {
+        setTimeout(restore, 400);
+      },
+      { once: true },
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    toast('在打印窗口中选择“存储为 PDF”', 4000);
+    await api.print();
+  } catch (error) {
+    restore();
+    toast(`导出失败：${error?.message ?? error}`);
+  }
 }
 
 // Commands
@@ -1105,7 +1198,16 @@ const actions = {
   'export-pdf': exportPdf,
   'export-image': exportImage,
   // 菜单栏和「···」都只留这一项；四种格式在抽屉里，行为和文案不变。
-  export: () => openExportDrawer({ run, onClose: () => app.editor?.focus() }),
+  export: () =>
+    openExportDrawer({
+      run,
+      onClose: () => app.editor?.focus(),
+      remoteImages: app.allowRemoteImages,
+      onRemoteImages: (enabled) => {
+        app.allowRemoteImages = enabled;
+        refreshRemoteImages();
+      },
+    }),
   tidy: () => tidyHint.run(),
   'ai-settings': () => openAiSettings(),
   settings: () =>
@@ -1327,12 +1429,13 @@ api.on('fs-changed', async ({ docChanged, dirs }) => {
   app.documents = null;
   await sidebar.refreshDirs(dirs);
   if (!docChanged || !app.doc.path || app.status === 'conflict') return;
+  const seenRevision = app.revision;
   await app.saving;
   const check = await api.checkDocument().catch(() => null);
   if (!check || check.status === 'unchanged') return;
   if (check.status === 'missing') return showConflict('missing');
-  if (app.pending) return showConflict('changed');
-  await reloadFromDisk();
+  if (app.pending || app.revision !== seenRevision) return showConflict('changed');
+  await reloadFromDisk(seenRevision);
   toast('文件已在其他程序中修改，已载入最新内容');
 });
 api.on('close-requested', async ({ quitting }) => {

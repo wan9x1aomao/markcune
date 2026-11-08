@@ -105,3 +105,8 @@ jobs:
 
       - name: 界面与 AI 逐项测试
         run: npm run test:browser
+
+      - name: PDF 导出回归
+        env:
+          REQUIRE_CHROME: "1"
+        run: node tests/export-pdf.mjs

@@ -205,6 +205,11 @@ pub fn update_status(app: AppHandle) -> UpdateStatus {
 }
 
 /// Downloads and verifies the update found by `check_update`, reporting progress to the window.
+///
+/// `requireSignedVersion` (tauri.conf.json) makes the updater compare the version in the minisign
+/// trusted comment with the version announced in latest.json. That already rejects a new version
+/// number paired with an older signed file. This app does not add a second check, and it does not
+/// change the public key, so 4.0.3 clients can still install a 4.0.4 package signed the same way.
 #[tauri::command]
 pub async fn download_update(window: WebviewWindow) -> Result<String, String> {
     let app = window.app_handle().clone();

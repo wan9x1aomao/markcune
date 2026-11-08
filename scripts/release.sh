@@ -112,7 +112,9 @@ else
   echo "整理服务：未配置，这一次的包只做规则整理"
 fi
 export TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGNING_KEY_FILE")"
-export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+# Unset stays empty so today's unencrypted key keeps working. Export the variable
+# before running this script once the key itself has a passphrase. The value is never printed.
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
 npx tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":true}}'
 
 OUT="release/$VERSION"

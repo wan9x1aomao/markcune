@@ -42,7 +42,7 @@ function rowTitle(title) {
  * Opens the export drawer. `run(id)` is the same command runner the menus use.
  * Returns a close function. Nothing is focused on open — a focus ring there reads as a bug.
  */
-export function openExportDrawer({ run, onClose } = {}) {
+export function openExportDrawer({ run, onClose, remoteImages = false, onRemoteImages } = {}) {
   document.querySelector('.overlay.export-overlay')?.remove();
 
   const overlay = document.createElement('div');
@@ -53,8 +53,19 @@ export function openExportDrawer({ run, onClose } = {}) {
         <h2>导出</h2>
         <button class="export-close" type="button" aria-label="关闭">${CLOSE}</button>
       </header>
+      <label class="export-remote">
+        <input type="checkbox" />
+        <span>
+          <span class="export-name">包含网络图片</span>
+          <span class="export-desc">默认不请求。勾选后预览并嵌入导出文件</span>
+        </span>
+      </label>
       <div class="export-list"></div>
     </div>`;
+
+  const remote = overlay.querySelector('.export-remote input');
+  remote.checked = remoteImages;
+  remote.addEventListener('change', () => onRemoteImages?.(remote.checked));
 
   const list = overlay.querySelector('.export-list');
   for (const format of FORMATS) {

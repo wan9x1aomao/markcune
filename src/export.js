@@ -256,27 +256,36 @@ ${scope} .raw { white-space: pre-wrap; font-family: 'SF Mono', ui-monospace, Men
 `;
 }
 
-/** Print rules for the article (`prefix` scopes them): page margins, no awkward page breaks. */
+/**
+ * Print rules for the article (`prefix` scopes them).
+ *
+ * WebKit (the macOS and Linux webview) drops everything after a box it refuses to split, and it
+ * also paginates from the on-screen layout. `overflow: hidden` and `break-inside: avoid` on a
+ * table, code block, formula or diagram that is taller than one page are exactly that box, so
+ * print forces every descendant to fragment and to stay unclipped. Images and diagrams are capped
+ * to one page with `max-height` instead of being marked unbreakable.
+ */
 const printRules = (prefix) => `
   @page { margin: 16mm 15mm; }
   ${prefix}${SCOPE} { max-width: none; padding: 0; font-size: 11pt; }
-  ${prefix}${SCOPE} * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  ${prefix}${SCOPE}, ${prefix}${SCOPE} * {
+    overflow: visible !important;
+    max-height: none !important;
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
   ${prefix}${SCOPE} h1, ${prefix}${SCOPE} h2, ${prefix}${SCOPE} h3, ${prefix}${SCOPE} h4 { break-after: avoid; page-break-after: avoid; }
-  /* Anything that can be taller than one page has to be allowed to split. WebKit clips the rest of
-     an overflow:hidden box once it crosses a page boundary and refuses to break inside a box marked
-     break-inside: avoid — long tables and code blocks were the ones coming out incomplete. */
-  ${prefix}${SCOPE} figure, ${prefix}${SCOPE} table, ${prefix}${SCOPE} blockquote { break-inside: auto; page-break-inside: auto; }
-  ${prefix}${SCOPE} figure.code, ${prefix}${SCOPE} figure.code pre,
-  ${prefix}${SCOPE} table, ${prefix}${SCOPE} .math-block { overflow: visible; }
-  ${prefix}${SCOPE} figure.code, ${prefix}${SCOPE} table { border-radius: 0; }
-  /* Things that fit on one page keep their no-split rule; oversized images must at least scale. */
-  ${prefix}${SCOPE} tr, ${prefix}${SCOPE} img, ${prefix}${SCOPE} blockquote > :first-child,
-  ${prefix}${SCOPE} .math-block, ${prefix}${SCOPE} li.task,
-  ${prefix}${SCOPE} figure.image, ${prefix}${SCOPE} figure.diagram { break-inside: avoid; page-break-inside: avoid; }
-  ${prefix}${SCOPE} img, ${prefix}${SCOPE} figure.diagram svg { max-height: 23cm; }
-  ${prefix}${SCOPE} figure.code pre { white-space: pre-wrap; word-break: break-all; }
+  ${prefix}${SCOPE} figure.code, ${prefix}${SCOPE} table { border-radius: 0 !important; }
+  ${prefix}${SCOPE} figure.code pre { white-space: pre-wrap !important; word-break: break-all; }
   ${prefix}${SCOPE} th, ${prefix}${SCOPE} td { overflow-wrap: anywhere; }
   ${prefix}${SCOPE} thead { display: table-header-group; }
+  ${prefix}${SCOPE} img, ${prefix}${SCOPE} figure.diagram svg {
+    max-height: 240mm !important;
+    height: auto !important;
+    object-fit: contain;
+  }
   ${prefix}${SCOPE} a { border-bottom: 0; }`;
 
 /** Rules for the exported picture (`scope` as for documentCss): fixed 760px page, nothing clipped. */
@@ -291,13 +300,49 @@ ${scope} .math-block { overflow: visible; }
 ${scope} .image-missing { margin: 1.2em 0; padding: 1.2em 1em; border: 1.5px dashed #c5c9d2; border-radius: 8px; background: #f6f7f9; color: #8a909c; text-align: center; font-size: 0.9em; }`;
 }
 
-/** In the app: only the print container is printed. */
+/**
+ * On screen the print tree has to be laid out (WebKit prints the layout it already has, and a
+ * `display: none` tree has height 0) but must not cover the editor. `visibility: hidden` plus
+ * absolute positioning does both; `.printing` then shows that same layout to the print formatter.
+ */
 const PRINT_CSS = `
-#print-root { display: none; }
+#print-root {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 180mm;
+  height: auto;
+  overflow: visible;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+html.printing, html.printing body {
+  height: auto !important;
+  overflow: visible !important;
+  background: #fff !important;
+}
+html.printing body > *:not(#print-root) { display: none !important; }
+html.printing #print-root {
+  visibility: visible !important;
+  position: static !important;
+  width: auto !important;
+  height: auto !important;
+  overflow: visible !important;
+}
 @media print {
   html, body { height: auto !important; overflow: visible !important; display: block !important; background: #fff !important; }
   body > *:not(#print-root) { display: none !important; }
-  #print-root { display: block !important; position: static !important; height: auto !important; overflow: visible !important; }
+  #print-root {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
 ${printRules('#print-root ')}
 }`;
 
@@ -367,7 +412,22 @@ ${element.outerHTML}
 </html>`;
 }
 
-/** Fills the print-only container with the rendered document; resolves once images are ready. */
+const IMAGE_WAIT_MS = 8000;
+
+function whenImageSettles(img) {
+  const done = img.decode?.().catch(() => {}) ?? Promise.resolve();
+  return Promise.race([done, new Promise((resolve) => setTimeout(resolve, IMAGE_WAIT_MS))]);
+}
+
+/** Two frames, so a webview that prints the current layout has measured the article. */
+function waitForLayout() {
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
+/**
+ * Fills the print-only container with the rendered document.
+ * Resolves once images have loaded or timed out and the article has a real height.
+ */
 export async function preparePrint(doc, options) {
   if (!document.getElementById('export-style')) {
     const style = document.createElement('style');
@@ -378,9 +438,13 @@ export async function preparePrint(doc, options) {
   let root = document.getElementById('print-root');
   if (!root) {
     root = Object.assign(document.createElement('div'), { id: 'print-root' });
+    root.setAttribute('aria-hidden', 'true');
     document.body.appendChild(root);
   }
   const { element } = await renderDocument(doc, options);
   root.replaceChildren(element);
-  await Promise.all([...root.querySelectorAll('img')].map((img) => img.decode?.().catch(() => {})));
+  await document.fonts?.ready;
+  await Promise.all([...root.querySelectorAll('img')].map(whenImageSettles));
+  await waitForLayout();
+  return root.scrollHeight;
 }

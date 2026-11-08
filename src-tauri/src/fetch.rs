@@ -9,9 +9,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use base64::Engine;
 use percent_encoding::percent_decode_str;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -24,7 +26,12 @@ const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_UNPACKED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_ENTRIES: usize = 20_000;
-const TIMEOUT: Duration = Duration::from_secs(180);
+const DOCUMENT_TIMEOUT: Duration = Duration::from_secs(90);
+const ARCHIVE_TIMEOUT: Duration = Duration::from_secs(180);
+/// 图片单独计时。一篇里最多 80 张，不能让一张挂住的图占掉整次 GitHub / X 下载的 180 秒。
+const IMAGE_TIMEOUT: Duration = Duration::from_secs(25);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_REDIRECTS: usize = 8;
 /// 一篇文章里的单张图 / 全部图。原图动辄几 MB，单独设上限，免得一张图就把整次下载拖垮。
 const MAX_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_IMAGES_TOTAL: u64 = 96 * 1024 * 1024;
@@ -280,12 +287,15 @@ fn valid_name(value: &str) -> bool {
 enum Failure {
     NotFound(String),
     Message(String),
+    /// The next hop is on a private, loopback or link-local address and was not permitted.
+    NeedPrivate(String),
 }
 
 impl Failure {
     fn message(self) -> String {
         match self {
             Failure::NotFound(text) | Failure::Message(text) => text,
+            Failure::NeedPrivate(host) => format!("NEED_PRIVATE\t{host}"),
         }
     }
 
@@ -294,13 +304,101 @@ impl Failure {
     }
 }
 
-fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        // GitHub's API answers 403 to a request without one.
+/// One request, no automatic redirects. `addr` is the IP we already checked, so a later DNS
+/// answer cannot point the same name at a private address (rebinding).
+fn hop_client(host: &str, addr: SocketAddr, timeout: Duration) -> Result<reqwest::Client, Failure> {
+    let mut builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .user_agent(format!("MarkCune/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(TIMEOUT)
-        .build()
-        .map_err(|error| format!("无法准备网络请求：{error}"))
+        .timeout(timeout)
+        .connect_timeout(CONNECT_TIMEOUT);
+    // An address literal has nothing left to resolve. Pinning it again makes reqwest 0.13 fail the
+    // connection. Names are pinned so a second DNS answer cannot swap in a private address.
+    if host.parse::<IpAddr>().is_err() {
+        builder = builder.resolve(host, addr);
+    }
+    builder.build().map_err(|error| Failure::Message(format!("无法准备网络请求：{error}")))
+}
+
+/// Hosts the user just allowed, for this one download. Compared without port or brackets.
+pub fn host_key(host: &str) -> String {
+    host.trim_matches(|c| c == '[' || c == ']').trim().to_ascii_lowercase()
+}
+
+/// Private, loopback, link-local, and the IPv4 ranges that are not globally routable.
+/// IPv4-mapped and IPv4-compatible IPv6 are judged as the IPv4 address inside them.
+pub fn blocked_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => blocked_v4(v4),
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().is_some_and(blocked_v4) || blocked_v6(v6),
+    }
+}
+
+fn blocked_v4(ip: Ipv4Addr) -> bool {
+    ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_multicast()
+        || ip.is_unspecified()
+        || ip.octets()[0] == 0
+        || cgnat(ip)
+        || benchmarking(ip)
+}
+
+fn cgnat(ip: Ipv4Addr) -> bool {
+    let [a, b, _, _] = ip.octets();
+    a == 100 && (64..128).contains(&b)
+}
+
+fn benchmarking(ip: Ipv4Addr) -> bool {
+    let [a, b, _, _] = ip.octets();
+    a == 198 && (18..20).contains(&b)
+}
+
+fn blocked_v6(ip: Ipv6Addr) -> bool {
+    ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || unique_local(ip)
+        || link_local_v6(ip)
+        || ip.segments()[0] == 0xfec0
+}
+
+fn unique_local(ip: Ipv6Addr) -> bool {
+    ip.octets()[0] & 0xfe == 0xfc
+}
+
+fn link_local_v6(ip: Ipv6Addr) -> bool {
+    ip.segments()[0] & 0xffc0 == 0xfe80
+}
+
+fn socket_port(url: &reqwest::Url) -> u16 {
+    url.port_or_known_default().unwrap_or(if url.scheme() == "https" { 443 } else { 80 })
+}
+
+/// Resolves `host` and refuses it when any answer is a blocked address, unless this exact host
+/// is in `permit`. Returns one checked address to connect to, so the request does not resolve again.
+fn pin_host(host: &str, port: u16, permit: &HashSet<String>) -> Result<SocketAddr, Failure> {
+    let host = host.trim_matches(|c| c == '[' || c == ']');
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if blocked_ip(ip) && !permit.contains(&host_key(host)) {
+            return Err(Failure::NeedPrivate(host_key(host)));
+        }
+        return Ok(SocketAddr::new(ip, port));
+    }
+    let looked_up = (host, port).to_socket_addrs().map_err(|_| {
+        Failure::Message(format!("解析不了 {host}（检查网络或代理）"))
+    });
+    let addrs: Vec<SocketAddr> = looked_up?.collect();
+    if addrs.is_empty() {
+        return Err(Failure::Message(format!("解析不了 {host}")));
+    }
+    let blocked = addrs.iter().any(|addr| blocked_ip(addr.ip()));
+    if blocked && !permit.contains(&host_key(host)) {
+        return Err(Failure::NeedPrivate(host_key(host)));
+    }
+    Ok(addrs[0])
 }
 
 struct Download {
@@ -312,20 +410,54 @@ struct Download {
 ///
 /// The cap has to be enforced while the bytes arrive, not before: GitHub's archive endpoint does
 /// not send a Content-Length, so "check the size first" is not an option there.
-async fn download(client: &reqwest::Client, url: &str, limit: u64) -> Result<Vec<u8>, Failure> {
-    Ok(download_limited(client, url, limit).await?.bytes)
+/// Redirects are followed by hand so each hop is checked against `permit`.
+async fn download(
+    url: &str,
+    limit: u64,
+    timeout: Duration,
+    permit: &HashSet<String>,
+) -> Result<Vec<u8>, Failure> {
+    Ok(download_limited(url, limit, timeout, permit).await?.bytes)
 }
 
 async fn download_limited(
-    client: &reqwest::Client,
     url: &str,
     limit: u64,
+    timeout: Duration,
+    permit: &HashSet<String>,
 ) -> Result<Download, Failure> {
-    let mut response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|error| Failure::Message(friendly(&error)))?;
+    let mut current = reqwest::Url::parse(url).map_err(|_| Failure::Message("这不是一个有效的链接".into()))?;
+    if !matches!(current.scheme(), "http" | "https") {
+        return Err(Failure::Message("只支持 http 和 https 链接".into()));
+    }
+    for _ in 0..=MAX_REDIRECTS {
+        let host = current.host_str().ok_or_else(|| Failure::Message("这个链接没有主机名".into()))?;
+        let addr = pin_host(host, socket_port(&current), permit)?;
+        let client = hop_client(host, addr, timeout)?;
+        let response = client
+            .get(current.clone())
+            .send()
+            .await
+            .map_err(|error| Failure::Message(friendly(&error)))?;
+        let status = response.status();
+        if status.is_redirection() {
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| Failure::Message("这个地址的跳转没有目标".into()))?;
+            current = current.join(location).map_err(|_| Failure::Message("这个地址的跳转无效".into()))?;
+            if !matches!(current.scheme(), "http" | "https") {
+                return Err(Failure::Message("跳转之后不再是 http 或 https 链接".into()));
+            }
+            continue;
+        }
+        return read_body(response, limit).await;
+    }
+    Err(Failure::Message("这个地址跳转太多次".into()))
+}
+
+async fn read_body(mut response: reqwest::Response, limit: u64) -> Result<Download, Failure> {
     let status = response.status();
     if !status.is_success() {
         let text = match status.as_u16() {
@@ -582,14 +714,14 @@ fn library_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-pub async fn open_from_url(app: AppHandle, url: String) -> Result<Fetched, String> {
+pub async fn open_from_url(app: AppHandle, url: String, allow_hosts: Option<Vec<String>>) -> Result<Fetched, String> {
     let target = classify(&url)?;
-    let client = client()?;
+    let permit: HashSet<String> = allow_hosts.unwrap_or_default().into_iter().map(|host| host_key(&host)).collect();
     let library = library_dir(&app)?;
 
     match target {
         Target::File { url, folder, path } => {
-            let bytes = download(&client, &url, MAX_FILE_BYTES).await.map_err(Failure::message)?;
+            let bytes = download(&url, MAX_FILE_BYTES, DOCUMENT_TIMEOUT, &permit).await.map_err(Failure::message)?;
             let text = decode(&bytes)?;
             if text.trim().is_empty() {
                 return Err("这个文件是空的".into());
@@ -603,13 +735,13 @@ pub async fn open_from_url(app: AppHandle, url: String) -> Result<Fetched, Strin
                 std::fs::create_dir_all(parent).map_err(|error| format!("无法创建目录：{error}"))?;
             }
             // 单篇 Markdown 里的图（相对路径、绝对地址、懒加载）落到文档旁边，引用改写成本地路径。
-            let (text, failed) = localize_images(&client, &text, &url, dest.parent().unwrap_or(&root), true, &[]).await;
+            let (text, failed) = localize_images(&text, &url, dest.parent().unwrap_or(&root), true, &[], &permit).await;
             atomic_write(&dest, text.as_bytes())?;
             let title = dest.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
             Ok(Fetched { path: dest, root, kind: "file", title, files: 1, skipped: failed, replaced: false })
         }
         Target::Repo { owner, repo, branch } => {
-            let archive = fetch_archive(&client, &owner, &repo, branch.as_deref())
+            let archive = fetch_archive(&owner, &repo, branch.as_deref(), &permit)
                 .await
                 .map_err(Failure::message)?;
             let root = library.join(safe_name(&repo)?);
@@ -627,22 +759,57 @@ pub async fn open_from_url(app: AppHandle, url: String) -> Result<Fetched, Strin
                 replaced: unpacked.replaced,
             })
         }
-        Target::Post { handle, id } => post_to_library(&client, &library, &handle, &id).await,
+        Target::Post { handle, id } => post_to_library(&library, &handle, &id, &permit).await,
     }
+}
+
+/// One public image as a data URL, for an export the user explicitly asked to embed.
+/// Private and loopback addresses stay refused: the checkbox is not a general intranet permit.
+#[tauri::command]
+pub async fn fetch_remote_image(url: String) -> Result<String, String> {
+    const MAX_EMBED: u64 = 8 * 1024 * 1024;
+    let parsed = reqwest::Url::parse(url.trim()).map_err(|_| "这不是一个有效的链接".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("只支持 http 和 https 图片".into());
+    }
+    let payload = download_limited(parsed.as_str(), MAX_EMBED, IMAGE_TIMEOUT, &HashSet::new())
+        .await
+        .map_err(|error| match error {
+            Failure::NeedPrivate(_) => "这张图片在本机或局域网上，没有随文件下载".into(),
+            other => other.message(),
+        })?;
+    let Some(ext) = image_ext_of(&payload.bytes, &payload.content_type) else {
+        return Err("返回的内容不是图片".into());
+    };
+    let mime = match ext {
+        ".jpg" => "image/jpeg",
+        ".png" => "image/png",
+        ".gif" => "image/gif",
+        ".webp" => "image/webp",
+        ".svg" => "image/svg+xml",
+        ".bmp" => "image/bmp",
+        ".avif" => "image/avif",
+        ".ico" => "image/x-icon",
+        _ => "application/octet-stream",
+    };
+    Ok(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(payload.bytes)
+    ))
 }
 
 /// 一条帖子落到书库：`<书库>/x.com/<用户名>-<帖子号>/`，图片进同级的 `images/`。
 async fn post_to_library(
-    client: &reqwest::Client,
     library: &Path,
     handle: &str,
     id: &str,
+    permit: &HashSet<String>,
 ) -> Result<Fetched, String> {
-    let post = fetch_post(client, handle, id).await?;
+    let post = fetch_post(handle, id, permit).await?;
     let root = library.join("x.com").join(safe_name(&format!("{handle}-{id}"))?);
     std::fs::create_dir_all(&root).map_err(|error| format!("无法创建目录：{error}"))?;
     let images_dir = root.join("images");
-    let (saved, failed) = save_images(client, &post.images, &images_dir).await;
+    let (saved, failed) = save_images(&post.images, &images_dir, permit).await;
     let text = tweet::document(&post, &|index| match saved.get(index).and_then(Option::as_ref) {
         Some(name) => format!("images/{name}"),
         // 图没下下来就把远程地址留着：能上外网的人照样看得见，正文也不会因此失败。
@@ -650,39 +817,28 @@ async fn post_to_library(
     });
     // 正文里另写的图片（Markdown / HTML，含 srcset、data-src）不在媒体表里，这里补下。
     // 媒体表里已经试过的地址不再试第二遍，失败张数也不会算两次。
-    let (text, extra_failed) = localize_images(client, &text, &post.url, &root, false, &post.images).await;
+    let (text, extra_failed) = localize_images(&text, &post.url, &root, false, &post.images, permit).await;
     let dest = root.join(post_file_name(&post.title, id));
     atomic_write(&dest, text.as_bytes())?;
     Ok(Fetched { path: dest, root, kind: "tweet", title: post.title, files: 1, skipped: failed + extra_failed, replaced: false })
 }
 
 /// 向镜像服务要一条帖子，并转成 Markdown。
-async fn fetch_post(client: &reqwest::Client, handle: &str, id: &str) -> Result<tweet::Post, String> {
+async fn fetch_post(handle: &str, id: &str, permit: &HashSet<String>) -> Result<tweet::Post, String> {
     let url = format!("https://api.fxtwitter.com/{handle}/status/{id}");
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|error| format!("{}——X 的内容要走境外网络，请确认这台机器能访问外网", friendly(&error)))?;
-    let status = response.status();
-    let body = response.text().await.map_err(|error| format!("读取帖子内容失败：{error}"))?;
-    if !status.is_success() {
-        return Err(match status.as_u16() {
-            404 => "这条帖子不存在，可能已被删除，或者账号是受保护的".to_string(),
-            401 | 403 => "这条帖子需要登录才能看，镜像服务拿不到".to_string(),
-            429 => "镜像服务被请求得太频繁，过一会儿再试".to_string(),
-            code => format!("镜像服务返回 HTTP {code}"),
-        });
-    }
+    let payload = download(&url, MAX_FILE_BYTES, DOCUMENT_TIMEOUT, permit).await.map_err(|error| match error {
+        Failure::NeedPrivate(host) => format!("NEED_PRIVATE\t{host}"),
+        Failure::NotFound(_) => "这条帖子不存在，可能已被删除，或者账号是受保护的".into(),
+        Failure::Message(text) if text.contains("401") || text.contains("403") => "这条帖子需要登录才能看，镜像服务拿不到".into(),
+        Failure::Message(text) if text.contains("429") => "镜像服务被请求得太频繁，过一会儿再试".into(),
+        Failure::Message(text) => format!("{text}——X 的内容要走境外网络，请确认这台机器能访问外网"),
+    })?;
+    let body = String::from_utf8(payload).map_err(|_| "读取帖子内容失败：不是文本".to_string())?;
     tweet::parse(&body)
 }
 
 /// 逐张下载正文里的图片，返回（成功落盘的文件名, 失败的张数）。
-async fn save_images(
-    client: &reqwest::Client,
-    urls: &[String],
-    dir: &Path,
-) -> (Vec<Option<String>>, usize) {
+async fn save_images(urls: &[String], dir: &Path, permit: &HashSet<String>) -> (Vec<Option<String>>, usize) {
     let mut saved: Vec<Option<String>> = vec![None; urls.len()];
     let mut failed = 0usize;
     let mut total = 0u64;
@@ -691,7 +847,7 @@ async fn save_images(
             failed += 1;
             continue;
         }
-        match download_limited(client, url, MAX_IMAGE_BYTES).await {
+        match download_limited(url, MAX_IMAGE_BYTES, IMAGE_TIMEOUT, permit).await {
             Ok(payload) if !payload.bytes.is_empty() => {
                 // 网页或空响应当成没下到，别存成一张打不开的 .jpg。
                 let Some(ext) = image_ext_of(&payload.bytes, &payload.content_type) else {
@@ -723,12 +879,12 @@ const MAX_LOCAL_IMAGES: usize = 80;
 ///
 /// 返回改写后的正文，以及没能保存的张数。失败的引用保持原样。
 async fn localize_images(
-    client: &reqwest::Client,
     text: &str,
     base: &str,
     dir: &Path,
     allow_relative: bool,
     skip: &[String],
+    permit: &HashSet<String>,
 ) -> (String, usize) {
     let images = collect_remote_images(text, base, allow_relative);
     if images.is_empty() {
@@ -751,7 +907,7 @@ async fn localize_images(
             failed += 1;
             continue;
         }
-        match download_limited(client, &image.resolved, MAX_IMAGE_BYTES).await {
+        match download_limited(&image.resolved, MAX_IMAGE_BYTES, IMAGE_TIMEOUT, permit).await {
             Ok(payload) if !payload.bytes.is_empty() => {
                 let Some(ext) = image_ext_of(&payload.bytes, &payload.content_type) else {
                     failed += 1;
@@ -1280,15 +1436,15 @@ fn archive_urls(owner: &str, repo: &str, branch: Option<&str>) -> Vec<String> {
 /// enough that a feature depending on them would be unreliable. A named branch that turns out to be
 /// wrong (and a refused `HEAD`) fall back to the two names almost every repository uses.
 async fn fetch_archive(
-    client: &reqwest::Client,
     owner: &str,
     repo: &str,
     branch: Option<&str>,
+    permit: &HashSet<String>,
 ) -> Result<Vec<u8>, Failure> {
     let urls = archive_urls(owner, repo, branch);
     let last = urls.len() - 1;
     for (index, url) in urls.iter().enumerate() {
-        match download(client, url, MAX_ARCHIVE_BYTES).await {
+        match download(url, MAX_ARCHIVE_BYTES, ARCHIVE_TIMEOUT, permit).await {
             Ok(body) => return Ok(body),
             // Only a missing branch is worth retrying; anything else is the real answer.
             Err(error) if error.is_not_found() && index < last => continue,
@@ -1375,8 +1531,8 @@ mod tests {
     #[test]
     #[ignore = "需要外网，且依赖别人账号的帖子始终存在"]
     fn a_real_post_becomes_a_document() {
-        let client = client().unwrap();
-        let post = tauri::async_runtime::block_on(fetch_post(&client, "ai_chuhai", "2111864471639498764")).unwrap();
+        let permit = HashSet::new();
+        let post = tauri::async_runtime::block_on(fetch_post("ai_chuhai", "2111864471639498764", &permit)).unwrap();
         assert!(!post.title.is_empty());
         assert!(!post.body.trim().is_empty());
         let text = tweet::document(&post, &|index| format!("images/{index}.jpg"));
@@ -1389,14 +1545,14 @@ mod tests {
     #[test]
     #[ignore = "需要外网，且依赖别人账号的帖子始终存在"]
     fn a_real_post_lands_in_the_library() {
-        let client = client().unwrap();
+        let permit = HashSet::new();
         let library = std::env::temp_dir().join(format!("mdpad-post-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&library);
         let fetched = tauri::async_runtime::block_on(post_to_library(
-            &client,
             &library,
             "zureA255062",
             "2111642497927798995",
+            &permit,
         ))
         .unwrap();
         assert_eq!(fetched.kind, "tweet");
@@ -1942,5 +2098,71 @@ mod tests {
             image_ext_of(b"<svg xmlns='http://www.w3.org/2000/svg'></svg>", ""),
             Some(".svg")
         );
+    }
+
+    #[test]
+    fn blocked_addresses_cover_private_loopback_link_local_and_mapped_ipv4() {
+        for ip in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "192.168.1.1",
+            "169.254.169.254",
+            "0.0.0.0",
+            "100.64.0.1",
+            "::1",
+            "fe80::1",
+            "fd00::1",
+            "::ffff:127.0.0.1",
+            "::ffff:10.0.0.1",
+        ] {
+            assert!(blocked_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["1.1.1.1", "8.8.8.8", "93.184.216.34", "2606:4700:4700::1111"] {
+            assert!(!blocked_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    #[test]
+    fn a_permitted_loopback_host_cannot_redirect_to_a_different_loopback_host() {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let secret_hits = Arc::new(AtomicUsize::new(0));
+        let secret_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let secret_port = secret_listener.local_addr().unwrap().port();
+        let hits = Arc::clone(&secret_hits);
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = secret_listener.accept() {
+                hits.fetch_add(1, Ordering::Relaxed);
+                let _ = stream.write_all(b"HTTP/1.0 200 OK\r\nContent-Length: 8\r\n\r\nINTERNAL");
+            }
+        });
+
+        let front = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let front_port = front.local_addr().unwrap().port();
+        let location = format!("http://[::1]:{secret_port}/secret");
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = front.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = std::io::Read::read(&mut stream, &mut buf);
+                let body = format!("HTTP/1.0 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                let _ = stream.write_all(body.as_bytes());
+            }
+        });
+
+        let permit = HashSet::from([host_key("127.0.0.1")]);
+        let err = tauri::async_runtime::block_on(download(
+            &format!("http://127.0.0.1:{front_port}/start"),
+            1024,
+            std::time::Duration::from_secs(5),
+            &permit,
+        ))
+        .unwrap_err();
+        let message = err.message();
+        assert!(message.starts_with("NEED_PRIVATE\t::1"), "{message}");
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert_eq!(secret_hits.load(Ordering::Relaxed), 0, "the other loopback host must not be contacted");
     }
 }

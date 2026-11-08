@@ -109,6 +109,32 @@ struct Target {
     key: String,
 }
 
+/// https anywhere, or http only to localhost / a literal loopback or private IP.
+/// Link-local (cloud metadata) and public http stay refused. Names other than localhost are not
+/// resolved here: a renderer that can call `ai_configure` must not be able to aim the key at an
+/// arbitrary host over cleartext, and a DNS name can change after we check it.
+pub fn acceptable_endpoint(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw.trim()) else { return false };
+    let Some(host) = url.host_str() else { return false };
+    match url.scheme() {
+        "https" => true,
+        "http" => local_http_host(host),
+        _ => false,
+    }
+}
+
+fn local_http_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    let host = host.trim_matches(|c| c == '[' || c == ']');
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => ip.is_loopback() || ip.is_private(),
+        Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback(),
+        Err(_) => false,
+    }
+}
+
 fn direct(app: &AppHandle) -> Option<Target> {
     Some(Target {
         base: setting(app, KEY_BASE).unwrap_or_else(|| DEFAULT_BASE.into()),
@@ -160,7 +186,9 @@ pub fn ai_configure(
     {
         let state = app_state(&app);
         let mut store = state.store.lock().unwrap();
-        put(&mut store, KEY_BASE, base_url);
+        if base_url.as_ref().is_none_or(|base| base.trim().is_empty() || acceptable_endpoint(base)) {
+            put(&mut store, KEY_BASE, base_url);
+        }
         put(&mut store, KEY_MODEL, model);
         put(&mut store, KEY_SECRET, api_key);
         if let Some(completion) = completion {
@@ -184,7 +212,12 @@ pub fn ai_configure(
 /// Shared by the voice module: one connection pool for every outbound call.
 pub(crate) fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| reqwest::Client::builder().build().unwrap_or_else(|_| reqwest::Client::new()))
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
 }
 
 fn clip(text: &str, max: usize) -> String {
@@ -247,6 +280,9 @@ fn read_error(body: &Value, status: u16) -> String {
 }
 
 async fn chat(target: &Target, system: &str, user: &str, max_tokens: u32, timeout: u64) -> Result<String, String> {
+    if !acceptable_endpoint(&target.base) {
+        return Err("服务地址只支持 https，或本机/局域网 IP 的 http（例如 http://127.0.0.1:11434/v1）".into());
+    }
     let url = format!("{}/chat/completions", target.base.trim_end_matches('/'));
     let response = client()
         .post(&url)
@@ -646,6 +682,18 @@ mod tests {
     #[test]
     fn the_key_is_on_the_never_sent_list() {
         assert!(crate::store::SECRET_SETTINGS.contains(&KEY_SECRET));
+    }
+
+    #[test]
+    fn endpoints_are_https_or_a_literal_local_http_address() {
+        assert!(acceptable_endpoint("https://api.deepseek.com/v1"));
+        assert!(acceptable_endpoint("http://127.0.0.1:11434/v1"));
+        assert!(acceptable_endpoint("http://localhost:11434/v1"));
+        assert!(acceptable_endpoint("http://192.168.1.8:11434/v1"));
+        assert!(!acceptable_endpoint("http://169.254.169.254/"));
+        assert!(!acceptable_endpoint("http://example.com/v1"));
+        assert!(!acceptable_endpoint("file:///etc/passwd"));
+        assert!(!acceptable_endpoint("http://nas.local/v1"));
     }
 
     #[test]

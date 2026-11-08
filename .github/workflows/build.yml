@@ -101,7 +101,10 @@ jobs:
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          # Empty when the secret is unset, so the current unencrypted key still builds.
+          # To use a passphrase, add the Actions secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+          # Do not commit or print the key.
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           source scripts/release.conf
           export MDPAD_UPDATE_ENDPOINT="$UPDATE_ENDPOINT"

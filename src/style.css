@@ -2586,6 +2586,21 @@ body.ai-pending .ai-pick {
   outline: none;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
+.export-remote {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 4px 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--hover);
+  cursor: default;
+}
+.export-remote input {
+  flex: none;
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
 .export-list {
   display: flex;
   flex-direction: column;

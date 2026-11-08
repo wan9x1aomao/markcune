@@ -110,11 +110,11 @@ export const linkPaste = $prose(
 
 export const findKey = new PluginKey('mdpad-find');
 
-function search(doc, query) {
+function search(doc, query, from = 0, to = doc.content.size) {
   const matches = [];
   if (!query) return matches;
   const needle = query.toLowerCase();
-  doc.descendants((node, pos) => {
+  doc.nodesBetween(from, to, (node, pos) => {
     if (!node.isTextblock) return true;
     const text = node.textBetween(0, node.content.size, undefined, '￼').toLowerCase();
     for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + needle.length)) {
@@ -123,6 +123,33 @@ function search(doc, query) {
     return false;
   });
   return matches;
+}
+
+/** Remap hits that sit outside the edited range and rescan only the text blocks that changed. */
+function searchEdited(doc, query, previous, tr) {
+  if (!query) return [];
+  if (!previous.length) return search(doc, query);
+  const changed = [];
+  tr.mapping.maps.forEach((stepMap) => {
+    stepMap.forEach((_oldStart, _oldEnd, newStart, newEnd) => changed.push([newStart, newEnd]));
+  });
+  if (!changed.length) return previous.map((match) => ({ from: tr.mapping.map(match.from), to: tr.mapping.map(match.to) })).filter((match) => match.from < match.to);
+  let from = doc.content.size;
+  let to = 0;
+  for (const [start, end] of changed) {
+    from = Math.min(from, start);
+    to = Math.max(to, end);
+  }
+  const $from = doc.resolve(Math.max(0, Math.min(from, doc.content.size)));
+  const $to = doc.resolve(Math.max(0, Math.min(to, doc.content.size)));
+  const blockFrom = $from.start($from.depth) - 1;
+  const blockTo = $to.end($to.depth) + 1;
+  const mapped = previous
+    .map((match) => ({ from: tr.mapping.map(match.from, -1), to: tr.mapping.map(match.to, 1) }))
+    .filter((match) => match.from < match.to && (match.to <= blockFrom || match.from >= blockTo));
+  mapped.push(...search(doc, query, Math.max(0, blockFrom), Math.min(doc.content.size, blockTo)));
+  mapped.sort((a, b) => a.from - b.from || a.to - b.to);
+  return mapped.filter((match, index) => index === 0 || match.from !== mapped[index - 1].from || match.to !== mapped[index - 1].to);
 }
 
 export const findPlugin = $prose(
@@ -140,7 +167,7 @@ export const findPlugin = $prose(
             return { query, matches, index };
           }
           if (tr.docChanged && previous.query) {
-            const matches = search(tr.doc, previous.query);
+            const matches = searchEdited(tr.doc, previous.query, previous.matches, tr);
             return { ...previous, matches, index: Math.min(previous.index, Math.max(matches.length - 1, 0)) };
           }
           return previous;

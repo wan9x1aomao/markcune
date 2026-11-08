@@ -35,7 +35,8 @@ fn focused_window(app: &AppHandle) -> Option<WebviewWindow> {
 fn create_window(app: &AppHandle, startup: Startup) {
     let state = app_state(app);
     let label = format!("doc-{}", state.next_id.fetch_add(1, Ordering::Relaxed));
-    state.windows.lock().unwrap().insert(label.clone(), WinState { startup: Some(startup), ..Default::default() });
+    state.windows.lock().unwrap().insert(label.clone(), WinState { startup: Some(startup.clone()), ..Default::default() });
+    grant_startup(app, &label, &startup);
 
     // Native file drops are off so HTML5 drag and drop (block handles, image drops) works on Windows too.
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
@@ -69,6 +70,14 @@ fn create_window(app: &AppHandle, startup: Startup) {
     }
 }
 
+fn grant_startup(app: &AppHandle, label: &str, startup: &Startup) {
+    match startup {
+        Startup::File { path } => files::grant_file(app, label, path),
+        Startup::Folder { path } => files::grant_dir(app, label, path),
+        Startup::Empty | Startup::Draft { .. } => {}
+    }
+}
+
 /// Opens a file or folder from outside (Finder, command line, second launch).
 fn open_path(app: &AppHandle, path: PathBuf) {
     let path = absolute(&path);
@@ -78,7 +87,7 @@ fn open_path(app: &AppHandle, path: PathBuf) {
     enum Target {
         Focus(String),
         Ready(String),
-        Pending,
+        Pending(String),
         New,
     }
     let state = app_state(app);
@@ -86,9 +95,9 @@ fn open_path(app: &AppHandle, path: PathBuf) {
         let mut windows = state.windows.lock().unwrap();
         if let Some((label, _)) = windows.iter().find(|(_, w)| !is_dir && w.doc.as_deref() == Some(path.as_path())) {
             Target::Focus(label.clone())
-        } else if let Some(w) = windows.values_mut().find(|w| matches!(w.startup, Some(Startup::Empty))) {
+        } else if let Some((label, w)) = windows.iter_mut().find(|(_, w)| matches!(w.startup, Some(Startup::Empty))) {
             w.startup = Some(startup.clone());
-            Target::Pending
+            Target::Pending(label.clone())
         } else if let Some((label, _)) = windows.iter().find(|(_, w)| w.startup.is_none() && w.is_empty()) {
             Target::Ready(label.clone())
         } else {
@@ -103,12 +112,13 @@ fn open_path(app: &AppHandle, path: PathBuf) {
             }
         }
         Target::Ready(label) => {
+            grant_startup(app, &label, &startup);
             let _ = app.emit_to(label.as_str(), "open-path", json!({ "path": path, "isDir": is_dir }));
             if let Some(window) = app.get_webview_window(&label) {
                 let _ = window.set_focus();
             }
         }
-        Target::Pending => {}
+        Target::Pending(label) => grant_startup(app, &label, &startup),
         Target::New => create_window(app, startup),
     }
 }
@@ -401,7 +411,7 @@ async fn confirm(window: WebviewWindow, title: String, message: String, ok: Stri
 
 #[tauri::command]
 async fn pick_documents(window: WebviewWindow) -> Vec<PathBuf> {
-    window
+    let paths: Vec<PathBuf> = window
         .dialog()
         .file()
         .add_filter("Markdown 文稿", files::DOC_EXTENSIONS)
@@ -410,23 +420,35 @@ async fn pick_documents(window: WebviewWindow) -> Vec<PathBuf> {
         .unwrap_or_default()
         .into_iter()
         .filter_map(|p| p.into_path().ok())
-        .collect()
+        .collect();
+    for path in &paths {
+        files::grant_file(window.app_handle(), window.label(), path);
+    }
+    paths
 }
 
 #[tauri::command]
 async fn pick_folder(window: WebviewWindow) -> Option<PathBuf> {
-    window.dialog().file().set_parent(&window).blocking_pick_folder().and_then(|p| p.into_path().ok())
+    let path = window.dialog().file().set_parent(&window).blocking_pick_folder().and_then(|p| p.into_path().ok())?;
+    files::grant_dir(window.app_handle(), window.label(), &path);
+    Some(path)
 }
 
 #[tauri::command]
 async fn pick_image(window: WebviewWindow) -> Option<PathBuf> {
-    window
+    let path = window
         .dialog()
         .file()
         .add_filter("图片", &["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"])
         .set_parent(&window)
         .blocking_pick_file()
-        .and_then(|p| p.into_path().ok())
+        .and_then(|p| p.into_path().ok());
+    if let Some(path) = &path {
+        if let Some(real) = files::image_target(path) {
+            with_win(window.app_handle(), window.label(), |w| w.pending_image = Some(real));
+        }
+    }
+    path
 }
 
 #[tauri::command]
@@ -693,6 +715,11 @@ fn open_dropped(app: &AppHandle, label: Option<String>, paths: Vec<PathBuf>) {
     let mut paths = paths.into_iter();
     if let (Some(label), Some(first)) = (label, paths.next()) {
         let is_dir = first.is_dir();
+        if is_dir {
+            files::grant_dir(app, &label, &first);
+        } else {
+            files::grant_file(app, &label, &first);
+        }
         let _ = app.emit_to(label.as_str(), "open-path", json!({ "path": first, "isDir": is_dir }));
     }
     for path in paths {
@@ -936,6 +963,7 @@ fn main() {
             files::draft_write,
             files::draft_delete,
             fetch::open_from_url,
+            fetch::fetch_remote_image,
             update::check_update,
             update::update_status,
             update::download_update,

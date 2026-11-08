@@ -50,6 +50,14 @@ pub struct WinState {
     pub close_guard: bool,
     pub zoom: Option<f64>,
     pub watcher: Option<notify::RecommendedWatcher>,
+    /// Canonical directories this window may list, create and rename inside.
+    pub allowed_dirs: Vec<PathBuf>,
+    /// Canonical files this window may open even when their folder was not granted.
+    pub allowed_files: Vec<PathBuf>,
+    /// The image the native dialog just returned, consumed by `import_image`.
+    pub pending_image: Option<PathBuf>,
+    /// Identity of the open document, so a swapped symlink is not written through.
+    pub file_id: Option<(u64, u64)>,
 }
 
 impl WinState {

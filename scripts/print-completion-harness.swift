@@ -53,8 +53,11 @@ web.navigationDelegate = wait
 web.loadHTMLString(html, baseURL: nil)
 if !pump(until: { wait.finished }, seconds: 8) {
     fputs("print-completion: page did not load\n", stderr)
+    fflush(stderr)
     exit(3)
 }
+fputs("print-completion: page loaded\n", stderr)
+fflush(stderr)
 
 let pdfURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mdpad-print-completion.pdf")
 try? FileManager.default.removeItem(at: pdfURL)
@@ -67,14 +70,20 @@ operation.showsProgressPanel = false
 operation.canSpawnSeparateThread = false
 let delegate = PrintDelegate()
 let selector = #selector(PrintDelegate.printOperationDidRun(_:success:contextInfo:))
-// The panel would wait for a click. CI has no click, so dismiss the modal session.
-// didRun must still run: that is cancel/close, success == false.
-DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+// The print panel's run loop is not the default mode, so a normal dispatch timer never fires.
+// Schedule the dismiss on the modal mode. No click, no GUI automation.
+let dismiss = Timer(timeInterval: 1, repeats: false) { _ in
     fputs("print-completion: dismissing the modal without a click\n", stderr)
     fflush(stderr)
     NSApp.stopModal()
 }
+RunLoop.current.add(dismiss, forMode: .common)
+RunLoop.current.add(dismiss, forMode: .modalPanel)
+fputs("print-completion: runModal\n", stderr)
+fflush(stderr)
 operation.runModal(for: window, delegate: delegate, didRun: selector, contextInfo: nil)
+fputs("print-completion: runModal returned called=\(delegate.called)\n", stderr)
+fflush(stderr)
 let fired = delegate.called || pump(until: { delegate.called }, seconds: 5)
 let payload: [String: Any] = [
     "api": "printOperationDidRun",

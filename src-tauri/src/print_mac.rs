@@ -78,7 +78,11 @@ pub fn print_page(window: WebviewWindow) -> Result<(), String> {
         print_session::end(&window.label());
         return Err(err.to_string());
     }
-    match started.lock().unwrap().take() {
+    let outcome = {
+        let mut guard = started.lock().unwrap();
+        guard.take()
+    };
+    match outcome {
         Some(Ok(())) => Ok(()),
         Some(Err(err)) => {
             print_session::end(&window.label());

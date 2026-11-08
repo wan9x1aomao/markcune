@@ -137,9 +137,12 @@ try {
     const dir = mkdtempSync(join(tmpdir(), 'mdpad-pdf-'));
     const file = join(dir, 'export.pdf');
     writeFileSync(file, Buffer.from(pdf.result.data, 'base64'));
-    writeFileSync('/opt/cursor/artifacts/export-pdf-regression.pdf', readFileSync(file));
     const text = execFileSync('pdftotext', ['-layout', file, '-'], { encoding: 'utf8' });
-    writeFileSync('/opt/cursor/artifacts/export-pdf-regression.txt', text);
+    const artifacts = '/opt/cursor/artifacts';
+    if (existsSync(artifacts)) {
+      writeFileSync(join(artifacts, 'export-pdf-regression.pdf'), readFileSync(file));
+      writeFileSync(join(artifacts, 'export-pdf-regression.txt'), text);
+    }
     const pages = execFileSync('pdfinfo', [file], { encoding: 'utf8' }).match(/Pages:\s+(\d+)/)?.[1];
     console.log('pdf pages', pages, 'bytes', pdf.result.data.length);
     for (const marker of ['MARK-START', 'MARK-MIDDLE', 'R80', 'CODE-080', 'MARK-END', 'MARK-LAST-SENTENCE', '由MarkCune导出']) {

@@ -110,4 +110,7 @@ jobs:
       - name: PDF 导出回归
         env:
           REQUIRE_CHROME: "1"
-        run: node tests/export-pdf.mjs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils
+          node tests/export-pdf.mjs

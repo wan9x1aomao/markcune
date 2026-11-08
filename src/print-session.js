@@ -1,4 +1,4 @@
-/** One export at a time. A second click while the dialog is open does nothing. */
+/** One export at a time. A second click while a DOM print dialog is open does nothing. */
 export function createPrintLock() {
   let active = false;
   return {
@@ -19,27 +19,48 @@ export function createPrintLock() {
 }
 
 /**
- * Waits until the page reports `afterprint` (dialog confirmed or cancelled).
- * The listener is installed before `startPrint`, so an event fired during the call is not missed.
- * There is no timer: restoring the editor before the dialog closes undoes pagination.
+ * Runs `startPrint` and always settles.
+ *
+ * Browsers that implement the HTML print events fire `beforeprint` during the call and
+ * `afterprint` when the dialog closes (confirm or cancel). This waits for that pair.
+ * A platform that fires neither — WKWebView's `printOperationWithPrintInfo` is a native
+ * panel and wry does not hook its delegate — settles as `no-afterprint` on the next
+ * microtask. Callers must not hide the editor until one of these events: the native
+ * panel does not send them, and a timer that removed layout would race pagination.
  */
-export function waitForAfterPrint(target, startPrint) {
-  return new Promise((resolve, reject) => {
+export function runPrint(target, startPrint) {
+  return new Promise((resolve) => {
     let settled = false;
-    const finish = (error) => {
+    let sawBefore = false;
+    const finish = (reason) => {
       if (settled) return;
       settled = true;
+      target.removeEventListener('beforeprint', onBefore);
       target.removeEventListener('afterprint', onAfter);
-      if (error) reject(error);
-      else resolve();
+      resolve(reason);
     };
-    const onAfter = () => finish();
+    const onBefore = () => {
+      sawBefore = true;
+    };
+    const onAfter = () => finish('afterprint');
+    target.addEventListener('beforeprint', onBefore);
     target.addEventListener('afterprint', onAfter);
+    let invocation;
     try {
-      Promise.resolve(startPrint()).catch((error) => finish(error));
+      invocation = Promise.resolve(startPrint());
     } catch (error) {
-      finish(error);
+      finish('error');
+      return;
     }
+    invocation.then(
+      () => {
+        queueMicrotask(() => {
+          if (settled || sawBefore) return;
+          finish('no-afterprint');
+        });
+      },
+      () => finish('error'),
+    );
   });
 }
 

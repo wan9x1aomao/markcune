@@ -11,7 +11,7 @@ import { openHelp } from './help.js';
 import { createRichEditor } from './editor.js';
 import { acceptsEdit, mountBaseline } from './mount-input.js';
 import { createPreviewCache } from './preview-sync.js';
-import { createPrintLock, waitForAfterPrint } from './print-session.js';
+import { createPrintLock, runPrint } from './print-session.js';
 import { createFindbar } from './findbar.js';
 import { icons } from './icons.js';
 import { openLicenses } from './licenses.js';
@@ -217,6 +217,14 @@ function showConflict(reason) {
       ['在原位置重新保存', () => resolveConflict('overwrite')],
       ['另存为…', () => saveAs()],
     ]);
+  } else if (reason === 'redirected') {
+    // Force is the content-conflict choice. It must not follow a symlink that replaced the file.
+    showBanner('这个文件已被换成指向别处的链接，不能在这里覆盖。请另存为，或重新打开文稿。', [
+      ['另存为…', () => saveAs()],
+      ['重新打开', () => reloadFromDisk()],
+    ]);
+  } else if (reason === 'unverified') {
+    showBanner('无法确认这个文件还是刚才打开的那一份，已停止保存。请另存为。', [['另存为…', () => saveAs()]]);
   } else {
     showBanner('这个文件已被其他程序修改。', [
       ['载入外部版本', () => resolveConflict('reload')],
@@ -1195,25 +1203,23 @@ const printLock = createPrintLock();
 async function exportPdf() {
   if (printLock.active) return;
   const previousTitle = document.title;
-  let restore = () => {};
   await printLock.run(async () => {
     try {
       const height = await preparePrintDocument();
       if (!height) throw new Error('没有排出可打印的页面');
-      document.documentElement.classList.add('printing');
+      // The editor stays on screen. #print-root is already laid out off to the side, and
+      // @media print is what hides the editor while a formatter is actually printing.
+      // WKWebView's native print operation does not promise beforeprint/afterprint, so a class
+      // that hides the page until one of those events would leave the window blank.
       document.title = exportTitle();
-      restore = () => {
-        document.documentElement.classList.remove('printing');
+      try {
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        toast('在打印窗口中选择“存储为 PDF”', 4000);
+        await runPrint(window, () => window.print());
+      } finally {
         document.title = previousTitle;
-      };
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      toast('在打印窗口中选择“存储为 PDF”', 4000);
-      // window.print() fires afterprint when the dialog closes, including cancel.
-      // The Rust print() returns as soon as the dialog is requested and does not.
-      await waitForAfterPrint(window, () => window.print());
-      restore();
+      }
     } catch (error) {
-      restore();
       toast(`导出失败：${error?.message ?? error}`);
     }
   });

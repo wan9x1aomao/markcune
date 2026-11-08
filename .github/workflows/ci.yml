@@ -71,6 +71,12 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+      # Programmatic WKWebView print, no print panel and no GUI clicks. The JSON line is the
+      # evidence: which DOM print events fired, and whether the PDF still has the end marker.
+      - name: WKWebView 打印探测
+        if: matrix.platform == 'macos'
+        run: swift scripts/wk-print-harness.swift
+
   # 真编辑器 + 无头 Chrome，外壳的回答是写死的：不填 Key、不联网也能跑。
   # Chrome 和 Windows 的 WebView2 同属 Chromium，「从左边距拖选」「表格列宽」这类
   # 只在 Chromium 下出现的回归，在这条线上就能挡住，不用等发版才暴露。

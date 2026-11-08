@@ -210,13 +210,18 @@ fn is_symlink(path: &Path) -> bool {
 
 /// Writes via a temporary file in the same folder, so a crash never leaves a half-written document.
 /// The temporary name is unpredictable and created exclusively, so nobody can pre-place a symlink
-/// where it is about to land. A symlinked document is written through to the file it points at,
-/// instead of being replaced by a regular file.
+/// where it is about to land. A symlink at `path` is refused: renaming onto it would be safe, but
+/// following it would write somewhere else, and replacing it would destroy the link.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let path = match std::fs::canonicalize(path) {
-        Ok(real) if is_symlink(path) => real,
-        _ => path.to_path_buf(),
-    };
+    match path.symlink_metadata() {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err("这个文件已经变成链接，不能覆盖保存".into());
+        }
+        Ok(_) => {}
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => return Err(describe(&err)),
+    }
+    let path = path.to_path_buf();
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -305,8 +310,10 @@ pub fn write_document(window: WebviewWindow, content: String, force: bool) -> Re
     let (path, version) = with_win(app, label, |w| (w.doc.clone(), w.version)).unwrap_or_default();
     let path = path.ok_or("文档还没有保存位置")?;
 
-    if identity_blocks_save(force, with_win(app, label, |w| w.file_id).flatten(), &path) {
-        return Ok(WriteResult::Conflict { reason: "changed" });
+    let expected = with_win(app, label, |w| w.file_id).flatten();
+    match gate_path(&path, expected, force) {
+        SaveGate::Conflict(reason) => return Ok(WriteResult::Conflict { reason }),
+        SaveGate::Create | SaveGate::Write => {}
     }
     if !force {
         match std::fs::read(&path) {
@@ -321,11 +328,21 @@ pub fn write_document(window: WebviewWindow, content: String, force: bool) -> Re
             Err(err) => return Err(describe(&err)),
         }
     }
-    atomic_write(&path, content.as_bytes())?;
+    if let Err(message) = atomic_write(&path, content.as_bytes()) {
+        // The path may have become a symlink between the check and the write.
+        if path.symlink_metadata().ok().is_some_and(|meta| meta.file_type().is_symlink()) {
+            return Ok(WriteResult::Conflict { reason: "redirected" });
+        }
+        return Err(message);
+    }
+    let id = file_identity(&path);
+    if id.is_none() {
+        return Ok(WriteResult::Conflict { reason: "unverified" });
+    }
     with_win(app, label, |w| {
         w.version = Some(Version::of(content.as_bytes()));
         w.doc_canonical = std::fs::canonicalize(&path).ok();
-        w.file_id = file_identity(&path);
+        w.file_id = id;
     });
     Ok(WriteResult::Saved)
 }
@@ -397,18 +414,48 @@ pub async fn save_as(window: WebviewWindow, content: String) -> Result<Option<Op
     Ok(Some(Opened { path: target, content, position: None, rewritten }))
 }
 
-/// True when a non-forced save would overwrite a different file than the one we opened.
-/// `force` is the "keep my version" choice and must be allowed to replace that file.
-pub fn identity_conflict(expected: Option<(u64, u64)>, path: &Path) -> bool {
-    let (Some(expected), Some(actual)) = (expected, file_identity(path)) else {
-        return false;
-    };
-    path.exists() && actual != expected
+/// What a save is allowed to do. `force` answers a content conflict only.
+#[derive(Debug, PartialEq, Eq)]
+enum SaveGate {
+    /// Replace the regular file that is already there.
+    Write,
+    /// The path is gone. Only a forced save may create it again.
+    Create,
+    /// `changed` / `missing` can be forced. `redirected` and `unverified` cannot.
+    Conflict(&'static str),
 }
 
-/// A forced save is the "keep my version" choice and must still be allowed to replace the file.
-fn identity_blocks_save(force: bool, expected: Option<(u64, u64)>, path: &Path) -> bool {
-    !force && identity_conflict(expected, path)
+/// `link` is the path itself, not whatever it points at. A missing identity never becomes "go ahead".
+fn gate_save(link: bool, exists: bool, actual: Option<(u64, u64)>, expected: Option<(u64, u64)>, force: bool) -> SaveGate {
+    if link {
+        return SaveGate::Conflict("redirected");
+    }
+    if !exists {
+        return if force { SaveGate::Create } else { SaveGate::Conflict("missing") };
+    }
+    let Some(actual) = actual else {
+        return SaveGate::Conflict("unverified");
+    };
+    match expected {
+        None => SaveGate::Conflict("unverified"),
+        Some(expected) if expected != actual && !force => SaveGate::Conflict("changed"),
+        Some(_) => SaveGate::Write,
+    }
+}
+
+fn gate_path(path: &Path, expected: Option<(u64, u64)>, force: bool) -> SaveGate {
+    let meta = match path.symlink_metadata() {
+        Ok(meta) => Some(meta),
+        Err(err) if err.kind() == ErrorKind::NotFound => None,
+        Err(_) => return SaveGate::Conflict("unverified"),
+    };
+    let Some(meta) = meta else {
+        return gate_save(false, false, None, expected, force);
+    };
+    if meta.file_type().is_symlink() {
+        return gate_save(true, true, None, expected, force);
+    }
+    gate_save(false, true, file_identity(path), expected, force)
 }
 
 /// Rewrites or copies relative image references so they still work from `new_dir`.
@@ -1042,12 +1089,12 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), "v2");
         assert_eq!(std::fs::read_to_string(&victim).unwrap(), "SECRET");
 
-        // Saving a symlinked document updates the file it points at and keeps the link.
+        // A symlink is not a place to write. The file it names stays untouched.
         let link = base.join("link.md");
         std::os::unix::fs::symlink(&doc, &link).unwrap();
-        atomic_write(&link, b"v3").unwrap();
+        assert!(atomic_write(&link, b"v3").is_err());
         assert!(is_symlink(&link));
-        assert_eq!(std::fs::read_to_string(&doc).unwrap(), "v3");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), "v2");
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1142,6 +1189,57 @@ mod tests {
     }
 
     #[test]
+    fn force_does_not_skip_a_missing_or_redirected_identity() {
+        let id = Some((1, 1));
+        let other = Some((2, 2));
+        assert_eq!(gate_save(false, true, other, id, false), SaveGate::Conflict("changed"));
+        assert_eq!(gate_save(false, true, other, id, true), SaveGate::Write);
+        assert_eq!(gate_save(true, true, other, id, false), SaveGate::Conflict("redirected"));
+        assert_eq!(gate_save(true, true, other, id, true), SaveGate::Conflict("redirected"));
+        assert_eq!(gate_save(false, true, None, id, false), SaveGate::Conflict("unverified"));
+        assert_eq!(gate_save(false, true, None, id, true), SaveGate::Conflict("unverified"));
+        assert_eq!(gate_save(false, true, id, None, true), SaveGate::Conflict("unverified"));
+        assert_eq!(gate_save(false, false, None, id, false), SaveGate::Conflict("missing"));
+        assert_eq!(gate_save(false, false, None, id, true), SaveGate::Create);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_swapped_symlink_is_not_written_even_when_forced() {
+        let base = std::env::temp_dir().join(format!("mdpad-force-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let doc = base.join("notes.md");
+        let secret = base.join("secret.md");
+        std::fs::write(&doc, "v1").unwrap();
+        std::fs::write(&secret, "SECRET").unwrap();
+        let opened = file_identity(&doc).unwrap();
+
+        // Another editor replaced the file in place. Force may put the user's text back.
+        let tmp = base.join("notes.md.new");
+        std::fs::write(&tmp, "v2").unwrap();
+        std::fs::rename(&tmp, &doc).unwrap();
+        assert_ne!(file_identity(&doc), Some(opened));
+        assert_eq!(gate_path(&doc, Some(opened), false), SaveGate::Conflict("changed"));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), "v2");
+        assert_eq!(gate_path(&doc, Some(opened), true), SaveGate::Write);
+        atomic_write(&doc, b"mine").unwrap();
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), "mine");
+        assert!(!doc.symlink_metadata().unwrap().file_type().is_symlink());
+        let kept = file_identity(&doc).unwrap();
+
+        // The same path is then replaced by a symlink. Force must not follow it.
+        std::fs::remove_file(&doc).unwrap();
+        std::os::unix::fs::symlink(&secret, &doc).unwrap();
+        assert_eq!(gate_path(&doc, Some(kept), false), SaveGate::Conflict("redirected"));
+        assert_eq!(gate_path(&doc, Some(kept), true), SaveGate::Conflict("redirected"));
+        assert!(atomic_write(&doc, b"mine").is_err());
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "SECRET");
+        assert!(doc.symlink_metadata().unwrap().file_type().is_symlink());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn a_missing_windows_file_index_is_not_treated_as_zero() {
         assert_eq!(identity_from_index(Some(7), None), None);
         assert_eq!(identity_from_index(None, Some(1)), None);
@@ -1176,9 +1274,11 @@ mod tests {
         std::fs::write(&renamed, "B").unwrap();
         adopt_saved_document(&mut state, &renamed);
         assert_eq!(state.file_id, file_identity(&renamed));
-        assert!(!identity_blocks_save(false, state.file_id, &renamed));
-        assert!(identity_blocks_save(false, file_identity(&original), &renamed));
-        assert!(!identity_blocks_save(true, file_identity(&original), &renamed));
+        assert_eq!(gate_path(&renamed, state.file_id, false), SaveGate::Write);
+        // A different inode at a regular path is a content conflict. Force may replace that
+        // regular file. It does not make a symlink acceptable; that case is tested separately.
+        assert_eq!(gate_path(&renamed, file_identity(&original), false), SaveGate::Conflict("changed"));
+        assert_eq!(gate_path(&renamed, file_identity(&original), true), SaveGate::Write);
 
         // First save of an untitled draft, into a folder that was not the sidebar.
         std::fs::write(&first, "draft").unwrap();
@@ -1187,15 +1287,15 @@ mod tests {
         let outside_dir = std::fs::canonicalize(&outside).unwrap();
         assert!(fresh.allowed_dirs.iter().any(|dir| dir == &outside_dir));
         assert_eq!(fresh.file_id, file_identity(&first));
-        assert!(!identity_blocks_save(false, fresh.file_id, &first));
+        assert_eq!(gate_path(&first, fresh.file_id, false), SaveGate::Write);
 
         // Save outside the current root, then both a normal save and a forced save can proceed.
         std::fs::write(&outside_existing, "C").unwrap();
         adopt_saved_document(&mut state, &outside_existing);
         let other_dir = std::fs::canonicalize(&elsewhere).unwrap();
         assert!(state.allowed_dirs.iter().any(|dir| dir == &other_dir));
-        assert!(!identity_blocks_save(false, state.file_id, &outside_existing));
-        assert!(!identity_blocks_save(true, state.file_id, &outside_existing));
+        assert_eq!(gate_path(&outside_existing, state.file_id, false), SaveGate::Write);
+        assert_eq!(gate_path(&outside_existing, state.file_id, true), SaveGate::Write);
 
         let _ = std::fs::remove_dir_all(&base);
     }

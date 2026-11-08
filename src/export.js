@@ -261,9 +261,9 @@ ${scope} .raw { white-space: pre-wrap; font-family: 'SF Mono', ui-monospace, Men
  * Print rules for the article (`prefix` scopes them).
  *
  * Tables, code, formulas and diagrams that are taller than a page must be allowed to split and
- * must not clip. The same rules are installed for `html.printing` and for `@media print`: a
- * webview may paginate the on-screen tree rather than print media. Chrome's print-to-PDF was
- * checked. macOS WKWebView and Windows WebView2 were not.
+ * must not clip. The rules sit on `#print-root` itself and again inside `@media print`.
+ * Chrome's print-to-PDF was checked. macOS WKWebView and Windows WebView2 were not, and this
+ * does not claim the truncation cause is fixed.
  */
 const printRules = (prefix) => `
   @page { margin: 16mm 15mm; }
@@ -302,8 +302,9 @@ ${scope} .image-missing { margin: 1.2em 0; padding: 1.2em 1em; border: 1.5px das
 
 /**
  * The print tree stays in the layout (so a formatter that snapshots the current tree has a height)
- * but does not cover the editor. `visibility: hidden` does that; `html.printing` reveals it.
- * This is not a claim that a zero screen height was the cause of truncated PDFs.
+ * but does not cover the editor. The editor is not hidden on screen: a webview that never fires
+ * `afterprint` would otherwise leave the window blank. `@media print` hides the editor only while
+ * the formatter is printing.
  */
 const PRINT_CSS = `
 #print-root {
@@ -317,20 +318,7 @@ const PRINT_CSS = `
   pointer-events: none;
   z-index: 0;
 }
-html.printing, html.printing body {
-  height: auto !important;
-  overflow: visible !important;
-  background: #fff !important;
-}
-html.printing body > *:not(#print-root) { display: none !important; }
-html.printing #print-root {
-  visibility: visible !important;
-  position: static !important;
-  width: auto !important;
-  height: auto !important;
-  overflow: visible !important;
-}
-${printRules('html.printing #print-root ')}
+${printRules('#print-root ')}
 @media print {
   html, body { height: auto !important; overflow: visible !important; display: block !important; background: #fff !important; }
   body > *:not(#print-root) { display: none !important; }

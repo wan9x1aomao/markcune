@@ -94,9 +94,8 @@ try {
         image: async (src) => src.startsWith('http') ? 'https://127.0.0.1:9/never.png' : src,
         diagram: (code) => renderMermaid(code, 'light', { htmlLabels: false }),
       });
-      document.documentElement.classList.add('printing');
       const root = document.getElementById('print-root');
-      const text = root.innerText;
+      const text = root.textContent || '';
       const pre = root.querySelector('pre');
       const tallImage = [...root.querySelectorAll('img')].find((img) => (img.alt || '').includes('高图'));
       const preStyle = pre ? getComputedStyle(pre) : null;

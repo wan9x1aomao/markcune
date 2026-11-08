@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createPrintLock, settleImage, waitForAfterPrint } from '../src/print-session.js';
+import { createPrintLock, runPrint, settleImage } from '../src/print-session.js';
 
 class Target {
   constructor() {
@@ -18,21 +18,46 @@ class Target {
   }
 }
 
-const target = new Target();
-let printed = 0;
-const pending = waitForAfterPrint(target, () => {
-  printed += 1;
+const confirmed = new Target();
+const confirmedRun = runPrint(confirmed, () => {
+  confirmed.dispatch('beforeprint');
 });
-assert.equal(printed, 1);
-target.dispatch('afterprint');
-await pending;
+queueMicrotask(() => confirmed.dispatch('afterprint'));
+assert.equal(await confirmedRun, 'afterprint');
 
 const cancelled = new Target();
-await waitForAfterPrint(cancelled, () => cancelled.dispatch('afterprint'));
+const cancelledRun = runPrint(cancelled, () => {
+  cancelled.dispatch('beforeprint');
+  cancelled.dispatch('afterprint');
+});
+assert.equal(await cancelledRun, 'afterprint');
 
-await assert.rejects(waitForAfterPrint(new Target(), () => {
-  throw new Error('print failed');
-}));
+const missing = new Target();
+assert.equal(await runPrint(missing, () => {}), 'no-afterprint');
+
+const broken = new Target();
+assert.equal(
+  await runPrint(broken, () => {
+    throw new Error('print failed');
+  }),
+  'error',
+);
+
+const held = new Target();
+let releaseAfter;
+const heldRun = runPrint(held, () => {
+  held.dispatch('beforeprint');
+  releaseAfter = () => held.dispatch('afterprint');
+});
+let heldResult;
+const finished = heldRun.then((reason) => {
+  heldResult = reason;
+});
+await Promise.resolve();
+assert.equal(heldResult, undefined, 'beforeprint without afterprint must keep the dialog open');
+releaseAfter();
+await finished;
+assert.equal(heldResult, 'afterprint');
 
 const lock = createPrintLock();
 let started = 0;

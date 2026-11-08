@@ -20,7 +20,7 @@ use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{NSPrintInfo, NSPrintOperation, NSWindow};
 use objc2_foundation::{NSObject, NSObjectProtocol};
 use objc2_web_kit::WKWebView;
-use tauri::{AppHandle, Emitter, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 use crate::print_session;
 

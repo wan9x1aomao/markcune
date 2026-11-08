@@ -58,6 +58,8 @@ if !pump(until: { wait.finished }, seconds: 8) {
 }
 fputs("print-completion: page loaded\n", stderr)
 fflush(stderr)
+window.makeKeyAndOrderFront(nil)
+window.orderFrontRegardless()
 
 let pdfURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mdpad-print-completion.pdf")
 try? FileManager.default.removeItem(at: pdfURL)

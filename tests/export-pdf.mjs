@@ -1,6 +1,6 @@
 // Prints a long document through the real export path and checks the PDF still has
-// its start, middle and end. Chrome's print-to-PDF is the stand-in here; it is not WKWebView.
-// WebKitGTK on this machine could not complete a headless print dialog, so that path is not claimed.
+// its start, middle and end. Chrome's print-to-PDF is the stand-in here.
+// macOS WKWebView and Windows WebView2 were not run. A screen height of 0 is not treated as a proven cause.
 import { spawn } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -27,7 +27,8 @@ if (!chrome) {
 
 const PORT = 5221;
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const rows = Array.from({ length: 30 }, (_, i) => `| R${String(i + 1).padStart(2, '0')} | 单元格 ${i + 1} ${'说明 '.repeat(6)} | ${i} |`);
+const rows = Array.from({ length: 80 }, (_, i) => `| R${String(i + 1).padStart(2, '0')} | 单元格 ${i + 1} ${'说明 '.repeat(6)} | ${i} |`);
+const tall = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="4000"><rect width="80" height="4000" fill="#ddd"/><text y="24">MARK-TALL</text></svg>`;
 const code = Array.from({ length: 80 }, (_, i) => `const line${i + 1} = "CODE-${String(i + 1).padStart(3, '0')}";`);
 const paras = Array.from({ length: 16 }, (_, i) => `段落 P${String(i + 1).padStart(2, '0')}。${'这是跨页正文。'.repeat(12)}`);
 const markdown = [
@@ -53,6 +54,7 @@ const markdown = [
   '  A[MARK-MERMAID] --> B[完成]',
   '```',
   '',
+  `![高图](data:image/svg+xml,${encodeURIComponent(tall)})`,
   '![本地](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==)',
   '',
   '![远程](https://example.invalid/pixel.png)',
@@ -88,12 +90,17 @@ try {
       const { preparePrint } = await import('/export.js');
       const { renderMermaid } = await import('/diagram.js');
       const height = await preparePrint(window.__lab.view.state.doc, {
-        image: async (src) => src.startsWith('http') ? 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><text y="14">远程图</text></svg>') : src,
+        imageWaitMs: 500,
+        image: async (src) => src.startsWith('http') ? 'https://127.0.0.1:9/never.png' : src,
         diagram: (code) => renderMermaid(code, 'light', { htmlLabels: false }),
       });
       document.documentElement.classList.add('printing');
       const root = document.getElementById('print-root');
       const text = root.innerText;
+      const pre = root.querySelector('pre');
+      const tallImage = [...root.querySelectorAll('img')].find((img) => (img.alt || '').includes('高图'));
+      const preStyle = pre ? getComputedStyle(pre) : null;
+      const imageStyle = tallImage ? getComputedStyle(tallImage) : null;
       return {
         height,
         scroll: root.scrollHeight,
@@ -102,15 +109,21 @@ try {
         end: text.includes('MARK-LAST-SENTENCE'),
         credit: text.includes('由MarkCune导出'),
         code: text.includes('CODE-080'),
-        row: text.includes('R30'),
+        row: text.includes('R80'),
+        tall: Boolean(tallImage),
+        overflow: preStyle && preStyle.overflow,
+        breakInside: preStyle && (preStyle.breakInside || preStyle.pageBreakInside),
+        imageMax: imageStyle && imageStyle.maxHeight,
       };
     })()`);
     if (laid.__error) throw new Error(laid.__error);
     console.log('layout', JSON.stringify(laid));
-    for (const key of ['start', 'middle', 'end', 'credit', 'code', 'row']) {
+    for (const key of ['start', 'middle', 'end', 'credit', 'code', 'row', 'tall']) {
       if (!laid[key]) throw new Error(`打印树缺少 ${key}`);
     }
     if (!(laid.scroll > 400)) throw new Error(`打印树没有高度：${laid.scroll}`);
+    if (laid.overflow === 'hidden') throw new Error('html.printing 下代码块仍是 overflow:hidden，分页规则没有进屏幕布局');
+    if (!laid.imageMax || laid.imageMax === 'none') throw new Error(`超高图没有 max-height：${laid.imageMax}`);
     const pdf = await page.send('Page.printToPDF', {
       printBackground: true,
       preferCSSPageSize: true,
@@ -129,7 +142,7 @@ try {
     writeFileSync('/opt/cursor/artifacts/export-pdf-regression.txt', text);
     const pages = execFileSync('pdfinfo', [file], { encoding: 'utf8' }).match(/Pages:\s+(\d+)/)?.[1];
     console.log('pdf pages', pages, 'bytes', pdf.result.data.length);
-    for (const marker of ['MARK-START', 'MARK-MIDDLE', 'R30', 'CODE-080', 'MARK-END', 'MARK-LAST-SENTENCE', '由MarkCune导出']) {
+    for (const marker of ['MARK-START', 'MARK-MIDDLE', 'R80', 'CODE-080', 'MARK-END', 'MARK-LAST-SENTENCE', '由MarkCune导出']) {
       if (!text.includes(marker)) throw new Error(`PDF 缺少 ${marker}`);
       console.log('YES', marker);
     }

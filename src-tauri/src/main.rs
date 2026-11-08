@@ -72,7 +72,7 @@ fn create_window(app: &AppHandle, startup: Startup) {
 
 fn grant_startup(app: &AppHandle, label: &str, startup: &Startup) {
     match startup {
-        Startup::File { path } => files::grant_file(app, label, path),
+        Startup::File { path } => files::grant_named_file(app, label, path),
         Startup::Folder { path } => files::grant_dir(app, label, path),
         Startup::Empty | Startup::Draft { .. } => {}
     }
@@ -422,7 +422,7 @@ async fn pick_documents(window: WebviewWindow) -> Vec<PathBuf> {
         .filter_map(|p| p.into_path().ok())
         .collect();
     for path in &paths {
-        files::grant_file(window.app_handle(), window.label(), path);
+        files::grant_named_file(window.app_handle(), window.label(), path);
     }
     paths
 }
@@ -711,6 +711,7 @@ mod test_hook {
 }
 
 /// Opens documents and folders dropped onto a window from Finder.
+#[cfg(target_os = "macos")]
 fn open_dropped(app: &AppHandle, label: Option<String>, paths: Vec<PathBuf>) {
     let mut paths = paths.into_iter();
     if let (Some(label), Some(first)) = (label, paths.next()) {
@@ -718,7 +719,7 @@ fn open_dropped(app: &AppHandle, label: Option<String>, paths: Vec<PathBuf>) {
         if is_dir {
             files::grant_dir(app, &label, &first);
         } else {
-            files::grant_file(app, &label, &first);
+            files::grant_named_file(app, &label, &first);
         }
         let _ = app.emit_to(label.as_str(), "open-path", json!({ "path": first, "isDir": is_dir }));
     }

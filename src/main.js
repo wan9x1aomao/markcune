@@ -9,6 +9,9 @@ import { paletteCommands } from './discovery.js';
 import { createHints } from './hints.js';
 import { openHelp } from './help.js';
 import { createRichEditor } from './editor.js';
+import { acceptsEdit, mountBaseline } from './mount-input.js';
+import { createPreviewCache } from './preview-sync.js';
+import { createPrintLock, waitForAfterPrint } from './print-session.js';
 import { createFindbar } from './findbar.js';
 import { icons } from './icons.js';
 import { openLicenses } from './licenses.js';
@@ -318,8 +321,8 @@ function refreshRemoteImages() {
   editor.setMarkdown(markdown);
   if (position) editor.setPosition?.(position);
   if (app.preview) {
-    previewMarkdown = markdown;
-    app.preview.setMarkdown(markdown);
+    previewCache.reset();
+    previewCache.apply(markdown, (next) => app.preview.setMarkdown(next));
   }
 }
 
@@ -376,10 +379,35 @@ function editorOptions() {
   };
 }
 
+function watchMountInput(nodes) {
+  let typed = false;
+  const mark = () => {
+    typed = true;
+  };
+  for (const node of nodes) {
+    node.addEventListener('beforeinput', mark);
+    node.addEventListener('paste', mark);
+    node.addEventListener('drop', mark);
+  }
+  return {
+    typed: () => typed,
+    stop() {
+      for (const node of nodes) {
+        node.removeEventListener('beforeinput', mark);
+        node.removeEventListener('paste', mark);
+        node.removeEventListener('drop', mark);
+      }
+    },
+  };
+}
+
 async function mountEditor(content, position) {
   performance.mark('mdpad:mount-start');
+  clearTimeout(previewTimer);
+  previewCache.reset();
   const previous = app.editor;
   app.editor = null;
+  const typing = watchMountInput([els.editorRoot, els.sourcePane]);
   await previous?.destroy();
   await app.preview?.destroy();
   app.preview = null;
@@ -392,6 +420,7 @@ async function mountEditor(content, position) {
   document.body.classList.toggle('split', source && app.split);
 
   let editor;
+  try {
   if (source) {
     const { createSourceEditor } = await import('./source.js');
     editor = createSourceEditor({ root: els.sourcePane, content, scroller: els.sourcePane, onChange });
@@ -403,6 +432,7 @@ async function mountEditor(content, position) {
         readonly: true,
         scroller: els.richPane,
       });
+      previewCache.apply(content, (markdown) => app.preview.setMarkdown(markdown));
       const previewWidths = tableWidths[tableDocKey()];
       if (previewWidths) restoreTableWidths(app.preview.view, previewWidths);
     }
@@ -416,8 +446,11 @@ async function mountEditor(content, position) {
   }
   performance.mark('mdpad:mount-created');
   app.doc.snapshot = editor.snapshot();
+  const typed = mountBaseline(typing.typed());
+  if (typed.replaceSnapshot) app.doc.snapshot = null;
   performance.mark('mdpad:mount-serialized');
   app.editor = editor;
+  if (typed.pending) app.pending = true;
   // The AI button only exists in the rich editor: there is no selection to rewrite in source mode.
   app.aiActions?.destroy();
   app.aiActions = editor.kind === 'rich' ? installAiActions(editor.view) : null;
@@ -435,6 +468,14 @@ async function mountEditor(content, position) {
   void els.panes.offsetWidth;
   els.panes.classList.add('fresh');
   performance.mark('mdpad:mount-done');
+  if (typed.pending) {
+    setStatus('saving');
+    clearTimeout(app.saveTimer);
+    app.saveTimer = setTimeout(() => save(), AUTOSAVE_DELAY);
+  }
+  } finally {
+    typing.stop();
+  }
 }
 
 const tidyHint = createTidyHint({
@@ -457,7 +498,7 @@ function scheduleWordCount() {
 }
 
 function onChange() {
-  if (!app.editor || app.reloading) return;
+  if (!acceptsEdit(app.editor)) return;
   app.revision += 1;
   scheduleWordCount();
   if (document.body.classList.contains('empty')) setEmpty(false);
@@ -589,15 +630,13 @@ async function reloadFromDisk(seenRevision = app.revision) {
   try {
     const opened = await api.readDocument(app.doc.path);
     if (seenRevision !== app.revision) return showConflict('changed');
-    app.reloading = true;
     app.doc.raw = opened.content;
     app.doc.saved = null;
     app.pending = false;
     await mountEditor(opened.content, position);
-    app.reloading = false;
-    setStatus('saved');
+    // A keystroke during mount sets pending and must not be reported as already saved.
+    if (!app.pending) setStatus('saved');
   } catch (error) {
-    app.reloading = false;
     toast(`无法重新载入：${error}`);
   }
 }
@@ -656,7 +695,14 @@ async function openFileNow(path, keepRoot = false) {
   app.pending = false;
   hideBanner();
   // A pinned file is usually outside the open folder: opening it must not tear that folder down.
-  if (!keepRoot && (!app.root || !isInside(opened.path, app.root))) await setRoot(dirname(opened.path));
+  if (!keepRoot && (!app.root || !isInside(opened.path, app.root))) {
+    try {
+      await setRoot(dirname(opened.path));
+    } catch {
+      // The file itself is open. Its folder was not granted, which is what happens when
+      // the path is a symlink and the target's directory was never chosen.
+    }
+  }
   await mountEditor(opened.content, opened.position);
   setStatus('saved');
   updateTitle();
@@ -981,7 +1027,7 @@ function refreshOutline() {
 }
 
 let previewTimer;
-let previewMarkdown = '';
+const previewCache = createPreviewCache();
 function schedulePreview() {
   if (!app.preview || !app.editor) return;
   clearTimeout(previewTimer);
@@ -989,9 +1035,8 @@ function schedulePreview() {
   previewTimer = setTimeout(async () => {
     if (!app.preview || !app.editor) return;
     const markdown = await app.editor.getMarkdownAsync(snapshot);
-    if (!app.editor.matches(snapshot) || markdown === previewMarkdown) return;
-    previewMarkdown = markdown;
-    app.preview.setMarkdown(markdown);
+    if (!app.editor.matches(snapshot)) return;
+    previewCache.apply(markdown, (next) => app.preview.setMarkdown(next));
   }, 250);
 }
 
@@ -1019,7 +1064,8 @@ async function exportDocument() {
   if (app.editor?.kind !== 'rich' && !app.preview) await setMode('rich', false);
   if (app.preview) {
     clearTimeout(previewTimer);
-    app.preview.setMarkdown(app.editor.getMarkdown());
+    previewCache.reset();
+    previewCache.apply(app.editor.getMarkdown(), (markdown) => app.preview.setMarkdown(markdown));
   }
   return (app.editor.kind === 'rich' ? app.editor : app.preview).view.state.doc;
 }
@@ -1144,37 +1190,33 @@ async function preparePrintDocument() {
   return preparePrint(doc, { image: exportImageSource, diagram: exportDiagram });
 }
 
+const printLock = createPrintLock();
+
 async function exportPdf() {
+  if (printLock.active) return;
   const previousTitle = document.title;
   let restore = () => {};
-  try {
-    const height = await preparePrintDocument();
-    if (!height) throw new Error('没有排出可打印的页面');
-    document.documentElement.classList.add('printing');
-    document.title = exportTitle();
-    restore = () => {
-      document.documentElement.classList.remove('printing');
-      document.title = previousTitle;
-      window.removeEventListener('afterprint', restore);
-    };
-    // The dialog captures this layout. Restoring on afterprint (and when focus returns, which is
-    // how some webviews report a closed dialog) puts the editor back. A short timer would hide
-    // the article again before WebKit had paginated it.
-    window.addEventListener('afterprint', restore);
-    window.addEventListener(
-      'focus',
-      () => {
-        setTimeout(restore, 400);
-      },
-      { once: true },
-    );
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    toast('在打印窗口中选择“存储为 PDF”', 4000);
-    await api.print();
-  } catch (error) {
-    restore();
-    toast(`导出失败：${error?.message ?? error}`);
-  }
+  await printLock.run(async () => {
+    try {
+      const height = await preparePrintDocument();
+      if (!height) throw new Error('没有排出可打印的页面');
+      document.documentElement.classList.add('printing');
+      document.title = exportTitle();
+      restore = () => {
+        document.documentElement.classList.remove('printing');
+        document.title = previousTitle;
+      };
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      toast('在打印窗口中选择“存储为 PDF”', 4000);
+      // window.print() fires afterprint when the dialog closes, including cancel.
+      // The Rust print() returns as soon as the dialog is requested and does not.
+      await waitForAfterPrint(window, () => window.print());
+      restore();
+    } catch (error) {
+      restore();
+      toast(`导出失败：${error?.message ?? error}`);
+    }
+  });
 }
 
 // Commands

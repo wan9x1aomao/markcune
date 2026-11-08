@@ -44,9 +44,10 @@ jobs:
                                   librsvg2-dev libxdo-dev libssl-dev patchelf libasound2-dev
 
       # 固定到 SHA 时 action 读不到分支名，必须显式说明要哪条工具链。
+      # 1.99.1 与 rust-toolchain.toml 相同，不要改回浮动的 stable。
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          toolchain: stable
+          toolchain: 1.99.1
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:

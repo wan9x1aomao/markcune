@@ -1,0 +1,5 @@
+# The version CI installs. `stable` would move under us; 1.99.1 is the toolchain
+# this tree was compiled and tested with (edition 2024 crates need a current rustc).
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"

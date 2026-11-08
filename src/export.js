@@ -7,6 +7,7 @@ import { highlightCode } from '@lezer/highlight';
 import katex from 'katex';
 import { exportHighlighter, tokenCss } from './code-theme.js';
 import { exportCreditHtml } from './export-footer.js';
+import { settleImage } from './print-session.js';
 
 const SCOPE = '.mdpad-export';
 const MATH_LANGUAGES = new Set(['latex', 'tex', 'katex', 'math']);
@@ -259,11 +260,10 @@ ${scope} .raw { white-space: pre-wrap; font-family: 'SF Mono', ui-monospace, Men
 /**
  * Print rules for the article (`prefix` scopes them).
  *
- * WebKit (the macOS and Linux webview) drops everything after a box it refuses to split, and it
- * also paginates from the on-screen layout. `overflow: hidden` and `break-inside: avoid` on a
- * table, code block, formula or diagram that is taller than one page are exactly that box, so
- * print forces every descendant to fragment and to stay unclipped. Images and diagrams are capped
- * to one page with `max-height` instead of being marked unbreakable.
+ * Tables, code, formulas and diagrams that are taller than a page must be allowed to split and
+ * must not clip. The same rules are installed for `html.printing` and for `@media print`: a
+ * webview may paginate the on-screen tree rather than print media. Chrome's print-to-PDF was
+ * checked. macOS WKWebView and Windows WebView2 were not.
  */
 const printRules = (prefix) => `
   @page { margin: 16mm 15mm; }
@@ -301,9 +301,9 @@ ${scope} .image-missing { margin: 1.2em 0; padding: 1.2em 1em; border: 1.5px das
 }
 
 /**
- * On screen the print tree has to be laid out (WebKit prints the layout it already has, and a
- * `display: none` tree has height 0) but must not cover the editor. `visibility: hidden` plus
- * absolute positioning does both; `.printing` then shows that same layout to the print formatter.
+ * The print tree stays in the layout (so a formatter that snapshots the current tree has a height)
+ * but does not cover the editor. `visibility: hidden` does that; `html.printing` reveals it.
+ * This is not a claim that a zero screen height was the cause of truncated PDFs.
  */
 const PRINT_CSS = `
 #print-root {
@@ -330,6 +330,7 @@ html.printing #print-root {
   height: auto !important;
   overflow: visible !important;
 }
+${printRules('html.printing #print-root ')}
 @media print {
   html, body { height: auto !important; overflow: visible !important; display: block !important; background: #fff !important; }
   body > *:not(#print-root) { display: none !important; }
@@ -414,11 +415,6 @@ ${element.outerHTML}
 
 const IMAGE_WAIT_MS = 8000;
 
-function whenImageSettles(img) {
-  const done = img.decode?.().catch(() => {}) ?? Promise.resolve();
-  return Promise.race([done, new Promise((resolve) => setTimeout(resolve, IMAGE_WAIT_MS))]);
-}
-
 /** Two frames, so a webview that prints the current layout has measured the article. */
 function waitForLayout() {
   return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -444,7 +440,8 @@ export async function preparePrint(doc, options) {
   const { element } = await renderDocument(doc, options);
   root.replaceChildren(element);
   await document.fonts?.ready;
-  await Promise.all([...root.querySelectorAll('img')].map(whenImageSettles));
+  const imageWaitMs = options.imageWaitMs ?? IMAGE_WAIT_MS;
+  await Promise.all([...root.querySelectorAll('img')].map((img) => settleImage(img, imageWaitMs)));
   await waitForLayout();
   return root.scrollHeight;
 }

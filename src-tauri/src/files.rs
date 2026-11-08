@@ -11,7 +11,7 @@ use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::state::{absolute, app_state, with_win, Version};
+use crate::state::{absolute, app_state, with_win, Version, WinState};
 use crate::watch;
 
 pub const DOC_EXTENSIONS: &[&str] = &["md", "markdown", "mdown", "mkd", "txt"];
@@ -34,14 +34,31 @@ pub fn file_identity(path: &Path) -> Option<(u64, u64)> {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::fs::MetadataExt;
-        Some((meta.volume_serial_number() as u64, meta.file_index().unwrap_or(0)))
+        let _ = meta;
+        windows_file_identity(path)
     }
     #[cfg(not(any(unix, windows)))]
     {
         let _ = meta;
         None
     }
+}
+
+/// Stable Win32 equivalent of the unstable `MetadataExt::file_index`.
+/// A failed call stays `None`. It is not reported as index 0, which would
+/// make every such file on the volume look identical.
+#[cfg(windows)]
+fn windows_file_identity(path: &Path) -> Option<(u64, u64)> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION};
+    let file = std::fs::File::open(path).ok()?;
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) };
+    if ok == 0 {
+        return None;
+    }
+    let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
+    identity_from_index(Some(info.dwVolumeSerialNumber), Some(index))
 }
 
 fn canonical_dir(path: &Path) -> Option<PathBuf> {
@@ -71,16 +88,56 @@ pub fn grant_dir(app: &AppHandle, label: &str, path: &Path) {
 
 pub fn grant_file(app: &AppHandle, label: &str, path: &Path) {
     let Some(real) = canonical_file(path) else { return };
-    with_win(app, label, |w| {
-        if !w.allowed_files.iter().any(|file| file == &real) {
-            w.allowed_files.push(real.clone());
-        }
-        if let Some(parent) = real.parent() {
-            if parent.is_dir() && !w.allowed_dirs.iter().any(|dir| dir == parent) {
-                w.allowed_dirs.push(parent.to_path_buf());
+    with_win(app, label, |w| grant_file_only(w, real));
+}
+
+/// Only this file. A symlink to a document must not authorize the target's whole folder.
+fn grant_file_only(state: &mut crate::state::WinState, real: PathBuf) {
+    if !state.allowed_files.iter().any(|file| file == &real) {
+        state.allowed_files.push(real);
+    }
+}
+
+/// Volume serial plus file index. Either `None` stays unknown: substituting 0 for a
+/// missing file index made every unnamed file on the volume look like the same file.
+/// In Rust 1.99 both `volume_serial_number` and `file_index` are `Option`.
+pub(crate) fn identity_from_index(volume: Option<u32>, index: Option<u64>) -> Option<(u64, u64)> {
+    Some((u64::from(volume?), index?))
+}
+
+/// The file the user named, plus the folder that name is in.
+/// A symlink grants that folder and the target file, not the target's folder.
+pub fn grant_named_file(app: &AppHandle, label: &str, path: &Path) {
+    with_win(app, label, |state| grant_named_file_state(state, path));
+}
+
+fn grant_named_file_state(state: &mut WinState, path: &Path) {
+    let path = absolute(path);
+    if let Some(parent) = path.parent() {
+        if let Some(dir) = canonical_dir(parent) {
+            if !state.allowed_dirs.iter().any(|have| have == &dir) {
+                state.allowed_dirs.push(dir);
             }
         }
-    });
+    }
+    if let Some(real) = canonical_file(&path) {
+        grant_file_only(state, real);
+    }
+}
+
+/// After Save As the window follows the new file, including a folder that was not the sidebar root.
+fn adopt_saved_document(state: &mut WinState, target: &Path) {
+    if let Some(parent) = target.parent() {
+        if let Some(dir) = canonical_dir(parent) {
+            if !state.allowed_dirs.iter().any(|have| have == &dir) {
+                state.allowed_dirs.push(dir);
+            }
+        }
+    }
+    if let Some(real) = canonical_file(target) {
+        grant_file_only(state, real);
+    }
+    state.file_id = file_identity(target);
 }
 
 fn remembered(app: &AppHandle, path: &Path) -> bool {
@@ -248,10 +305,8 @@ pub fn write_document(window: WebviewWindow, content: String, force: bool) -> Re
     let (path, version) = with_win(app, label, |w| (w.doc.clone(), w.version)).unwrap_or_default();
     let path = path.ok_or("文档还没有保存位置")?;
 
-    if let Some(expected) = with_win(app, label, |w| w.file_id).flatten() {
-        if path.exists() && file_identity(&path) != Some(expected) {
-            return Ok(WriteResult::Conflict { reason: "changed" });
-        }
+    if identity_blocks_save(force, with_win(app, label, |w| w.file_id).flatten(), &path) {
+        return Ok(WriteResult::Conflict { reason: "changed" });
     }
     if !force {
         match std::fs::read(&path) {
@@ -334,8 +389,26 @@ pub async fn save_as(window: WebviewWindow, content: String) -> Result<Option<Op
         let _ = std::fs::remove_file(draft_file(&app, &id));
         with_win(&app, &label, |w| w.draft_id = None);
     }
+    // The dialog is the user's choice of this directory, including one outside the current root
+    // and the first save of an untitled draft. The window may then point its sidebar there.
+    // file_id must become this file's, or the next save still thinks it is editing the old one.
+    with_win(&app, &label, |state| adopt_saved_document(state, &target));
     remember_document(&app, &label, &target, &content);
     Ok(Some(Opened { path: target, content, position: None, rewritten }))
+}
+
+/// True when a non-forced save would overwrite a different file than the one we opened.
+/// `force` is the "keep my version" choice and must be allowed to replace that file.
+pub fn identity_conflict(expected: Option<(u64, u64)>, path: &Path) -> bool {
+    let (Some(expected), Some(actual)) = (expected, file_identity(path)) else {
+        return false;
+    };
+    path.exists() && actual != expected
+}
+
+/// A forced save is the "keep my version" choice and must still be allowed to replace the file.
+fn identity_blocks_save(force: bool, expected: Option<(u64, u64)>, path: &Path) -> bool {
+    !force && identity_conflict(expected, path)
 }
 
 /// Rewrites or copies relative image references so they still work from `new_dir`.
@@ -508,10 +581,7 @@ pub fn image_target(path: &Path) -> Option<PathBuf> {
 pub fn allow_image(window: WebviewWindow, path: PathBuf) -> Option<PathBuf> {
     let real = image_target(&path)?;
     let app = window.app_handle();
-    let allowed = with_win(app, window.label(), |w| {
-        w.allowed_dirs.iter().any(|dir| inside(dir, &real)) || w.allowed_files.iter().any(|file| file == &real)
-    })
-    .unwrap_or(false);
+    let allowed = with_win(app, window.label(), |w| image_permitted(w, &real)).unwrap_or(false);
     if !allowed {
         return None;
     }
@@ -519,11 +589,21 @@ pub fn allow_image(window: WebviewWindow, path: PathBuf) -> Option<PathBuf> {
     Some(real)
 }
 
+fn image_permitted(state: &WinState, real: &Path) -> bool {
+    state.allowed_dirs.iter().any(|dir| inside(dir, real))
+        || state.allowed_files.iter().any(|file| file == real)
+        || state.pending_image.as_ref().is_some_and(|image| image == real)
+}
+
 /// A local image as a data: URL, for self-contained HTML export.
 #[tauri::command]
-pub fn image_data_url(path: PathBuf) -> Result<String, String> {
+pub fn image_data_url(window: WebviewWindow, path: PathBuf) -> Result<String, String> {
     use base64::Engine;
     let real = image_target(&path).ok_or("不是图片文件")?;
+    let allowed = with_win(window.app_handle(), window.label(), |w| image_permitted(w, &real)).unwrap_or(false);
+    if !allowed {
+        return Err("没有读取这张图片的权限".into());
+    }
     let size = std::fs::metadata(&real).map_err(|e| describe(&e))?.len();
     if size > MAX_EMBEDDED_IMAGE {
         return Err("图片太大，无法嵌入".into());
@@ -1059,6 +1139,107 @@ mod tests {
         assert!(split_pngs(b"<html></html>", 1).is_err());
         // 尾部多余字节
         assert!(split_pngs(&[a.clone(), vec![1, 2, 3]].concat(), 1).is_err());
+    }
+
+    #[test]
+    fn a_missing_windows_file_index_is_not_treated_as_zero() {
+        assert_eq!(identity_from_index(Some(7), None), None);
+        assert_eq!(identity_from_index(None, Some(1)), None);
+        assert_eq!(identity_from_index(Some(7), Some(0)), Some((7, 0)));
+        assert_ne!(identity_from_index(Some(7), Some(1)), identity_from_index(Some(7), Some(2)));
+        assert_ne!(identity_from_index(Some(7), Some(1)), identity_from_index(Some(8), Some(1)));
+    }
+
+    #[test]
+    fn save_as_switches_identity_and_grants_the_chosen_folder() {
+        let base = std::env::temp_dir().join(format!("mdpad-saveas-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("root");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let original = root.join("a.md");
+        let renamed = root.join("b.md");
+        let first = outside.join("未命名.md");
+        let elsewhere = base.join("other");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let outside_existing = elsewhere.join("c.md");
+        std::fs::write(&original, "A").unwrap();
+        std::fs::write(&renamed, "old B").unwrap();
+        std::fs::write(&outside_existing, "old C").unwrap();
+
+        let mut state = WinState::default();
+        state.file_id = file_identity(&original);
+        state.allowed_dirs.push(std::fs::canonicalize(&root).unwrap());
+
+        // Overwrite an existing document: the next save must see B, not A.
+        std::fs::write(&renamed, "B").unwrap();
+        adopt_saved_document(&mut state, &renamed);
+        assert_eq!(state.file_id, file_identity(&renamed));
+        assert!(!identity_blocks_save(false, state.file_id, &renamed));
+        assert!(identity_blocks_save(false, file_identity(&original), &renamed));
+        assert!(!identity_blocks_save(true, file_identity(&original), &renamed));
+
+        // First save of an untitled draft, into a folder that was not the sidebar.
+        std::fs::write(&first, "draft").unwrap();
+        let mut fresh = WinState::default();
+        adopt_saved_document(&mut fresh, &first);
+        let outside_dir = std::fs::canonicalize(&outside).unwrap();
+        assert!(fresh.allowed_dirs.iter().any(|dir| dir == &outside_dir));
+        assert_eq!(fresh.file_id, file_identity(&first));
+        assert!(!identity_blocks_save(false, fresh.file_id, &first));
+
+        // Save outside the current root, then both a normal save and a forced save can proceed.
+        std::fs::write(&outside_existing, "C").unwrap();
+        adopt_saved_document(&mut state, &outside_existing);
+        let other_dir = std::fs::canonicalize(&elsewhere).unwrap();
+        assert!(state.allowed_dirs.iter().any(|dir| dir == &other_dir));
+        assert!(!identity_blocks_save(false, state.file_id, &outside_existing));
+        assert!(!identity_blocks_save(true, state.file_id, &outside_existing));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_document_symlink_does_not_grant_the_targets_folder() {
+        let base = std::env::temp_dir().join(format!("mdpad-grant-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let links = base.join("links");
+        let secret = base.join("secret");
+        std::fs::create_dir_all(&links).unwrap();
+        std::fs::create_dir_all(&secret).unwrap();
+        let notes = secret.join("notes.md");
+        std::fs::write(&notes, "# hi\n").unwrap();
+        let alias = links.join("alias.md");
+        std::os::unix::fs::symlink(&notes, &alias).unwrap();
+        let picture = secret.join("shot.png");
+        std::fs::write(&picture, "png").unwrap();
+        let picked = links.join("picked.png");
+        std::fs::write(&picked, "png").unwrap();
+
+        let mut state = WinState::default();
+        grant_file_only(&mut state, std::fs::canonicalize(&alias).unwrap());
+        let secret_dir = std::fs::canonicalize(&secret).unwrap();
+        let notes_real = std::fs::canonicalize(&notes).unwrap();
+        assert!(state.allowed_files.iter().any(|file| file == &notes_real));
+        assert!(!state.allowed_dirs.iter().any(|dir| dir == &secret_dir));
+
+        let mut named = WinState::default();
+        grant_named_file_state(&mut named, &alias);
+        let links_dir = std::fs::canonicalize(&links).unwrap();
+        assert!(named.allowed_dirs.iter().any(|dir| dir == &links_dir));
+        assert!(named.allowed_files.iter().any(|file| file == &notes_real));
+        assert!(!named.allowed_dirs.iter().any(|dir| dir == &secret_dir));
+
+        assert!(!image_permitted(&named, &std::fs::canonicalize(&picture).unwrap()));
+        assert!(image_permitted(&named, &std::fs::canonicalize(&picked).unwrap()));
+        named.pending_image = Some(std::fs::canonicalize(&picture).unwrap());
+        assert!(image_permitted(&named, &std::fs::canonicalize(&picture).unwrap()));
+        named.pending_image = None;
+        assert!(!image_permitted(&named, &std::fs::canonicalize(&picture).unwrap()));
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

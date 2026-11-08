@@ -8,9 +8,10 @@
 // Platform keys match release.sh: mac, windows, linux (AppImage), deb.
 // Downloads live under one fixed name per platform (overwritten each release), so links never carry a version.
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { commitFiles } from './site-commit.mjs';
 
 const [site, version, ...pairs] = process.argv.slice(2);
 if (!site || !version) {
@@ -20,6 +21,14 @@ if (!site || !version) {
 const files = Object.fromEntries(pairs.map((pair) => pair.split('=')));
 
 // Fixed download names, keyed by the data-mdpad link marker. Keep in sync with scripts/release.sh.
+// Installed only together with latest.json, after every page has validated.
+const DOWNLOADS = {
+  mac: 'MarkCune-macOS-arm64.dmg',
+  windows: 'MarkCune-windows-x64-setup.exe',
+  linux: 'MarkCune-linux-x86_64.AppImage',
+  deb: 'MarkCune-linux-amd64.deb',
+  'mac-updater': 'MarkCune-macOS-arm64.tar.gz',
+};
 const LINKS = {
   'link-mac': 'MarkCune-macOS-arm64.dmg',
   'link-windows': 'MarkCune-windows-x64-setup.exe',
@@ -330,4 +339,16 @@ if (errors.length) {
   }
   process.exit(1);
 }
-for (const page of pending) writeFileSync(page.path, page.html);
+const ops = pending.map((page) => ({ dest: page.path, html: page.html }));
+if (files.latest) {
+  ops.push({ dest: join(site, 'latest.json'), source: files.latest });
+  for (const [key, name] of Object.entries(DOWNLOADS)) {
+    if (files[key]) ops.push({ dest: join(site, 'downloads', name), source: files[key] });
+  }
+}
+try {
+  commitFiles(ops);
+} catch (error) {
+  console.error(`update-site: 写入失败，已保留原页面：${error.message}`);
+  process.exit(1);
+}

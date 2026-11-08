@@ -207,15 +207,21 @@ if [[ "${MANUAL_UPGRADE:-0}" == "1" ]]; then
   echo "Linux 的 .deb 会自动替换旧包，AppImage 手动删掉旧文件。"
   echo "新站上线前不要放出这份 latest.json，也不要把 4.0.0 的包挂到旧站。"
 elif [[ -n "$SITE_DIR" ]]; then
-  mkdir -p "$SITE_DIR/downloads"
-  cp "$OUT/$MAC.dmg"    "$SITE_DIR/downloads/$SITE_MAC_DMG"
-  cp "$OUT/$MAC.tar.gz" "$SITE_DIR/downloads/$SITE_MAC"
-  cp "$OUT/$WIN"        "$SITE_DIR/downloads/$SITE_WIN"
-  cp "$OUT/$LINUX"      "$SITE_DIR/downloads/$SITE_LINUX"
-  cp "$OUT/$DEB"        "$SITE_DIR/downloads/$SITE_DEB"
-  cp "$OUT/latest.json" "$SITE_DIR/latest.json"
-  [[ -f "$SITE_DIR/index.html" ]] && node scripts/update-site.mjs "$SITE_DIR" "$VERSION" \
-    "mac=$OUT/$MAC.dmg" "windows=$OUT/$WIN" "linux=$OUT/$LINUX" "deb=$OUT/$DEB"
+  # Pages are checked before latest.json or the packages replace the live copies.
+  # A failure leaves the previous HTML, JSON and packages in place.
+  if [[ -f "$SITE_DIR/index.html" ]]; then
+    node scripts/update-site.mjs "$SITE_DIR" "$VERSION" \
+      "mac=$OUT/$MAC.dmg" "windows=$OUT/$WIN" "linux=$OUT/$LINUX" "deb=$OUT/$DEB" \
+      "mac-updater=$OUT/$MAC.tar.gz" "latest=$OUT/latest.json"
+  else
+    mkdir -p "$SITE_DIR/downloads"
+    cp "$OUT/$MAC.dmg"    "$SITE_DIR/downloads/$SITE_MAC_DMG"
+    cp "$OUT/$MAC.tar.gz" "$SITE_DIR/downloads/$SITE_MAC"
+    cp "$OUT/$WIN"        "$SITE_DIR/downloads/$SITE_WIN"
+    cp "$OUT/$LINUX"      "$SITE_DIR/downloads/$SITE_LINUX"
+    cp "$OUT/$DEB"        "$SITE_DIR/downloads/$SITE_DEB"
+    cp "$OUT/latest.json" "$SITE_DIR/latest.json"
+  fi
   echo
   echo "已放入官网目录 ${SITE_DIR}，用 WorkBuddy 重新发布这个目录即可。"
 else

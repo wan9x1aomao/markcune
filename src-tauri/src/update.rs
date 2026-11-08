@@ -250,10 +250,20 @@ pub async fn download_update(window: WebviewWindow) -> Result<String, String> {
         }
         Err(err) => {
             *state.available.lock().unwrap() = Some(update);
-            let tampered = matches!(err, tauri_plugin_updater::Error::Minisign(_) | tauri_plugin_updater::Error::SignatureUtf8(_));
-            let message = if tampered { "更新包校验失败，已取消更新" } else { "下载更新失败，请检查网络连接后重试" };
-            Err(fail(message)(err))
+            Err(fail(download_failure_message(&err))(err))
         }
+    }
+}
+
+/// The plugin already verified the signature and, when `requireSignedVersion` is on, the version
+/// inside it. This only chooses the sentence. It does not check the version again.
+fn download_failure_message(err: &tauri_plugin_updater::Error) -> &'static str {
+    use tauri_plugin_updater::Error::{Minisign, MissingSignedVersion, Network, Reqwest, SignatureUtf8, SignedVersionMismatch};
+    match err {
+        Minisign(_) | SignatureUtf8(_) => "更新包校验失败，已取消更新",
+        SignedVersionMismatch { .. } | MissingSignedVersion => "更新包的签名版本和发布信息不一致，已取消更新",
+        Network(_) | Reqwest(_) => "下载更新失败，请检查网络连接后重试",
+        _ => "下载更新失败，已取消更新",
     }
 }
 
@@ -342,6 +352,25 @@ mod tests {
     }
 
     /// Only our own staging files may be deleted on startup; the drafts folder shares the directory.
+    #[test]
+    fn signed_version_stays_enabled_in_the_updater_config() {
+        let conf = include_str!("../tauri.conf.json");
+        assert!(conf.contains("\"requireSignedVersion\": true"));
+    }
+
+    #[test]
+    fn a_signature_or_version_failure_is_not_called_a_network_error() {
+        let mismatch = tauri_plugin_updater::Error::SignedVersionMismatch {
+            signed: "1.0.0".into(),
+            announced: "9.9.9".into(),
+        };
+        assert!(download_failure_message(&mismatch).contains("版本"));
+        assert!(!download_failure_message(&tauri_plugin_updater::Error::MissingSignedVersion).contains("网络"));
+        assert!(download_failure_message(&tauri_plugin_updater::Error::SignatureUtf8("x".into())).contains("校验"));
+        let offline = tauri_plugin_updater::Error::Network("reset".into());
+        assert!(download_failure_message(&offline).contains("网络"));
+    }
+
     #[test]
     fn only_staged_installers_are_cleaned_up() {
         assert!(is_staged_update("update-3.5.4.bin"));

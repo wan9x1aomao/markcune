@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -291,6 +291,51 @@ try {
   assert.match(warnedIndex, /data-mdpad="version">v0\.0\.1</);
   assert.match(warnedGuide, /data-mdpad="version" id="latest">0\.0\.1</);
   assert.doesNotMatch(warnedGuide, /data-mdpad="version"[^>]*>v0\.0\.1/);
+
+  const publishDir = join(root, 'publish');
+  writeSite(publishDir, markedPages());
+  writeFileSync(join(publishDir, 'sitemap.xml'), 'SITEMAP-KEEP');
+  writeFileSync(join(publishDir, 'dirty.txt'), 'DIRTY-KEEP');
+  writeFileSync(join(publishDir, 'latest.json'), '{"version":"old"}');
+  const latest = join(root, 'latest.json');
+  writeFileSync(latest, '{"version":"new"}');
+  const published = spawnSync(process.execPath, [
+    script,
+    publishDir,
+    newest,
+    `mac=${bins.mac}`,
+    `windows=${bins.windows}`,
+    `linux=${bins.linux}`,
+    `deb=${bins.deb}`,
+    `latest=${latest}`,
+  ], { encoding: 'utf8' });
+  assert.equal(published.status, 0, published.stderr);
+  assert.match(readFileSync(join(publishDir, 'index.html'), 'utf8'), /这段正文不要改/);
+  assert.equal(readFileSync(join(publishDir, 'sitemap.xml'), 'utf8'), 'SITEMAP-KEEP');
+  assert.equal(readFileSync(join(publishDir, 'dirty.txt'), 'utf8'), 'DIRTY-KEEP');
+  assert.equal(readFileSync(join(publishDir, 'latest.json'), 'utf8'), '{"version":"new"}');
+  assert.equal(readFileSync(join(publishDir, 'downloads', 'MarkCune-macOS-arm64.dmg')).length, BYTES.mac);
+
+  const brokenDir = join(root, 'broken-publish');
+  writeSite(brokenDir, unmarkedPages());
+  writeFileSync(join(brokenDir, 'sitemap.xml'), 'SITEMAP-KEEP');
+  writeFileSync(join(brokenDir, 'dirty.txt'), 'DIRTY-KEEP');
+  writeFileSync(join(brokenDir, 'latest.json'), '{"version":"old"}');
+  const broken = spawnSync(process.execPath, [
+    script,
+    brokenDir,
+    newest,
+    `mac=${bins.mac}`,
+    `windows=${bins.windows}`,
+    `linux=${bins.linux}`,
+    `deb=${bins.deb}`,
+    `latest=${latest}`,
+  ], { encoding: 'utf8' });
+  assert.equal(broken.status, 1);
+  assert.equal(readFileSync(join(brokenDir, 'latest.json'), 'utf8'), '{"version":"old"}');
+  assert.equal(readFileSync(join(brokenDir, 'sitemap.xml'), 'utf8'), 'SITEMAP-KEEP');
+  assert.equal(readFileSync(join(brokenDir, 'dirty.txt'), 'utf8'), 'DIRTY-KEEP');
+  assert.equal(existsSync(join(brokenDir, 'downloads', 'MarkCune-macOS-arm64.dmg')), false);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

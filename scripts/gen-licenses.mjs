@@ -11,7 +11,7 @@
 // 只读 node_modules 与 cargo 的本地缓存，不联网。
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -158,8 +158,22 @@ function rustPackages() {
     }
   }
 
-  const registry = join(homedir(), '.cargo', 'registry', 'src');
-  const sourceRoots = existsSync(registry) ? readdirSync(registry).map((entry) => join(registry, entry)) : [];
+  const override = process.env.MDPAD_CARGO_REGISTRY;
+  const crateDir = (pkg) => {
+    if (override != null) {
+      const dir = join(override, `${pkg.name}-${pkg.version}`);
+      return existsSync(dir) ? dir : null;
+    }
+    const manifestDir = dirname(pkg.manifest_path);
+    if (existsSync(join(manifestDir, 'Cargo.toml'))) return manifestDir;
+    const registry = join(process.env.CARGO_HOME || join(homedir(), '.cargo'), 'registry', 'src');
+    if (!existsSync(registry)) return null;
+    for (const base of readdirSync(registry)) {
+      const dir = join(registry, base, `${pkg.name}-${pkg.version}`);
+      if (existsSync(dir)) return dir;
+    }
+    return null;
+  };
 
   return [...seen]
     .map((id) => byId.get(id))
@@ -171,12 +185,8 @@ function rustPackages() {
         if (existsSync(path)) text = readFileSync(path, 'utf8');
       }
       if (!text) {
-        for (const base of sourceRoots) {
-          const dir = join(base, `${pkg.name}-${pkg.version}`);
-          if (!existsSync(dir)) continue;
-          text = readLicenseText(dir);
-          if (text) break;
-        }
+        const dir = crateDir(pkg);
+        if (dir) text = readLicenseText(dir);
       }
       return {
         name: pkg.name,
@@ -354,8 +364,27 @@ const footer = `
 
 const full = `${header}${text}${footer}`;
 
-writeFileSync(join(ROOT, 'THIRD-PARTY-NOTICES.md'), full);
-writeFileSync(
+const missingText = rust.filter((pkg) => !pkg.text).length;
+if (!js.length || rust.length < 100 || missingText > rust.length * 0.5) {
+  console.error(
+    `gen-licenses: 拒绝覆盖旧清单（前端 ${js.length}，crate ${rust.length}，其中 ${missingText} 个没有许可正文）。请先取得完整的 cargo 源码再生成。`,
+  );
+  process.exit(1);
+}
+
+function publish(path, contents) {
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, contents);
+  try {
+    renameSync(tmp, path);
+  } catch (error) {
+    if (existsSync(tmp)) unlinkSync(tmp);
+    throw error;
+  }
+}
+
+publish(join(ROOT, 'THIRD-PARTY-NOTICES.md'), full);
+publish(
   join(ROOT, 'src', 'licenses-text.js'),
   `// 由 scripts/gen-licenses.mjs 生成，勿手改。发版前重跑该脚本。\n// 作为独立的异步 chunk 加载，只有点开「关于 › 开源许可」时才会被读进内存。\nexport default ${JSON.stringify(full)};\n`,
 );

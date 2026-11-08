@@ -1,7 +1,11 @@
 // src/licenses-text.js 是生成物，但它必须与「当前这个版本」一致：版本号、依赖清单、条款都要对得上。
 // 这些断言守的是最容易被忽略的一条 —— 加了依赖、忘了重跑 npm run licenses，署名就漏了。
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = new URL('..', import.meta.url);
@@ -37,6 +41,29 @@ const refs = new Set([...body.matchAll(/条款 \[(\d+)\]/g)].map((m) => Number(m
 const bodies = new Set([...body.matchAll(/^### \[(\d+)\] /gm)].map((m) => Number(m[1])));
 assert.ok(refs.size > 0, '应有条款引用');
 for (const ref of refs) assert.ok(bodies.has(ref), `条款 [${ref}] 没有对应正文`);
+
+// 空的 cargo 源码目录会把全部 crate 收成一段「未随包提供」。正文段数和 MIT/Apache 原文都要在。
+assert.ok(bodies.size >= 50, `许可正文只有 ${bodies.size} 段，整批正文不该消失`);
+assert.match(body, /Permission is hereby granted, free of charge/);
+assert.match(body, /Apache License/);
+const missingHeading = body.match(/### \[(\d+)\] 未随包提供许可文件/);
+if (missingHeading) {
+  const listed = [...body.matchAll(new RegExp(`条款 \\[${missingHeading[1]}\\]`, 'g'))].length;
+  assert.ok(listed < 60, `有 ${listed} 个组件被标成未随包提供许可，源码目录可能是空的`);
+}
+
+const hash = (value) => createHash('sha256').update(value).digest('hex');
+const beforeNotices = hash(notices);
+const emptyRegistry = mkdtempSync(join(tmpdir(), 'mdpad-empty-registry-'));
+const refused = spawnSync(process.execPath, ['scripts/gen-licenses.mjs'], {
+  cwd: fileURLToPath(root),
+  env: { ...process.env, MDPAD_CARGO_REGISTRY: emptyRegistry },
+  encoding: 'utf8',
+});
+rmSync(emptyRegistry, { recursive: true, force: true });
+assert.notEqual(refused.status, 0, refused.stdout + refused.stderr);
+assert.match(refused.stderr, /拒绝覆盖/);
+assert.equal(hash(read('THIRD-PARTY-NOTICES.md')), beforeNotices, '缺少源码时不能覆盖旧清单');
 
 // 两家 md 必须一模一样：仓库里给人看的那份和应用里发出去的那份不能分叉。
 // Windows checkout may turn the .md into CRLF; the generated JS string stays LF.

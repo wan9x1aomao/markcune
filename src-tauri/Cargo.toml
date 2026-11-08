@@ -37,6 +37,11 @@ flate2 = { version = "1", default-features = false, features = ["rust_backend"] 
 # ⚠️ webview 里拿不到麦克风（wry 没实现 WKUIDelegate 的 media capture 回调），所以录音只能在 Rust 侧做。
 cpal = "0.15"
 
+[target.'cfg(windows)'.dependencies]
+# std::os::windows::fs::MetadataExt::file_index is still unstable (windows_by_handle).
+# The Win32 call is the stable way to read the volume serial and file index.
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 block2 = "0.6"

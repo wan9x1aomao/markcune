@@ -110,7 +110,7 @@ export const linkPaste = $prose(
 
 export const findKey = new PluginKey('mdpad-find');
 
-function search(doc, query, from = 0, to = doc.content.size) {
+export function search(doc, query, from = 0, to = doc.content.size) {
   const matches = [];
   if (!query) return matches;
   const needle = query.toLowerCase();
@@ -126,12 +126,16 @@ function search(doc, query, from = 0, to = doc.content.size) {
 }
 
 /** Remap hits that sit outside the edited range and rescan only the text blocks that changed. */
-function searchEdited(doc, query, previous, tr) {
+export function searchEdited(doc, query, previous, tr) {
   if (!query) return [];
   if (!previous.length) return search(doc, query);
   const changed = [];
-  tr.mapping.maps.forEach((stepMap) => {
-    stepMap.forEach((_oldStart, _oldEnd, newStart, newEnd) => changed.push([newStart, newEnd]));
+  tr.steps.forEach((_step, index) => {
+    // newStart/newEnd are positions in the document after this step, not the final one.
+    const rest = tr.mapping.slice(index + 1);
+    tr.mapping.maps[index].forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+      changed.push([rest.map(newStart, -1), rest.map(newEnd, 1)]);
+    });
   });
   if (!changed.length) return previous.map((match) => ({ from: tr.mapping.map(match.from), to: tr.mapping.map(match.to) })).filter((match) => match.from < match.to);
   let from = doc.content.size;

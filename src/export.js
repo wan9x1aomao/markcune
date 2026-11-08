@@ -301,11 +301,8 @@ ${scope} .image-missing { margin: 1.2em 0; padding: 1.2em 1em; border: 1.5px das
 }
 
 /**
- * The print tree is laid out off-screen until `html.printing`. Native WKWebView printing
- * (`printOperationWithPrintInfo`) does not apply a JS print event, and a visibility:hidden
- * tree is what `createPDF` omitted. `html.printing` makes this tree the on-screen layout
- * for that call. `#print-return` stays clickable so the editor can come back without afterprint.
- * `@media print` hides that button when a formatter actually paginates.
+ * The print tree is laid out off-screen until `html.printing`, which is the layout a Mac
+ * already printed in full. It comes off when the native print operation says it is done.
  */
 const PRINT_CSS = `
 #print-root {
@@ -319,8 +316,7 @@ const PRINT_CSS = `
   pointer-events: none;
   z-index: 0;
 }
-#print-return { display: none; }
-html.printing body > *:not(#print-root):not(#print-return) { display: none !important; }
+html.printing body > *:not(#print-root) { display: none !important; }
 html.printing #print-root {
   visibility: visible !important;
   position: static !important;
@@ -328,16 +324,8 @@ html.printing #print-root {
   height: auto !important;
   overflow: visible !important;
 }
-html.printing #print-return {
-  display: block;
-  position: fixed;
-  top: 12px;
-  right: 12px;
-  z-index: 2147483646;
-}
 ${printRules('#print-root ')}
 @media print {
-  #print-return { display: none !important; }
   html, body { height: auto !important; overflow: visible !important; display: block !important; background: #fff !important; }
   body > *:not(#print-root) { display: none !important; }
   #print-root {

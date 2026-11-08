@@ -2383,6 +2383,8 @@ dependencies = [
  "flate2",
  "notify",
  "objc2",
+ "objc2-app-kit",
+ "objc2-web-kit",
  "percent-encoding",
  "reqwest",
  "serde",

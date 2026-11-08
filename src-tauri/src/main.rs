@@ -4,6 +4,9 @@ mod ai;
 mod fetch;
 mod files;
 mod pinned;
+#[cfg(target_os = "macos")]
+mod print_mac;
+mod print_session;
 mod state;
 mod store;
 mod tweet;
@@ -481,7 +484,16 @@ fn reveal(app: AppHandle, path: PathBuf) {
 /// Linux: `webkit2gtk::PrintOperation::run_dialog`. Windows: the webview evaluates `window.print()`.
 #[tauri::command]
 fn print_page(window: WebviewWindow) -> Result<(), String> {
-    window.print().map_err(|err| err.to_string())
+    // macOS needs our own NSPrintOperation delegate. wry's print() passes nil and returns
+    // before the panel closes, so the page cannot know when to come back.
+    #[cfg(target_os = "macos")]
+    {
+        print_mac::print_page(window)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        window.print().map_err(|err| err.to_string())
+    }
 }
 
 #[tauri::command]

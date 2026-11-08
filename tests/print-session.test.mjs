@@ -1,63 +1,94 @@
 import assert from 'node:assert/strict';
-import { createPrintLock, runPrint, settleImage } from '../src/print-session.js';
+import { createPrintLock, finishNativePrint, nativePrintEnd, restoresEditor, settleImage } from '../src/print-session.js';
 
-class Target {
+assert.equal(nativePrintEnd('macos'), 'print-finished');
+assert.equal(nativePrintEnd('windows'), 'afterprint');
+assert.equal(nativePrintEnd('linux'), 'command');
+for (const reason of ['finished', 'cancelled', 'error']) assert.equal(restoresEditor(reason), true);
+
+class Bus {
   constructor() {
     this.listeners = new Map();
   }
-  addEventListener(name, fn) {
+  add(name, fn) {
     const list = this.listeners.get(name) ?? [];
     list.push(fn);
     this.listeners.set(name, list);
+    return () => {
+      this.listeners.set(name, (this.listeners.get(name) ?? []).filter((item) => item !== fn));
+    };
   }
-  removeEventListener(name, fn) {
-    this.listeners.set(name, (this.listeners.get(name) ?? []).filter((item) => item !== fn));
-  }
-  dispatch(name) {
-    for (const fn of this.listeners.get(name) ?? []) fn();
+  emit(name, success) {
+    for (const fn of this.listeners.get(name) ?? []) fn(success);
   }
 }
 
-const confirmed = new Target();
-const confirmedRun = runPrint(confirmed, () => {
-  confirmed.dispatch('beforeprint');
-});
-queueMicrotask(() => confirmed.dispatch('afterprint'));
-assert.equal(await confirmedRun, 'afterprint');
-
-const cancelled = new Target();
-const cancelledRun = runPrint(cancelled, () => {
-  cancelled.dispatch('beforeprint');
-  cancelled.dispatch('afterprint');
-});
-assert.equal(await cancelledRun, 'afterprint');
-
-const missing = new Target();
-assert.equal(await runPrint(missing, () => {}), 'no-afterprint');
-
-const broken = new Target();
-assert.equal(
-  await runPrint(broken, () => {
-    throw new Error('print failed');
-  }),
-  'error',
-);
-
-const held = new Target();
-let releaseAfter;
-const heldRun = runPrint(held, () => {
-  held.dispatch('beforeprint');
-  releaseAfter = () => held.dispatch('afterprint');
-});
-let heldResult;
-const finished = heldRun.then((reason) => {
-  heldResult = reason;
+const mac = new Bus();
+let macStarted = 0;
+const macRun = finishNativePrint('macos', {
+  start: () => {
+    macStarted += 1;
+  },
+  listenFinished: (fn) => mac.add('print-finished', fn),
 });
 await Promise.resolve();
-assert.equal(heldResult, undefined, 'beforeprint without afterprint must keep the dialog open');
-releaseAfter();
-await finished;
-assert.equal(heldResult, 'afterprint');
+assert.equal(macStarted, 1, 'the panel starts only after the completion listener is attached');
+let macResult;
+const macDone = macRun.then((reason) => {
+  macResult = reason;
+});
+await Promise.resolve();
+assert.equal(macResult, undefined, 'closing the panel is what ends the session');
+mac.emit('print-finished', false);
+await macDone;
+assert.equal(macResult, 'cancelled');
+
+const printed = new Bus();
+const printedRun = finishNativePrint('macos', {
+  start: () => {},
+  listenFinished: (fn) => printed.add('print-finished', fn),
+});
+queueMicrotask(() => printed.emit('print-finished', true));
+assert.equal(await printedRun, 'finished');
+
+const windows = new Bus();
+const windowsRun = finishNativePrint('windows', {
+  start: () => {},
+  listenAfterprint: (fn) => windows.add('afterprint', fn),
+});
+queueMicrotask(() => windows.emit('afterprint'));
+assert.equal(await windowsRun, 'finished');
+
+assert.equal(
+  await finishNativePrint('linux', {
+    start: async () => {},
+  }),
+  'finished',
+);
+
+await assert.rejects(
+  finishNativePrint('linux', {
+    start: async () => {
+      throw new Error('print failed');
+    },
+  }),
+);
+
+const other = new Bus();
+const firstWindow = finishNativePrint('macos', {
+  start: () => {},
+  listenFinished: (fn) => other.add('doc-1', fn),
+});
+let firstReason;
+const firstDone = firstWindow.then((reason) => {
+  firstReason = reason;
+});
+other.emit('doc-2', true);
+await Promise.resolve();
+assert.equal(firstReason, undefined, 'another window finishing does not end this one');
+other.emit('doc-1', true);
+await firstDone;
+assert.equal(firstReason, 'finished');
 
 const lock = createPrintLock();
 let started = 0;

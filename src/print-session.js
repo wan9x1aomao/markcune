@@ -19,48 +19,58 @@ export function createPrintLock() {
 }
 
 /**
- * Runs `startPrint` and always settles.
- *
- * Browsers that implement the HTML print events fire `beforeprint` during the call and
- * `afterprint` when the dialog closes (confirm or cancel). This waits for that pair.
- * A platform that fires neither — WKWebView's `printOperationWithPrintInfo` is a native
- * panel and wry does not hook its delegate — settles as `no-afterprint` on the next
- * microtask. Callers must not hide the editor until one of these events: the native
- * panel does not send them, and a timer that removed layout would race pagination.
+ * What tells us the native panel is gone.
+ * macOS: NSPrintOperation's didRunSelector, emitted as `print-finished` (confirm and cancel).
+ * Windows: wry's print evaluates `window.print()`, which fires `afterprint` when the dialog closes.
+ * Linux: the GTK dialog blocks inside the command, so the command returning is the end.
  */
-export function runPrint(target, startPrint) {
-  return new Promise((resolve) => {
+export function nativePrintEnd(platform) {
+  if (platform === 'linux') return 'command';
+  if (platform === 'macos') return 'print-finished';
+  return 'afterprint';
+}
+
+/** Confirm, cancel, and a failed start all leave the editor. None of them wait on a timer. */
+export function restoresEditor(reason) {
+  return reason === 'finished' || reason === 'cancelled' || reason === 'error';
+}
+
+/**
+ * Subscribe first, then start the native print. `hooks.listenFinished` / `listenAfterprint`
+ * return an unsubscribe function. The macOS command returns before the panel closes.
+ */
+export function finishNativePrint(platform, hooks) {
+  const end = nativePrintEnd(platform);
+  if (end === 'command') {
+    return Promise.resolve(hooks.start()).then(() => 'finished');
+  }
+  return new Promise((resolve, reject) => {
     let settled = false;
-    let sawBefore = false;
+    let stop = () => {};
     const finish = (reason) => {
       if (settled) return;
       settled = true;
-      target.removeEventListener('beforeprint', onBefore);
-      target.removeEventListener('afterprint', onAfter);
+      stop();
       resolve(reason);
     };
-    const onBefore = () => {
-      sawBefore = true;
-    };
-    const onAfter = () => finish('afterprint');
-    target.addEventListener('beforeprint', onBefore);
-    target.addEventListener('afterprint', onAfter);
-    let invocation;
-    try {
-      invocation = Promise.resolve(startPrint());
-    } catch (error) {
-      finish('error');
-      return;
-    }
-    invocation.then(
-      () => {
-        queueMicrotask(() => {
-          if (settled || sawBefore) return;
-          finish('no-afterprint');
-        });
-      },
-      () => finish('error'),
-    );
+    const arm =
+      end === 'afterprint'
+        ? Promise.resolve(hooks.listenAfterprint(() => finish('finished')))
+        : Promise.resolve(hooks.listenFinished((success) => finish(success ? 'finished' : 'cancelled')));
+    arm
+      .then((unlisten) => {
+        if (typeof unlisten === 'function') stop = unlisten;
+        return hooks.start();
+      })
+      .then(
+        () => {},
+        (error) => {
+          if (settled) return;
+          settled = true;
+          stop();
+          reject(error);
+        },
+      );
   });
 }
 

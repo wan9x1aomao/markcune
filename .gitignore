@@ -4,5 +4,6 @@ dist/
 build/
 release/
 src-tauri/target.noindex/
+src-tauri/target/
 src-tauri/gen/
 .claude/

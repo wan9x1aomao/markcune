@@ -71,9 +71,10 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
-      # Programmatic WKWebView print, no print panel and no GUI clicks. The JSON line is the
-      # evidence: which DOM print events fired, and whether the PDF still has the end marker.
-      - name: WKWebView 打印探测
+      # Diagnostic only. createPDF is not the product print path and is not a PDF regression.
+      # A green step means the probe printed JSON. MARK-START missing from that JSON is expected
+      # for this API. A timeout (exit 2) fails this step; that failure is the probe, not a product pass.
+      - name: 诊断 probe：WKWebView createPDF（不是产品 PDF 测试）
         if: matrix.platform == 'macos'
         run: swift scripts/wk-print-harness.swift
 

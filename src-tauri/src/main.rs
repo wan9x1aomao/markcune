@@ -476,9 +476,12 @@ fn reveal(app: AppHandle, path: PathBuf) {
     let _ = app.opener().reveal_item_in_dir(path);
 }
 
+/// wry 0.57 prints through the platform webview, not through a JS `window.print()` we control.
+/// macOS: `WKWebView.printOperationWithPrintInfo` (the UI delegate does not implement print).
+/// Linux: `webkit2gtk::PrintOperation::run_dialog`. Windows: the webview evaluates `window.print()`.
 #[tauri::command]
-fn print_page(window: WebviewWindow) {
-    let _ = window.print();
+fn print_page(window: WebviewWindow) -> Result<(), String> {
+    window.print().map_err(|err| err.to_string())
 }
 
 #[tauri::command]

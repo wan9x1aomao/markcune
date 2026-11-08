@@ -74,6 +74,7 @@ let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), 
 window.contentView = web
 let wait = LoadWait()
 web.navigationDelegate = wait
+log("wk-print: diagnostic probe only, not a product PDF test")
 log("wk-print: loading")
 web.loadHTMLString(html, baseURL: nil)
 if !pump(until: { wait.finished }, seconds: 8) || wait.failed != nil {

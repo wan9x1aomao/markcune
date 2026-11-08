@@ -240,10 +240,14 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
             }
             std::fs::rename(&tmp, &path)
         });
-    if result.is_err() {
+    if let Err(err) = result {
         let _ = std::fs::remove_file(&tmp);
-        // Some locations (network shares, files locked on Windows) refuse renames.
-        std::fs::write(&path, bytes).map_err(|e| describe(&e))?;
+        // `std::fs::write` follows symlinks. A link that appeared after the first check
+        // would be written through. Rename failure is reported instead.
+        if path.symlink_metadata().ok().is_some_and(|meta| meta.file_type().is_symlink()) {
+            return Err("这个文件已经变成链接，不能覆盖保存".into());
+        }
+        return Err(describe(&err));
     }
     Ok(())
 }
@@ -1089,12 +1093,19 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), "v2");
         assert_eq!(std::fs::read_to_string(&victim).unwrap(), "SECRET");
 
-        // A symlink is not a place to write. The file it names stays untouched.
+        // A symlink is not a place to write. `std::fs::write` would follow it and change v2.
         let link = base.join("link.md");
         std::os::unix::fs::symlink(&doc, &link).unwrap();
         assert!(atomic_write(&link, b"v3").is_err());
         assert!(is_symlink(&link));
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), "v2");
+
+        // Rename onto a directory fails. The old fallback would then call `std::fs::write`.
+        let dir = base.join("not-a-file.md");
+        std::fs::create_dir(&dir).unwrap();
+        assert!(atomic_write(&dir, b"nope").is_err());
+        assert!(dir.is_dir());
+        assert!(std::fs::read_dir(&dir).unwrap().next().is_none());
         let _ = std::fs::remove_dir_all(&base);
     }
 

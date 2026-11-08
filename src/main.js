@@ -11,7 +11,7 @@ import { openHelp } from './help.js';
 import { createRichEditor } from './editor.js';
 import { acceptsEdit, mountBaseline } from './mount-input.js';
 import { createPreviewCache } from './preview-sync.js';
-import { createPrintLock, runPrint } from './print-session.js';
+import { createPrintLock } from './print-session.js';
 import { createFindbar } from './findbar.js';
 import { icons } from './icons.js';
 import { openLicenses } from './licenses.js';
@@ -1199,27 +1199,60 @@ async function preparePrintDocument() {
 }
 
 const printLock = createPrintLock();
+const isLinux = navigator.userAgent.includes('Linux');
+
+function printReturnButton() {
+  let button = document.getElementById('print-return');
+  if (!button) {
+    button = document.createElement('button');
+    button.id = 'print-return';
+    button.type = 'button';
+    button.className = 'text-button';
+    button.textContent = '返回编辑';
+    document.body.appendChild(button);
+  }
+  return button;
+}
 
 async function exportPdf() {
   if (printLock.active) return;
   const previousTitle = document.title;
   await printLock.run(async () => {
+    const button = printReturnButton();
+    const restore = () => {
+      document.documentElement.classList.remove('printing');
+      document.title = previousTitle;
+      button.hidden = true;
+    };
     try {
       const height = await preparePrintDocument();
       if (!height) throw new Error('没有排出可打印的页面');
-      // The editor stays on screen. #print-root is already laid out off to the side, and
-      // @media print is what hides the editor while a formatter is actually printing.
-      // WKWebView's native print operation does not promise beforeprint/afterprint, so a class
-      // that hides the page until one of those events would leave the window blank.
+      // Screen layout, not a hidden tree: WKWebView's printOperation prints the view it can see.
+      document.documentElement.classList.add('printing');
       document.title = exportTitle();
-      try {
-        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        toast('在打印窗口中选择“存储为 PDF”', 4000);
-        await runPrint(window, () => window.print());
-      } finally {
-        document.title = previousTitle;
+      button.hidden = false;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      toast('在系统打印面板中选择“存储为 PDF”。没有面板时点右上角“返回编辑”。', 5000);
+      // Native channel. macOS does not show a panel for the page's window.print().
+      await api.print();
+      // Linux run_dialog blocks until the panel closes. macOS printOperation returns immediately
+      // and does not emit afterprint. Windows eval's window.print() does emit afterprint.
+      if (isLinux) {
+        restore();
+        return;
       }
+      await new Promise((resolve) => {
+        const done = () => {
+          button.removeEventListener('click', done);
+          window.removeEventListener('afterprint', done);
+          restore();
+          resolve();
+        };
+        button.addEventListener('click', done);
+        if (!isMac) window.addEventListener('afterprint', done);
+      });
     } catch (error) {
+      restore();
       toast(`导出失败：${error?.message ?? error}`);
     }
   });

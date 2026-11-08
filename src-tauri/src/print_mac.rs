@@ -101,7 +101,7 @@ fn start(webview: &tauri::webview::PlatformWebview, app: AppHandle, label: Strin
     if !responds.as_bool() {
         return Err("这个系统版本不能打印".into());
     }
-    let operation = unsafe { view.printOperationWithPrintInfo(&NSPrintInfo::sharedPrintInfo()) };
+    let operation: Retained<NSPrintOperation> = unsafe { view.printOperationWithPrintInfo(&NSPrintInfo::sharedPrintInfo()) };
     // Leave page generation on this thread so the callback is not early.
     operation.setCanSpawnSeparateThread(false);
     let delegate = PrintDelegate::new(mtm, app, label);

@@ -67,8 +67,15 @@ operation.showsProgressPanel = false
 operation.canSpawnSeparateThread = false
 let delegate = PrintDelegate()
 let selector = #selector(PrintDelegate.printOperationDidRun(_:success:contextInfo:))
+// The panel would wait for a click. CI has no click, so dismiss the modal session.
+// didRun must still run: that is cancel/close, success == false.
+DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+    fputs("print-completion: dismissing the modal without a click\n", stderr)
+    fflush(stderr)
+    NSApp.stopModal()
+}
 operation.runModal(for: window, delegate: delegate, didRun: selector, contextInfo: nil)
-let fired = pump(until: { delegate.called }, seconds: 15)
+let fired = delegate.called || pump(until: { delegate.called }, seconds: 5)
 let payload: [String: Any] = [
     "api": "printOperationDidRun",
     "callback": delegate.called,

@@ -131,6 +131,8 @@ let payload: [String: Any] = [
     "hasStart": text.contains("MARK-START"),
     "hasEnd": text.contains("MARK-END"),
     "hasRow": text.contains("R40"),
+    "hasEditor": text.contains("EDITOR-VISIBLE"),
+    "text": String(text.prefix(180)),
     "bytes": pdf.count,
 ]
 let data = try JSONSerialization.data(withJSONObject: payload)

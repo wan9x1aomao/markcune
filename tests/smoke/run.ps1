@@ -19,19 +19,42 @@ function Invoke-App { # Invoke-App <文档> <测试脚本> <日志名> [等待�
   $env:MDPAD_LIBRARY_DIR = Join-Path $work "library-$Name"
   $env:MDPAD_TEST_JS = Get-Content -Raw -Encoding UTF8 (Join-Path $root "tests/smoke/$Scenario")
   $app = Start-Process -FilePath $bin -ArgumentList "`"$Doc`"" -RedirectStandardError $log -PassThru
-  if (-not $app.WaitForExit($Wait)) { $app.Kill(); Write-Host 'Timed out' }
-  Get-Content -Encoding UTF8 $log
-  return (Get-Content -Raw -Encoding UTF8 $log)
+  $exited = $app.WaitForExit($Wait)
+  if (-not $exited) {
+    $app.Kill()
+    Write-Host 'Timed out'
+  } else {
+    # The no-argument overload flushes the redirected stderr stream before we read it.
+    $app.WaitForExit()
+    try { Write-Host "app exit code: $($app.ExitCode)" } catch { Write-Host 'app exit code: unavailable' }
+  }
+  # Get-Content used to emit into the function's output stream: Actions showed no app log at all,
+  # and $output became a mix of lines and one whole string. Print it explicitly, return one string.
+  $text = if (Test-Path $log) { Get-Content -Raw -Encoding UTF8 $log } else { '' }
+  Write-Host "--- app stderr ($Name) ---"
+  Write-Host $text
+  Write-Host '--- end ---'
+  return $text
 }
 
 Write-Host '=== 1. 打开、编辑、保存 ==='
 $doc = Join-Path $work 'sample.md'
 $output = Invoke-App $doc 'test.js' 'log'
 $saved = Get-Content -Raw -Encoding UTF8 $doc
-if ($output -match 'loaded=true' -and $output -match '"katex":true' -and
-    $output -match '"status":"已保存"' -and $output -match '"headingMarkers":\["# "\]' -and $saved -match '新增的文字') {
+$checks = [ordered]@{
+  'loaded=true'          = [bool]($output -match 'loaded=true')
+  'katex:true'           = [bool]($output -match '"katex":true')
+  'status:已保存'         = [bool]($output -match '"status":"已保存"')
+  'headingMarkers:# '    = [bool]($output -match '"headingMarkers":\["# "\]')
+  'saved:新增的文字'      = [bool]($saved -match '新增的文字')
+}
+$missing = @($checks.Keys | Where-Object { -not $checks[$_] })
+if ($missing.Count -eq 0) {
   Write-Host 'PASS'
 } else {
+  foreach ($key in $checks.Keys) { Write-Host ("  check {0}: {1}" -f $key, $checks[$key]) }
+  Write-Host ("  missing: {0}" -f ($missing -join ', '))
+  Write-Host ("  work dir: {0}" -f $work)
   Write-Host 'FAIL'
   exit 1
 }

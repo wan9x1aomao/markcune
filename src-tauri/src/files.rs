@@ -1259,6 +1259,28 @@ mod tests {
         assert_ne!(identity_from_index(Some(7), Some(1)), identity_from_index(Some(8), Some(1)));
     }
 
+    /// 4.0.4 的保存闸门靠文件身份放行；Windows 走 GetFileInformationByHandle。
+    /// 这条查询若在真实文件上失败，冒烟测试第 1 段的「已保存 / 落盘」必然失败。
+    /// 只在 Windows CI 上跑，用来确认或排除这条线，别靠猜改产品代码。
+    #[cfg(windows)]
+    #[test]
+    fn windows_identity_lets_the_save_gate_pass() {
+        let base = std::env::temp_dir().join(format!("mdpad-win-id-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let doc = base.join("sample.md");
+        std::fs::write(&doc, "# hi\n").unwrap();
+        let id = file_identity(&doc);
+        assert!(id.is_some(), "GetFileInformationByHandle returned no identity for a plain file");
+        // 编辑器持有 canonicalize 之后的路径（Windows 的 \\?\ 前缀），身份必须一致。
+        let canon = std::fs::canonicalize(&doc).unwrap();
+        assert_eq!(file_identity(&canon), id, "identity differs after canonicalize");
+        assert_eq!(gate_path(&doc, id, false), SaveGate::Write, "the first save would be refused as unverified");
+        std::fs::write(&doc, "# hi\n新增的文字\n").unwrap();
+        assert_eq!(file_identity(&doc), id, "identity changed after an in-place rewrite");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn save_as_switches_identity_and_grants_the_chosen_folder() {
         let base = std::env::temp_dir().join(format!("mdpad-saveas-{}", std::process::id()));

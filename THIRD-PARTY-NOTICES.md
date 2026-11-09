@@ -2575,10 +2575,10 @@ MarkCune 自身的代码以 MIT 许可发布，版权 (c) 2026 wan9x1aomao。
 - windows-strings 0.5.1 · MIT OR Apache-2.0 · 条款 [1]
   Copyright (c) Microsoft Corporation.
   源码 https://github.com/microsoft/windows-rs
-- windows-sys 0.60.2 · MIT OR Apache-2.0 · 条款 [1]
+- windows-sys 0.61.2 · MIT OR Apache-2.0 · 条款 [1]
   Copyright (c) Microsoft Corporation.
   源码 https://github.com/microsoft/windows-rs
-- windows-sys 0.61.2 · MIT OR Apache-2.0 · 条款 [1]
+- windows-sys 0.60.2 · MIT OR Apache-2.0 · 条款 [1]
   Copyright (c) Microsoft Corporation.
   源码 https://github.com/microsoft/windows-rs
 - windows-sys 0.45.0 · MIT OR Apache-2.0 · 条款 [1]

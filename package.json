@@ -28,7 +28,7 @@
     "build": "tauri build --bundles app",
     "build:debug": "tauri build --debug --bundles app",
     "build:win": "tauri build --bundles nsis",
-    "test": "node scripts/check-syntax.mjs && node tests/tidy.test.mjs && node tests/ai.test.mjs && node tests/gateway.test.mjs && node tests/notices.test.mjs && node tests/changelog.test.mjs && node tests/rebrand.test.mjs && node tests/export-image.test.mjs && node tests/export-footer.test.mjs && node tests/licenses.test.mjs && node tests/update-site.test.mjs && node tests/find-mapping.test.mjs && node tests/preview-sync.test.mjs && node tests/mount-input.test.mjs && node tests/print-session.test.mjs && node tests/site-commit.test.mjs",
+    "test": "node scripts/check-syntax.mjs && node tests/tidy.test.mjs && node tests/ai.test.mjs && node tests/gateway.test.mjs && node tests/notices.test.mjs && node tests/changelog.test.mjs && node tests/rebrand.test.mjs && node tests/export-image.test.mjs && node tests/export-footer.test.mjs && node tests/licenses.test.mjs && node tests/update-site.test.mjs && node tests/find-mapping.test.mjs && node tests/preview-sync.test.mjs && node tests/mount-input.test.mjs && node tests/print-session.test.mjs && node tests/site-commit.test.mjs && node tests/remote-image.test.mjs",
     "test:browser": "node tests/ai-browser.mjs",
     "licenses": "node scripts/gen-licenses.mjs"
   },

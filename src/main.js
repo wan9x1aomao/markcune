@@ -19,6 +19,7 @@ import { downloadNotice } from './notices.js';
 import { createOutline } from './outline.js';
 import { openPalette } from './palette.js';
 import { basename, dirname, isInside, relative, samePath, splitExtension } from './paths.js';
+import { isRemoteImage } from './remote-image.js';
 import { installShortcuts } from './shortcuts.js';
 import { createSidebar } from './sidebar.js';
 import { readTableWidths, restoreTableWidths } from './table.js';
@@ -247,16 +248,11 @@ async function resolveConflict(choice) {
 // Editor lifecycle
 
 const IMAGE_URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
-const REMOTE_IMAGE = /^(https?:)?\/\//i;
 const REMOTE_PLACEHOLDER =
   'data:image/svg+xml,' +
   encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="88"><rect width="100%" height="100%" rx="8" fill="#f4f5f7"/><text x="24" y="52" font-family="sans-serif" font-size="15" fill="#8a909c">网络图片未加载</text></svg>',
   );
-
-function isRemoteImage(url) {
-  return typeof url === 'string' && REMOTE_IMAGE.test(url.trim());
-}
 const WINDOWS_ABSOLUTE = /^[a-z]:[\\/]/i;
 
 function normalizePath(path) {

@@ -296,7 +296,29 @@ pub fn read_document(window: WebviewWindow, path: PathBuf) -> Result<Opened, Str
     remember_document(app, window.label(), &real, &content);
     with_win(app, window.label(), |w| w.file_id = id);
     let position = app_state(app).store.lock().unwrap().position(&real);
-    Ok(Opened { path: real, content, position, rewritten: false })
+    Ok(Opened { path: portable_path(&real), content, position, rewritten: false })
+}
+
+/// Windows `canonicalize()` returns a verbatim path (`\\?\C:\...`). The page's path
+/// helpers expect a plain drive/UNC path: splitting the verbatim prefix into components
+/// turned `\\?\C:\docs\note.md` into `?/C:/docs/...`, so local images stopped resolving
+/// on Windows (the smoke test's icon came back as a 404 relative URL).
+/// The shell keeps the verbatim path for its own checks; only the page-facing copy is portable.
+fn strip_verbatim_prefix(text: &str) -> String {
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{unc}");
+    }
+    if let Some(drive) = text.strip_prefix(r"\\?\") {
+        return drive.to_string();
+    }
+    text.to_string()
+}
+
+fn portable_path(path: &Path) -> PathBuf {
+    match path.to_str() {
+        Some(text) => PathBuf::from(strip_verbatim_prefix(text)),
+        None => path.to_path_buf(),
+    }
 }
 
 #[derive(Serialize)]
@@ -1248,6 +1270,14 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&secret).unwrap(), "SECRET");
         assert!(doc.symlink_metadata().unwrap().file_type().is_symlink());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_windows_verbatim_path_is_given_to_the_page_as_a_plain_path() {
+        assert_eq!(strip_verbatim_prefix(r"\\?\C:\docs\note.md"), r"C:\docs\note.md");
+        assert_eq!(strip_verbatim_prefix(r"\\?\UNC\server\share\note.md"), r"\\server\share\note.md");
+        assert_eq!(strip_verbatim_prefix("/tmp/note.md"), "/tmp/note.md");
+        assert_eq!(portable_path(Path::new("/tmp/note.md")), PathBuf::from("/tmp/note.md"));
     }
 
     #[test]

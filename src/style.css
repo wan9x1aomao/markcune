@@ -3001,3 +3001,108 @@ body.ai-pending .ai-pick {
   font-size: 11.5px;
   line-height: 1.55;
 }
+
+/* Android phone: the file list is a drawer. The editor stays full width.
+   Desktop never has html.android, so the docked sidebar is unchanged. */
+html.android {
+  --topbar-h: calc(44px + env(safe-area-inset-top, 0px));
+}
+html.android body #content,
+html.android body.sidebar-hidden #content,
+html.android body.focus #content,
+html.android body.outline-open:not(.focus) #content {
+  left: 0;
+  right: 0;
+}
+html.android #toggle-sidebar {
+  display: inline-flex;
+  width: auto;
+  height: 36px;
+  gap: 4px;
+  padding: 0 10px 0 8px;
+  border-radius: 10px;
+  color: var(--text);
+}
+html.android #toggle-sidebar .menu-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+html.android body.drawer-open #toggle-sidebar {
+  background: var(--active);
+}
+html.android #topbar {
+  height: var(--topbar-h);
+  padding: env(safe-area-inset-top, 0px) calc(8px + env(safe-area-inset-right, 0px)) 0 calc(8px + env(safe-area-inset-left, 0px));
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+html.android body.sidebar-hidden #topbar {
+  padding-left: calc(8px + env(safe-area-inset-left, 0px));
+}
+html.android .word-count {
+  display: none;
+}
+html.android #mode-switch {
+  justify-self: end;
+}
+html.android .segmented button {
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+html.android .actions {
+  gap: 2px;
+}
+html.android #panes {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+html.android #editor .milkdown .ProseMirror {
+  padding: 12px 18px calc(32vh + env(safe-area-inset-bottom, 0px));
+}
+html.android #drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  background: rgba(18, 22, 34, 0.32);
+}
+html.android body #sidebar,
+html.android body.sidebar-hidden #sidebar,
+html.android body.focus #sidebar {
+  z-index: 40;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(300px, 86vw);
+  border-radius: 0 18px 18px 0;
+  box-shadow: var(--shadow-pop);
+  transform: translateX(-105%);
+  opacity: 1;
+  pointer-events: none;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+html.android body.drawer-open #sidebar {
+  transform: none;
+  pointer-events: auto;
+}
+html.android .sidebar-top {
+  padding-left: 14px;
+  justify-content: space-between;
+}
+html.android .sidebar-top::before {
+  content: '文件';
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+}
+html.android #outline {
+  z-index: 35;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+}

@@ -925,13 +925,30 @@ function glide(change) {
   }
 }
 
+const isAndroid = () => document.documentElement.classList.contains('android');
+
+function setDrawer(open) {
+  document.body.classList.toggle('drawer-open', open);
+  const backdrop = $('drawer-backdrop');
+  if (backdrop) backdrop.hidden = !open;
+  const toggle = $('toggle-sidebar');
+  if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
 function applyPanels() {
   document.body.classList.toggle('sidebar-hidden', !app.settings.sidebar);
   document.body.classList.toggle('outline-open', !!app.settings.outline);
   $('toggle-outline').classList.toggle('on', !!app.settings.outline);
+  // The phone drawer is not the desktop dock. A stored "sidebar open" must not
+  // cover the editor on the next launch.
+  if (isAndroid() && !document.body.classList.contains('drawer-open')) setDrawer(false);
 }
 
 function setPanel(name, visible) {
+  if (isAndroid() && name === 'sidebar') {
+    setDrawer(visible);
+    return;
+  }
   app.settings[name] = visible;
   glide(applyPanels);
   api.setSetting(name, visible);
@@ -1296,7 +1313,8 @@ const actions = {
   'toggle-source': () => setMode(app.mode === 'source' && !app.split ? 'rich' : 'source', false),
   'toggle-split': () => (app.split ? setMode('rich', false) : setMode('source', true)),
   'toggle-focus': () => setFocus(!app.focus),
-  'toggle-sidebar': () => setPanel('sidebar', !app.settings.sidebar),
+  'toggle-sidebar': () =>
+    isAndroid() ? setDrawer(!document.body.classList.contains('drawer-open')) : setPanel('sidebar', !app.settings.sidebar),
   'toggle-outline': () => setPanel('outline', !app.settings.outline),
   'check-update': () => updater.check(false),
   changelog: () => api.openUrl(CHANGELOG_URL),
@@ -1395,19 +1413,23 @@ function showMore(anchor) {
 
 // Wiring
 
+const afterDrawerPick = (fn) => (...args) => {
+  if (isAndroid()) setDrawer(false);
+  return fn(...args);
+};
 const sidebar = createSidebar(els.sidebarBody, {
   api,
   revealLabel: isMac ? '在访达中显示' : '在资源管理器中显示',
-  onOpen: openFile,
+  onOpen: afterDrawerPick(openFile),
   onOpenInNewWindow: (path) => api.openInNewWindow(path),
-  onOpenFolder: openFolder,
-  onOpenFile: () => run('open-file'),
-  onOpenFromUrl: () => run('open-from-url'),
-  onNewDocument: newDocument,
+  onOpenFolder: afterDrawerPick(openFolder),
+  onOpenFile: afterDrawerPick(() => run('open-file')),
+  onOpenFromUrl: afterDrawerPick(() => run('open-from-url')),
+  onNewDocument: afterDrawerPick(newDocument),
   onRenamed,
   onError: toast,
   // Pinned rows always open in place: switching the tree root would hide the folder being browsed.
-  onOpenPinned: (path) => openFile(path, { keepRoot: true }),
+  onOpenPinned: afterDrawerPick((path) => openFile(path, { keepRoot: true })),
   onPinFile: pinFromDisk,
   onPinPath: (path) => pinPath(path),
   onUnpinPinned: unpinPath,
@@ -1447,7 +1469,12 @@ const buttons = {
 };
 for (const [id, [icon, title, onClick]] of Object.entries(buttons)) {
   $(id).innerHTML = icon;
-  $(id).title = title;
+  $(id).title = id === 'toggle-sidebar' && isAndroid() ? '文件' : title;
+  if (id === 'toggle-sidebar' && isAndroid()) {
+    $(id).setAttribute('aria-label', '文件');
+    $(id).setAttribute('aria-expanded', 'false');
+    $(id).insertAdjacentHTML('beforeend', '<span class="menu-label">文件</span>');
+  }
   $(id).addEventListener('click', onClick);
 }
 
@@ -1461,9 +1488,14 @@ els.status.addEventListener('click', () => {
 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || event.defaultPrevented) return;
+  if (document.body.classList.contains('drawer-open')) {
+    setDrawer(false);
+    return;
+  }
   if (findbar.open) findbar.close();
   else if (app.focus) setFocus(false);
 });
+$('drawer-backdrop').addEventListener('click', () => setDrawer(false));
 
 // A web page can't learn a dropped file's path, so dropped documents are opened via the menu.
 document.addEventListener(

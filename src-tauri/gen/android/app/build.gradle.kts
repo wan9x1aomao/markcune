@@ -39,6 +39,14 @@ android {
             }
         }
         getByName("release") {
+            // Test build only. Phones can install it; this is the Android debug
+            // certificate, not a production identity. The keystore is never committed.
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+            isShrinkResources = false
+            ndk {
+                debugSymbolLevel = "NONE"
+            }
             optimization {
                enable = true
             }

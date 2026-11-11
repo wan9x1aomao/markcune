@@ -1,0 +1,103 @@
+name: 仅构建安装包
+
+# 给已经合入 main 的修复打 Windows / Linux 安装包。
+# 只上传 Actions artifact。不创建 Release、不打 tag、不写 latest.json、不上官网。
+# 源码固定为下面的 commit，不跟本 workflow 所在分支走。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+          - platform: linux
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: 078138ca395cf4fb91132b3dcb6426fdaec2ff91
+          persist-credentials: false
+
+      - name: Linux 依赖
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf xvfb libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.99.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri -> target.noindex
+
+      - run: npm ci
+
+      - name: 打包
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          SOURCE_COMMIT: 078138ca395cf4fb91132b3dcb6426fdaec2ff91
+        run: |
+          set -euo pipefail
+          HEAD_COMMIT=$(git rev-parse HEAD)
+          if [ "$HEAD_COMMIT" != "$SOURCE_COMMIT" ]; then
+            echo "::error::检出的不是指定的 main 提交：$HEAD_COMMIT"
+            exit 1
+          fi
+          source scripts/release.conf
+          export MDPAD_UPDATE_ENDPOINT="$UPDATE_ENDPOINT"
+          if [ -n "${TIDY_URL:-}" ]; then export MDPAD_TIDY_URL="$TIDY_URL"; fi
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          mkdir -p out
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            SIGNING=configured
+            CONFIG='{"bundle":{"createUpdaterArtifacts":true}}'
+          else
+            SIGNING=absent
+            CONFIG='{}'
+          fi
+          echo "commit=$HEAD_COMMIT"
+          echo "version=$VERSION"
+          echo "signing=$SIGNING"
+          BUNDLE=src-tauri/target.noindex/release/bundle
+          if [ "${{ matrix.platform }}" = windows ]; then
+            npx tauri build --bundles nsis --config "$CONFIG"
+            cp $BUNDLE/nsis/*-setup.exe "out/MarkCune-$VERSION-windows-x64-setup.exe"
+            if [ "$SIGNING" = configured ]; then
+              cp $BUNDLE/nsis/*-setup.exe.sig "out/MarkCune-$VERSION-windows-x64-setup.exe.sig"
+            fi
+          else
+            npx tauri build --bundles appimage --config "$CONFIG"
+            cp $BUNDLE/appimage/*.AppImage "out/MarkCune-$VERSION-linux-x86_64.AppImage"
+            if [ "$SIGNING" = configured ]; then
+              cp $BUNDLE/appimage/*.AppImage.sig "out/MarkCune-$VERSION-linux-x86_64.AppImage.sig"
+            fi
+          fi
+          printf 'commit=%s\nversion=%s\nplatform=%s\nsigning=%s\nupdater_endpoint=%s\nrelease=not-published\n' \
+            "$HEAD_COMMIT" "$VERSION" "${{ matrix.platform }}" "$SIGNING" "$MDPAD_UPDATE_ENDPOINT" \
+            > out/BUILD-SOURCE.txt
+          ls -la out
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: installer-${{ matrix.platform }}
+          path: out/*
+          if-no-files-found: error

@@ -86,6 +86,24 @@ pub fn grant_dir(app: &AppHandle, label: &str, path: &Path) {
     });
 }
 
+/// The folder a link download just wrote. The page then points the sidebar at it and opens the
+/// file, both of which call [`authorize`]. Only this folder is added: not the library above it.
+/// A symlink is not a folder this download created, so its target stays ungranted.
+pub fn grant_fetched_dir(app: &AppHandle, label: &str, root: &Path) {
+    with_win(app, label, |state| grant_fetched_dir_state(state, root));
+}
+
+fn grant_fetched_dir_state(state: &mut WinState, root: &Path) {
+    let Ok(meta) = root.symlink_metadata() else { return };
+    if !meta.file_type().is_dir() {
+        return;
+    }
+    let Some(real) = canonical_dir(root) else { return };
+    if !state.allowed_dirs.iter().any(|dir| dir == &real) {
+        state.allowed_dirs.push(real);
+    }
+}
+
 pub fn grant_file(app: &AppHandle, label: &str, path: &Path) {
     let Some(real) = canonical_file(path) else { return };
     with_win(app, label, |w| grant_file_only(w, real));
@@ -1401,6 +1419,75 @@ mod tests {
         assert!(image_permitted(&named, &std::fs::canonicalize(&picture).unwrap()));
         named.pending_image = None;
         assert!(!image_permitted(&named, &std::fs::canonicalize(&picture).unwrap()));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Same directory check `authorize` uses, without recent files or the image picker.
+    fn granted_here(state: &WinState, path: &Path) -> bool {
+        let Some(real) = canonical_file(path).or_else(|| canonical_dir(path)) else {
+            return false;
+        };
+        state.allowed_files.iter().any(|file| file == &real) || state.allowed_dirs.iter().any(|dir| inside(dir, &real))
+    }
+
+    #[test]
+    fn a_download_grants_its_own_folder_and_not_the_library() {
+        let base = std::env::temp_dir().join(format!("mdpad-fetch-grant-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let library = base.join("MDPad");
+        let book = library.join("x.com").join("demo-1");
+        let notes = book.join("demo.md");
+        let picture = book.join("images").join("1.jpg");
+        let sibling = library.join("other");
+        let secret = sibling.join("secret.md");
+        let lookalike = library.join("x.com").join("demo-1-extra");
+        std::fs::create_dir_all(picture.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+        std::fs::create_dir_all(&lookalike).unwrap();
+        std::fs::write(&notes, "# hi\n").unwrap();
+        std::fs::write(&picture, "jpg").unwrap();
+        std::fs::write(&secret, "nope").unwrap();
+
+        let mut state = WinState::default();
+        assert!(!granted_here(&state, &book), "a new download is not already granted");
+        grant_fetched_dir_state(&mut state, &book);
+        grant_fetched_dir_state(&mut state, &book);
+
+        let book_real = std::fs::canonicalize(&book).unwrap();
+        let library_real = std::fs::canonicalize(&library).unwrap();
+        assert_eq!(state.allowed_dirs, vec![book_real]);
+        assert!(granted_here(&state, &book));
+        assert!(granted_here(&state, &notes));
+        assert!(granted_here(&state, picture.parent().unwrap()));
+        assert!(!granted_here(&state, &library));
+        assert!(!state.allowed_dirs.iter().any(|dir| dir == &library_real));
+        assert!(!granted_here(&state, &sibling));
+        assert!(!granted_here(&state, &secret));
+        assert!(!granted_here(&state, &lookalike));
+        grant_fetched_dir_state(&mut state, &notes);
+        assert_eq!(state.allowed_dirs.len(), 1, "a file is not a folder grant");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_download_folder_does_not_grant_its_target() {
+        let base = std::env::temp_dir().join(format!("mdpad-fetch-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let secret = base.join("secret");
+        std::fs::create_dir_all(&secret).unwrap();
+        std::fs::write(secret.join("notes.md"), "# hi\n").unwrap();
+        let alias = base.join("book");
+        std::os::unix::fs::symlink(&secret, &alias).unwrap();
+
+        let mut state = WinState::default();
+        grant_fetched_dir_state(&mut state, &alias);
+        let secret_real = std::fs::canonicalize(&secret).unwrap();
+        assert!(state.allowed_dirs.is_empty());
+        assert!(!granted_here(&state, &secret));
+        assert!(!state.allowed_dirs.iter().any(|dir| dir == &secret_real));
 
         let _ = std::fs::remove_dir_all(&base);
     }

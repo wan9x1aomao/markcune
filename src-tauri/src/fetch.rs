@@ -16,7 +16,7 @@ use std::time::Duration;
 use base64::Engine;
 use percent_encoding::percent_decode_str;
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::files::{atomic_write, is_document};
 use crate::tweet;
@@ -714,12 +714,17 @@ fn library_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-pub async fn open_from_url(app: AppHandle, url: String, allow_hosts: Option<Vec<String>>) -> Result<Fetched, String> {
+pub async fn open_from_url(
+    window: WebviewWindow,
+    url: String,
+    allow_hosts: Option<Vec<String>>,
+) -> Result<Fetched, String> {
+    let app = window.app_handle().clone();
     let target = classify(&url)?;
     let permit: HashSet<String> = allow_hosts.unwrap_or_default().into_iter().map(|host| host_key(&host)).collect();
     let library = library_dir(&app)?;
 
-    match target {
+    let fetched = match target {
         Target::File { url, folder, path } => {
             let bytes = download(&url, MAX_FILE_BYTES, DOCUMENT_TIMEOUT, &permit).await.map_err(Failure::message)?;
             let text = decode(&bytes)?;
@@ -760,7 +765,11 @@ pub async fn open_from_url(app: AppHandle, url: String, allow_hosts: Option<Vec<
             })
         }
         Target::Post { handle, id } => post_to_library(&library, &handle, &id, &permit).await,
-    }
+    }?;
+    // The page calls set_root on this folder, then opens the file. Both go through authorize.
+    // This download created the folder; grant that folder only, not the library above it.
+    crate::files::grant_fetched_dir(&app, window.label(), &fetched.root);
+    Ok(fetched)
 }
 
 /// One public image as a data URL, for an export the user explicitly asked to embed.

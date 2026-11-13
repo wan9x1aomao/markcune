@@ -284,6 +284,7 @@ fn valid_name(value: &str) -> bool {
 // ---------------------------------------------------------------------------------------------
 
 /// A failed download, kept structured so we can tell "wrong branch" from a real problem.
+#[derive(Debug)]
 enum Failure {
     NotFound(String),
     Message(String),
@@ -306,7 +307,19 @@ impl Failure {
 
 /// One request, no automatic redirects. `addr` is the IP we already checked, so a later DNS
 /// answer cannot point the same name at a private address (rebinding).
-fn hop_client(host: &str, addr: SocketAddr, timeout: Duration) -> Result<reqwest::Client, Failure> {
+///
+/// `proxy` replaces the process proxy for this client. `None` keeps reqwest's default, which
+/// reads `http(s)_proxy` / `all_proxy` and, with the `system-proxy` feature, the macOS and
+/// Windows system proxy. A loopback proxy is the user's own tunnel, not the page they asked
+/// for: the address check below is about the URL's host, and the proxy connection is separate.
+/// HTTPS through that proxy is `CONNECT host:443`, so the hostname is what leaves the machine,
+/// not the fake-ip we may have pinned for a direct connection.
+fn hop_client(
+    host: &str,
+    addr: SocketAddr,
+    timeout: Duration,
+    proxy: Option<reqwest::Proxy>,
+) -> Result<reqwest::Client, Failure> {
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .user_agent(format!("MarkCune/{}", env!("CARGO_PKG_VERSION")))
@@ -316,6 +329,9 @@ fn hop_client(host: &str, addr: SocketAddr, timeout: Duration) -> Result<reqwest
     // connection. Names are pinned so a second DNS answer cannot swap in a private address.
     if host.parse::<IpAddr>().is_err() {
         builder = builder.resolve(host, addr);
+    }
+    if let Some(proxy) = proxy {
+        builder = builder.proxy(proxy);
     }
     builder.build().map_err(|error| Failure::Message(format!("无法准备网络请求：{error}")))
 }
@@ -351,9 +367,35 @@ fn cgnat(ip: Ipv4Addr) -> bool {
     a == 100 && (64..128).contains(&b)
 }
 
+/// `198.18.0.0/15`, the RFC 2544 benchmarking range. Not routed on the public internet.
 fn benchmarking(ip: Ipv4Addr) -> bool {
     let [a, b, _, _] = ip.octets();
     a == 198 && (18..20).contains(&b)
+}
+
+/// Clash, sing-box and V2Ray answer public names from this range in fake-ip mode
+/// (the default pool is `198.18.0.0/15`). The address is a stand-in for that name:
+/// a TUN device, or the system proxy's `CONNECT`, is what actually reaches the site.
+/// It is not a LAN, loopback or metadata address.
+fn fake_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => benchmarking(v4),
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().is_some_and(benchmarking),
+    }
+}
+
+/// Whether `ip` blocks this hop.
+///
+/// A literal host (`http://198.18.1.78/`, `http://10.1.2.3/`) is judged by [`blocked_ip`],
+/// so typing a reserved address never becomes a way into the fake-ip pool or the LAN.
+/// A DNS answer for some other name may be fake-ip: that name is still the public host
+/// the user pasted. Any *other* blocked answer beside it (a real `10/8`, loopback, …)
+/// still rejects the name, which is the rebinding case.
+fn host_address_blocked(ip: IpAddr, literal: bool) -> bool {
+    if !literal && fake_ip(ip) {
+        return false;
+    }
+    blocked_ip(ip)
 }
 
 fn blocked_v6(ip: Ipv6Addr) -> bool {
@@ -382,10 +424,7 @@ fn socket_port(url: &reqwest::Url) -> u16 {
 fn pin_host(host: &str, port: u16, permit: &HashSet<String>) -> Result<SocketAddr, Failure> {
     let host = host.trim_matches(|c| c == '[' || c == ']');
     if let Ok(ip) = host.parse::<IpAddr>() {
-        if blocked_ip(ip) && !permit.contains(&host_key(host)) {
-            return Err(Failure::NeedPrivate(host_key(host)));
-        }
-        return Ok(SocketAddr::new(ip, port));
+        return judge_host(host, port, &[SocketAddr::new(ip, port)], permit, true);
     }
     let looked_up = (host, port).to_socket_addrs().map_err(|_| {
         Failure::Message(format!("解析不了 {host}（检查网络或代理）"))
@@ -394,11 +433,26 @@ fn pin_host(host: &str, port: u16, permit: &HashSet<String>) -> Result<SocketAdd
     if addrs.is_empty() {
         return Err(Failure::Message(format!("解析不了 {host}")));
     }
-    let blocked = addrs.iter().any(|addr| blocked_ip(addr.ip()));
+    judge_host(host, port, &addrs, permit, false)
+}
+
+/// `literal` is true when `host` itself is an IP, not a name we looked up.
+fn judge_host(
+    host: &str,
+    port: u16,
+    addrs: &[SocketAddr],
+    permit: &HashSet<String>,
+    literal: bool,
+) -> Result<SocketAddr, Failure> {
+    let blocked = addrs.iter().any(|addr| host_address_blocked(addr.ip(), literal));
     if blocked && !permit.contains(&host_key(host)) {
         return Err(Failure::NeedPrivate(host_key(host)));
     }
-    Ok(addrs[0])
+    // A name that has a real public answer should be pinned to that, not to a
+    // fake-ip that only means something when a TUN is running. Fake-ip is used
+    // when it is the only answer we were given.
+    let chosen = addrs.iter().find(|addr| !fake_ip(addr.ip())).unwrap_or(&addrs[0]);
+    Ok(SocketAddr::new(chosen.ip(), port))
 }
 
 struct Download {
@@ -426,6 +480,18 @@ async fn download_limited(
     timeout: Duration,
     permit: &HashSet<String>,
 ) -> Result<Download, Failure> {
+    // `None` leaves the system and environment proxy in place. Tests pass one
+    // explicitly so they can watch a loopback proxy without touching process env.
+    fetch_limited(url, limit, timeout, permit, None).await
+}
+
+async fn fetch_limited(
+    url: &str,
+    limit: u64,
+    timeout: Duration,
+    permit: &HashSet<String>,
+    proxy: Option<reqwest::Proxy>,
+) -> Result<Download, Failure> {
     let mut current = reqwest::Url::parse(url).map_err(|_| Failure::Message("这不是一个有效的链接".into()))?;
     if !matches!(current.scheme(), "http" | "https") {
         return Err(Failure::Message("只支持 http 和 https 链接".into()));
@@ -433,7 +499,7 @@ async fn download_limited(
     for _ in 0..=MAX_REDIRECTS {
         let host = current.host_str().ok_or_else(|| Failure::Message("这个链接没有主机名".into()))?;
         let addr = pin_host(host, socket_port(&current), permit)?;
-        let client = hop_client(host, addr, timeout)?;
+        let client = hop_client(host, addr, timeout, proxy.clone())?;
         let response = client
             .get(current.clone())
             .send()
@@ -847,6 +913,11 @@ async fn fetch_post(handle: &str, id: &str, permit: &HashSet<String>) -> Result<
 }
 
 /// 逐张下载正文里的图片，返回（成功落盘的文件名, 失败的张数）。
+///
+/// 失败只计数，不把 `NEED_PRIVATE` 再抛回页面。文章 JSON 和图片往往不是同一个主机：
+/// 前者失败会弹出「允许这一次」，用户点了之后只有那个主机放行；图片主机被拦时这里
+/// 安静跳过，正文里就只剩远程地址。fake-ip 下两个主机都会解析到 `198.18/15`，
+/// 所以以前会出现「文章在、图全没了」。
 async fn save_images(urls: &[String], dir: &Path, permit: &HashSet<String>) -> (Vec<Option<String>>, usize) {
     let mut saved: Vec<Option<String>> = vec![None; urls.len()];
     let mut failed = 0usize;
@@ -2130,6 +2201,121 @@ mod tests {
         for ip in ["1.1.1.1", "8.8.8.8", "93.184.216.34", "2606:4700:4700::1111"] {
             assert!(!blocked_ip(ip.parse().unwrap()), "{ip}");
         }
+        // The benchmarking range stays blocked as an address. A literal URL uses this
+        // function; a DNS answer for a public name is judged separately below.
+        for ip in ["198.18.0.1", "198.18.1.78", "198.19.255.255", "::ffff:198.18.1.77"] {
+            assert!(blocked_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["198.17.255.255", "198.20.0.1"] {
+            assert!(!blocked_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    #[test]
+    fn a_public_name_answered_with_fake_ip_is_not_a_private_network() {
+        // Clash fake-ip: pbs.twimg.com → 198.18.1.78. The name is still the public host.
+        let permit = HashSet::new();
+        let addr = |ip: &str| SocketAddr::from((ip.parse::<IpAddr>().unwrap(), 443));
+        let pinned = judge_host("pbs.twimg.com", 443, &[addr("198.18.1.78")], &permit, false).unwrap();
+        assert_eq!(pinned, addr("198.18.1.78"));
+        // Mapped IPv6 form of the same pool.
+        let mapped = addr("::ffff:198.18.1.77");
+        let pinned = judge_host("api.fxtwitter.com", 443, &[mapped], &permit, false).unwrap();
+        assert_eq!(pinned, SocketAddr::new(mapped.ip(), 443));
+        // A real public answer wins over a fake-ip one, so a mixed resolver is not pinned
+        // into the benchmarking range.
+        let pinned = judge_host(
+            "pbs.twimg.com",
+            443,
+            &[addr("198.18.1.78"), addr("93.184.216.34")],
+            &permit,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pinned.ip(), "93.184.216.34".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn a_literal_fake_ip_or_a_real_private_answer_is_still_refused() {
+        let permit = HashSet::new();
+        let addr = |ip: &str| SocketAddr::from((ip.parse::<IpAddr>().unwrap(), 80));
+        // The URL itself is 198.18.x.x. That is not a public name with a fake-ip answer.
+        let literal = judge_host("198.18.1.78", 80, &[addr("198.18.1.78")], &permit, true)
+            .unwrap_err()
+            .message();
+        assert!(literal.starts_with("NEED_PRIVATE\t198.18.1.78"), "{literal}");
+        // One private answer beside the fake-ip is enough: that is rebinding, not Clash.
+        for extra in ["127.0.0.1", "10.0.0.1", "192.168.0.1", "169.254.169.254", "::1"] {
+            let err = judge_host("pbs.twimg.com", 443, &[addr("198.18.1.78"), addr(extra)], &permit, false)
+                .unwrap_err()
+                .message();
+            assert!(err.starts_with("NEED_PRIVATE\tpbs.twimg.com"), "{extra}: {err}");
+        }
+        // Allowing the article host does not allow the image host. That split is why a
+        // fake-ip machine could save the post and still drop every picture.
+        let article_only = HashSet::from([host_key("api.fxtwitter.com")]);
+        let err = judge_host("pbs.twimg.com", 443, &[addr("10.1.2.3")], &article_only, false)
+            .unwrap_err()
+            .message();
+        assert!(err.starts_with("NEED_PRIVATE\tpbs.twimg.com"), "{err}");
+        let ok = judge_host("api.fxtwitter.com", 443, &[addr("198.18.1.77")], &article_only, false);
+        assert!(ok.is_ok(), "{ok:?}");
+    }
+
+    #[test]
+    fn a_public_url_is_fetched_through_a_loopback_proxy_and_a_literal_intranet_url_is_not() {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::clone(&hits);
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                seen.fetch_add(1, Ordering::Relaxed);
+                let mut buf = [0u8; 2048];
+                let _ = std::io::Read::read(&mut stream, &mut buf);
+                let body = b"proxied-image";
+                let head = format!(
+                    "HTTP/1.0 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(body);
+            }
+        });
+
+        let proxy = reqwest::Proxy::all(format!("http://127.0.0.1:{port}")).unwrap();
+        // A public literal never needs DNS. The bytes have to come from the loopback
+        // proxy; a direct connection to this address would not say "proxied-image".
+        let got = tauri::async_runtime::block_on(fetch_limited(
+            "http://93.184.216.34/mdpad-probe",
+            1024,
+            std::time::Duration::from_secs(5),
+            &HashSet::new(),
+            Some(proxy.clone()),
+        ))
+        .unwrap();
+        assert_eq!(got.bytes, b"proxied-image");
+        assert_eq!(hits.load(Ordering::Relaxed), 1, "the public URL never reached the proxy");
+
+        // The proxy is not a permit for an intranet target. Nothing new should be accepted.
+        let fetched = tauri::async_runtime::block_on(fetch_limited(
+            "http://198.18.1.78/secret",
+            1024,
+            std::time::Duration::from_secs(5),
+            &HashSet::new(),
+            Some(proxy),
+        ));
+        let Err(err) = fetched else {
+            panic!("a literal fake-ip URL must not be downloaded");
+        };
+        let err = err.message();
+        assert!(err.starts_with("NEED_PRIVATE\t198.18.1.78"), "{err}");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert_eq!(hits.load(Ordering::Relaxed), 1, "a literal fake-ip URL must not be sent to the proxy");
     }
 
     #[test]

@@ -1,0 +1,12 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "doc-0",
+        "title": "MarkCune",
+        "url": "index.html",
+        "dragDropEnabled": false
+      }
+    ]
+  }
+}

@@ -15,10 +15,19 @@
         document.documentElement.dataset.theme = dark ? 'dark' : 'light';
         document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
       })();
+      // Android only, before first paint. Desktop never gets this class or the viewport tag.
+      if (/Android/i.test(navigator.userAgent)) {
+        document.documentElement.classList.add('android');
+        const viewport = document.createElement('meta');
+        viewport.name = 'viewport';
+        viewport.content = 'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content';
+        document.head.appendChild(viewport);
+      }
     </script>
   </head>
   <body>
     <main id="workspace">
+      <button id="drawer-backdrop" type="button" hidden aria-label="关闭文件列表"></button>
       <aside id="sidebar">
         <div class="sidebar-top" data-tauri-drag-region>
           <button id="sidebar-search" class="icon-button" title="快速打开"></button>

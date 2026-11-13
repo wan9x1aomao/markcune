@@ -421,7 +421,12 @@ pub async fn save_as(window: WebviewWindow, content: String) -> Result<Option<Op
     let (current, root, draft_id) =
         with_win(&app, &label, |w| (w.doc.clone(), w.root.clone(), w.draft_id.clone())).unwrap_or_default();
 
-    let mut dialog = app.dialog().file().add_filter("Markdown 文稿", &["md", "markdown"]).set_parent(&window);
+    let mut dialog = app.dialog().file().add_filter("Markdown 文稿", &["md", "markdown"]);
+    // Dialog parenting is a desktop API. Android still gets the system save picker.
+    #[cfg(desktop)]
+    {
+        dialog = dialog.set_parent(&window);
+    }
     let directory = current.as_ref().and_then(|p| p.parent().map(Path::to_path_buf)).or(root);
     if let Some(dir) = directory {
         dialog = dialog.set_directory(dir);

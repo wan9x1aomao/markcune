@@ -1,3 +1,13 @@
 [build]
 # ".noindex" keeps Spotlight (and Launch Services) away from the debug/release app bundles.
 target-dir = "target.noindex"
+
+# cpal's Android backend (oboe) is C++. The NDK linker leaves libc++ ABI symbols
+# (`__cxa_pure_virtual` and friends) unresolved, and Android's libc does not provide
+# them, so the activity dies in `System.loadLibrary` unless we ship libc++_shared.
+# These flags apply only to the Android targets. Desktop links are unchanged.
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-lc++_shared"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-lc++_shared"]

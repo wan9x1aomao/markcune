@@ -212,12 +212,39 @@ pub fn ai_configure(
 /// Shared by the voice module: one connection pool for every outbound call.
 pub(crate) fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
-    })
+    CLIENT.get_or_init(build_client)
+}
+
+/// Desktop uses reqwest's default rustls (aws-lc plus the platform verifier).
+/// Android cannot: aws-lc does not cross-compile reliably, and
+/// `rustls-platform-verifier` panics until a JNI `Context` is installed
+/// (`Expect rustls-platform-verifier to be initialized`). The spike uses ring
+/// and the Mozilla root set so a request can actually leave the device.
+#[cfg(not(target_os = "android"))]
+fn build_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+#[cfg(target_os = "android")]
+fn build_client() -> reqwest::Client {
+    let provider = rustls::crypto::ring::default_provider();
+    let _ = provider.clone().install_default();
+    let provider = std::sync::Arc::new(provider);
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add_parsable_certificates(webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().cloned());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .expect("ring supports the default TLS versions")
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .use_preconfigured_tls(config)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
 }
 
 fn clip(text: &str, max: usize) -> String {

@@ -70,10 +70,13 @@ export function buildManifest({ version, notes, base, pubDate, signatures }) {
 
 function readSignature(path) {
   const text = readFileSync(path, 'utf8');
-  if (!text.startsWith('untrusted comment:')) {
-    throw new Error(`签名文件不是 minisign 签名：${path}`);
-  }
-  return text;
+  if (text.startsWith('untrusted comment:')) return text;
+  // Tauri writes the minisign text as one base64 line. The updater has always
+  // verified the contents of that file, so latest.json must keep this form.
+  const trimmed = text.trim();
+  const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+  if (decoded.startsWith('untrusted comment:')) return trimmed;
+  throw new Error(`签名文件不是 minisign 签名：${path}`);
 }
 
 // Copy the signed bytes to the fixed names, write latest.json from those

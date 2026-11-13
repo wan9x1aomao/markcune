@@ -170,6 +170,32 @@ try {
   assert.throws(() => assertAssetNames([...fixedAssets, versioned]), /不一致/);
   assert.doesNotThrow(() => assertAssetNames(fixedAssets));
   assert.throws(() => extraAssets([{ name: 'extra.txt' }]), /apiUrl/);
+
+  const outB64 = join(dir, 'out-b64');
+  const stageB64 = join(dir, 'stage-b64');
+  mkdirSync(outB64);
+  mkdirSync(stageB64);
+  const b64 = (label) => Buffer.from(sig(label), 'utf8').toString('base64');
+  writeFileSync(join(outB64, sources.dmg), 'dmg-bytes');
+  writeFileSync(join(outB64, sources.mac), 'tar-bytes');
+  writeFileSync(join(outB64, `${sources.mac}.sig`), b64('mac'));
+  writeFileSync(join(outB64, sources.win), 'exe-bytes');
+  writeFileSync(join(outB64, `${sources.win}.sig`), b64('win'));
+  writeFileSync(join(outB64, sources.linux), 'appimage-bytes');
+  writeFileSync(join(outB64, `${sources.linux}.sig`), b64('linux'));
+  writeFileSync(join(outB64, sources.deb), 'deb-bytes');
+  stageReleaseAssets({
+    out: outB64,
+    stage: stageB64,
+    base: GITHUB_LATEST,
+    version: '9.9.9',
+    notes: '说明',
+    sources,
+    pubDate: '2026-11-13T00:00:00.000Z',
+  });
+  const latestB64 = JSON.parse(readFileSync(join(stageB64, FIXED.latest), 'utf8'));
+  assert.equal(latestB64.platforms['darwin-aarch64'].signature, b64('mac'));
+  assert.equal(readFileSync(join(stageB64, `${FIXED.macTar}.sig`), 'utf8'), b64('mac'));
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

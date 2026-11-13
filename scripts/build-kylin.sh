@@ -207,6 +207,8 @@ printf '   架构    %s\n   基线    glibc %s\n   链接器  %s\n' "$ARCH" "$GL
 # 和 build.yml 保持一致：更新地址来自 release.conf，写进二进制就不能再改。
 # shellcheck disable=SC1091
 source scripts/release.conf
+UPDATE_ENDPOINT=${UPDATE_ENDPOINT%$'\r'}
+TIDY_URL=${TIDY_URL%$'\r'}
 export MDPAD_UPDATE_ENDPOINT="$UPDATE_ENDPOINT"
 if [ -n "${TIDY_URL:-}" ]; then export MDPAD_TIDY_URL="$TIDY_URL"; fi
 printf '\n   更新地址 %s\n   一键整理 %s\n' "$MDPAD_UPDATE_ENDPOINT" "${MDPAD_TIDY_URL:-未配置（只做规则整理）}"

@@ -24,6 +24,13 @@ if [[ -z "${HTTPS_PROXY:-}" ]] && scutil --proxy 2>/dev/null | grep -q "HTTPSEna
 fi
 SITE_DIR=""
 source scripts/release.conf
+# Git for Windows checks this file out as CRLF. A trailing CR would be compiled into the update URL.
+UPDATE_ENDPOINT=${UPDATE_ENDPOINT%$'\r'}
+DOWNLOAD_BASE_URL=${DOWNLOAD_BASE_URL%$'\r'}
+SITE_DIR=${SITE_DIR%$'\r'}
+SIGNING_KEY_FILE=${SIGNING_KEY_FILE%$'\r'}
+TIDY_URL=${TIDY_URL:-}
+TIDY_URL=${TIDY_URL%$'\r'}
 [[ -n "$UPDATE_ENDPOINT" && -n "$DOWNLOAD_BASE_URL" ]] || { echo "请先在 scripts/release.conf 里填写 UPDATE_ENDPOINT 和 DOWNLOAD_BASE_URL"; exit 1; }
 [[ -f "$SIGNING_KEY_FILE" ]] || { echo "找不到签名私钥：$SIGNING_KEY_FILE"; exit 1; }
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "版本号格式应为 x.y.z"; exit 1; }

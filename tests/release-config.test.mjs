@@ -21,7 +21,10 @@ const read = (path) => readFileSync(new URL(path, root), 'utf8');
 
 function readConf(text) {
   const out = {};
-  for (const line of text.split('\n')) {
+  // Git for Windows checks text out as CRLF. `.` does not match CR, so a `$` anchor
+  // misses the assignment and the endpoint looks unset.
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\r$/, '');
     const quoted = line.match(/^([A-Z0-9_]+)="(.*)"$/);
     if (quoted) {
       out[quoted[1]] = quoted[2];
@@ -34,7 +37,9 @@ function readConf(text) {
 }
 
 const GITHUB_LATEST = 'https://github.com/wan9x1aomao/markcune/releases/latest/download';
-const conf = readConf(read('scripts/release.conf'));
+const confText = read('scripts/release.conf');
+const conf = readConf(confText);
+assert.deepEqual(readConf(confText.replace(/\n/g, '\r\n')), conf, 'CRLF 检出时配置值不能带上回车');
 assert.equal(conf.UPDATE_ENDPOINT, `${GITHUB_LATEST}/latest.json`);
 assert.equal(conf.DOWNLOAD_BASE_URL, GITHUB_LATEST);
 assert.equal(conf.SITE_DIR, '', 'SITE_DIR 默认为空，不再写入 WorkBuddy 目录');
@@ -64,6 +69,8 @@ const ymlBuild = buildYml.indexOf('npx tauri build', ymlExport);
 assert.ok(ymlExport > 0 && ymlBuild > ymlExport, 'Windows / Linux 打包也要注入同一个更新地址');
 assert.match(buildYml, /source scripts\/release\.conf/);
 assert.ok(read('scripts/build-kylin.sh').includes('export MDPAD_UPDATE_ENDPOINT="$UPDATE_ENDPOINT"'));
+assert.ok(releaseSh.includes("UPDATE_ENDPOINT=${UPDATE_ENDPOINT%$'\\r'}"));
+assert.ok(buildYml.includes("UPDATE_ENDPOINT=${UPDATE_ENDPOINT%$'\\r'}"));
 
 const updateRs = read('src-tauri/src/update.rs');
 assert.match(updateRs, /option_env!\("MDPAD_UPDATE_ENDPOINT"\)/);
@@ -173,7 +180,7 @@ const names = spawnSync(process.execPath, ['scripts/github-release-assets.mjs', 
   encoding: 'utf8',
 });
 assert.equal(names.status, 0, names.stderr);
-assert.deepEqual(names.stdout.trim().split('\n'), releaseAssetNames());
+assert.deepEqual(names.stdout.replace(/\r\n/g, '\n').trim().split('\n'), releaseAssetNames());
 
 const bad = spawnSync(process.execPath, ['scripts/github-release-assets.mjs', 'check-assets', join(dir, 'missing.json')], {
   cwd: repo,

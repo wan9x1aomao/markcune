@@ -107,6 +107,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           source scripts/release.conf
+          # Checkout on Windows is CRLF. A trailing CR must not be compiled into the update URL.
+          UPDATE_ENDPOINT=${UPDATE_ENDPOINT%$'\r'}
+          TIDY_URL=${TIDY_URL%$'\r'}
           export MDPAD_UPDATE_ENDPOINT="$UPDATE_ENDPOINT"
           # 「一键整理」的网关地址，和 macOS 本机打包取自同一个 release.conf。
           # 留空则不注入，这一版的 Windows / Linux 包只做规则整理。

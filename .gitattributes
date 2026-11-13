@@ -1,4 +1,7 @@
 # tests/rebrand.test.mjs matches adjacent lines in this lockfile. Keep LF on Windows.
 src-tauri/Cargo.lock text eol=lf
+# Bash sources these. A CRLF checkout would bake a trailing CR into the update URL.
+scripts/release.conf text eol=lf
+scripts/*.sh text eol=lf
 THIRD-PARTY-NOTICES.md text eol=lf
 src/licenses-text.js text eol=lf

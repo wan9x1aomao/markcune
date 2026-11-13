@@ -43,11 +43,11 @@ docs/press/
 grep -m1 '"version"' package.json
 grep -m1 '"version"' src-tauri/tauri.conf.json
 
-# 已发布的版本与日期
-cat ../mdpad-site/latest.json
+# 已发布的版本与日期。草稿发布之后，/releases/latest 才指向这一版。
+curl -fsSL https://github.com/wan9x1aomao/markcune/releases/latest/download/latest.json
 
-# 安装包体积：按真实文件算，四舍五入到 0.1 MB
-ls -lh ../mdpad-site/downloads/
+# 安装包体积：按真实文件算，四舍五入到 0.1 MB。文件名是固定的，不带版本号。
+# 本机刚跑完发版脚本时，也可以看 release/<版本号>/。
 ```
 
 - **体积按文件写**，不要写「每个平台都不到 8 MB」这种概括句——AppImage 因为内置 WebKitGTK 是 81 MB，一写就错。

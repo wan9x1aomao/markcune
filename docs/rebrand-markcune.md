@@ -49,7 +49,7 @@
 | Home 兜底目录 | `~/.mdpad/` | 同上 |
 | 环境变量 | `MDPAD_DATA_DIR`、`MDPAD_LIBRARY_DIR`、`MDPAD_UPDATE_ENDPOINT`、`MDPAD_TIDY_URL`、`MDPAD_AI_*`、`MDPAD_TEST_*` | 发布脚本、CI、网关、测试共同依赖的契约 |
 | 签名私钥 | `~/.tauri/mdpad.key` | 已发布的更新包靠它签名；换路径不能换私钥 |
-| 更新端点 / 下载地址 / 官网本地目录 | `mdpad.app.workbuddy.host`、`$HOME/mdpad-site` | 3.5.x 客户端只认旧地址，新域名就绪前不能断 |
+| 更新端点 / 下载地址 | `https://github.com/wan9x1aomao/markcune/releases/latest/download/` | 2026-11-12 从已 403 的 workbuddy 迁来。4.0.6 起写进安装包，之后不要再改。4.0.5 及更早仍是旧地址 |
 | localStorage / 插件键 / DOM 类 / 调试全局 | `mdpad-theme`、`mdpad-*`、`__mdpadDebug`、`__mdpadExport`、`mdpad-img:` 等 | 存的是用户数据和测试契约，改名要迁移 |
 | 历史发布物 | `release/` 下旧版本、历史 tag、`docs/press/3.5.2.md` | 历史记录保留旧名，不改写 |
 | 测试专用 ObjC 类名 / 临时文件后缀 | `MDPadTestDraggingInfo`、`.mdpad-tmp` 等 | 仅测试与临时文件，对用户不可见 |
@@ -58,7 +58,7 @@
 
 ## 5. 这次先不动的过渡项
 
-- **域名**：`markcune.com / .md / .app / .cn` 待注册；注册并部署前，README / 应用里的官网链接继续指向旧地址，并注明“过渡期”。
+- **域名**：`markcune.com / .md / .app / .cn` 待注册。README 的下载链接已改为 GitHub Release。应用内的官网链接仍指向旧地址（该站现已 403），换域名之前可以再改到 Release 页。
 - **GitHub 仓库**：已改为 `wan9x1aomao/markcune`。旧地址自动跳转到新仓库，不必等域名与站点就绪。
 - **图标 / 字标**：MarkCune 的视觉应从“楔形刻痕 / 文本光标”出发，不用毛笔与墨痕；本次只改原型，正式图标另起一轮。
 - **升级方式（发布 4.0.0 时曾用 B，2026-10-29 已恢复自动更新）**：发布 4.0.0 时不推自动更新，旧站 `latest.json` 停在 3.5.6；官网手动下载并提示先卸载旧版。新站就绪后已改回自动更新，发版流程见 [多平台更名清单](rebrand-platforms.md) 第 6 节。

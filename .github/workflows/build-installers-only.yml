@@ -63,6 +63,8 @@ jobs:
             exit 1
           fi
           source scripts/release.conf
+          UPDATE_ENDPOINT=${UPDATE_ENDPOINT%$'\r'}
+          TIDY_URL=${TIDY_URL%$'\r'}
           export MDPAD_UPDATE_ENDPOINT="$UPDATE_ENDPOINT"
           if [ -n "${TIDY_URL:-}" ]; then export MDPAD_TIDY_URL="$TIDY_URL"; fi
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")

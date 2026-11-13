@@ -1,6 +1,16 @@
-//! In-app updates. The update URL is baked in at build time (MDPAD_UPDATE_ENDPOINT, set by
-//! scripts/release.sh); builds without it simply report that updates are not configured.
-//! Updates are signed; tauri.conf.json carries the public key.
+//! In-app updates. The update URL is baked in at build time from `MDPAD_UPDATE_ENDPOINT`.
+//! `scripts/release.sh` and `.github/workflows/build.yml` export `UPDATE_ENDPOINT` from
+//! `scripts/release.conf` before `tauri build`; `build.rs` makes Cargo rebuild when that
+//! variable changes. `tauri.conf.json` has the public key and no `endpoints` entry, so this
+//! constant is the only URL. Builds without it report that updates are not configured.
+//!
+//! The release endpoint is GitHub's `releases/latest/download/latest.json`. Fetching it, and
+//! fetching each package URL in the manifest, answers with two 302s: first to
+//! `/releases/download/<tag>/<file>`, then to `release-assets.githubusercontent.com`.
+//! tauri-plugin-updater 2.13 builds its client with `reqwest::ClientBuilder::new()` and does
+//! not change the redirect policy, so reqwest follows up to 10 redirects by default. A draft
+//! release is not part of `/releases/latest`; the URL starts serving this build once the
+//! draft is published.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;

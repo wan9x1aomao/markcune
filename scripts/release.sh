@@ -1,12 +1,16 @@
 #!/bin/bash
 # 发布一个新版本：macOS 在本机打包，Windows 和 Linux 由 GitHub Actions 打包，
-# 然后生成三平台共用的 latest.json，并更新官网目录。
+# 然后生成三平台共用的 latest.json，并把它和固定文件名的安装包上传到草稿 Release。
 #
-#   scripts/release.sh <版本号> [更新说明]
-#   例如：scripts/release.sh 3.3.0 "修复了若干问题"
+#   KEEP_RELEASE=1 scripts/release.sh <版本号> [更新说明]
+#   例如：KEEP_RELEASE=1 scripts/release.sh 4.0.6 "修复了若干问题"
 #
 # 需要：已登录 gh（~/.local/bin/gh auth login）、改动都已提交、scripts/release.conf 已填写。
-# 生成的文件在 release/<版本号>/，配置了 SITE_DIR 时会直接放进官网目录。
+# 生成的文件在 release/<版本号>/（版本号文件名，本地归档）。
+# GitHub Release 上只留固定文件名，这样 releases/latest/download/<文件名> 在草稿发布后能对上。
+# SITE_DIR 留空则不写本地站点；填了目录才走原来的站点复制。
+# 草稿默认保留。发布更新：gh release edit v<版本号> --draft=false
+# 只有 KEEP_RELEASE=0 会删掉草稿（连同更新文件一起删掉）。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -154,36 +158,22 @@ for file in "$WIN" "$WIN.sig" "$LINUX" "$LINUX.sig" "$DEB"; do
   [[ -f "$OUT/$file" ]] || { echo "缺少 $file"; exit 1; }
 done
 
-# The site serves each platform under one fixed name, overwritten on every release; release/<版本号>/
-# keeps the versioned names as an archive. Signatures cover file contents, so renaming keeps them valid.
-SITE_MAC_DMG="MarkCune-macOS-arm64.dmg"
-SITE_MAC="MarkCune-macOS-arm64.tar.gz"
-SITE_WIN="MarkCune-windows-x64-setup.exe"
-SITE_LINUX="MarkCune-linux-x86_64.AppImage"
-SITE_DEB="MarkCune-linux-amd64.deb"
-
-# 3. One latest.json for every platform (non-ASCII escaped so any viewer shows it correctly).
-# Signatures come from the versioned files in $OUT; urls point at the fixed names on the site.
-# 这份清单是给新站 / 后续自动更新用的：MANUAL_UPGRADE=1 时只留在 release/ 里，不复制到旧站。
+# Fixed names are what releases/latest/download/<name> serves. Versioned names stay in
+# release/<版本号>/ as a local archive. Signatures cover file bytes, so the rename stays valid.
+# 3. latest.json + the fixed-name copies. MANUAL_UPGRADE=1 still writes latest.json locally
+#    but does not upload it, so publishing the draft does not arm an automatic update.
+# Always pass one flag. An empty "${array[@]}" under set -u aborts on macOS bash 3.2.
+ASSET_ARGS=(--latest)
+if [[ "${MANUAL_UPGRADE:-0}" == "1" ]]; then
+  ASSET_ARGS=(--no-latest)
+fi
+STAGE=$(mktemp -d "${TMPDIR:-/tmp}/markcune-release.XXXXXX")
+trap 'rm -rf "$STAGE"' EXIT
+# 这些赋值只作用于这一条 node 命令。shell 里的 MAC / WIN / LINUX / DEB 仍是带版本号的文件名。
 VERSION="$VERSION" NOTES="$NOTES" BASE="$DOWNLOAD_BASE_URL" OUT="$OUT" \
-  MAC="$MAC.tar.gz" WIN="$WIN" LINUX="$LINUX" \
-  SITE_MAC="$SITE_MAC" SITE_WIN="$SITE_WIN" SITE_LINUX="$SITE_LINUX" node -e '
-  const fs = require("fs");
-  const { VERSION, NOTES, BASE, OUT, MAC, WIN, LINUX, SITE_MAC, SITE_WIN, SITE_LINUX } = process.env;
-  const entry = (file, name) => ({ signature: fs.readFileSync(`${OUT}/${file}.sig`, "utf8"), url: `${BASE}/${name}` });
-  const manifest = {
-    version: VERSION,
-    notes: NOTES,
-    pub_date: new Date().toISOString(),
-    platforms: {
-      "darwin-aarch64": entry(MAC, SITE_MAC),
-      "windows-x86_64": entry(WIN, SITE_WIN),
-      "linux-x86_64": entry(LINUX, SITE_LINUX),
-    },
-  };
-  const text = JSON.stringify(manifest, null, 2).replace(/[\u0080-￿]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
-  fs.writeFileSync(`${OUT}/latest.json`, text + "\n");'
-rm "$OUT"/*.sig
+  DMG="$MAC.dmg" MAC="$MAC.tar.gz" WIN="$WIN" LINUX="$LINUX" DEB="$DEB" \
+  node scripts/github-release-assets.mjs stage "$STAGE" "${ASSET_ARGS[@]}"
+rm -f "$OUT"/*.sig
 
 echo
 echo "已生成 ${OUT}："
@@ -191,24 +181,17 @@ ls -lh "$OUT" | tail -n +2
 
 if [[ "${MANUAL_UPGRADE:-0}" == "1" ]]; then
   echo
-  echo "MANUAL_UPGRADE=1：本次按手动升级发布，旧站保持不动。"
-  echo "  ${SITE_DIR:-旧官网目录} 不写入任何文件，旧站 latest.json 继续是 3.5.6，"
-  echo "  3.5.6 客户端不会收到更新提示，也不会自动装到 4.0.0。"
-  echo
-  echo "新官网就绪后，把这些文件按固定名放到新站 downloads/："
-  echo "  $MAC.dmg → $SITE_MAC_DMG"
-  echo "  $MAC.tar.gz → $SITE_MAC"
-  echo "  $WIN → $SITE_WIN"
-  echo "  $LINUX → $SITE_LINUX"
-  echo "  $DEB → $SITE_DEB"
-  echo "  再把 ${OUT}/latest.json 放到新站更新地址（${UPDATE_ENDPOINT}）。"
-  echo
-  echo "下载页必须写清：macOS 先删掉旧的 MDPad.app；Windows 先卸载旧版 MDPad 再装；"
-  echo "Linux 的 .deb 会自动替换旧包，AppImage 手动删掉旧文件。"
-  echo "新站上线前不要放出这份 latest.json，也不要把 4.0.0 的包挂到旧站。"
+  echo "MANUAL_UPGRADE=1：latest.json 只留在 ${OUT}，不上传到 Release，也不写入站点。"
+  echo "  发布这个草稿不会替换 ${UPDATE_ENDPOINT}。"
 elif [[ -n "$SITE_DIR" ]]; then
   # Pages are checked before latest.json or the packages replace the live copies.
   # A failure leaves the previous HTML, JSON and packages in place.
+  # These names match scripts/github-release-assets.mjs (FIXED) and scripts/update-site.mjs.
+  SITE_MAC_DMG="MarkCune-macOS-arm64.dmg"
+  SITE_MAC="MarkCune-macOS-arm64.tar.gz"
+  SITE_WIN="MarkCune-windows-x64-setup.exe"
+  SITE_LINUX="MarkCune-linux-x86_64.AppImage"
+  SITE_DEB="MarkCune-linux-amd64.deb"
   if [[ -f "$SITE_DIR/index.html" ]]; then
     node scripts/update-site.mjs "$SITE_DIR" "$VERSION" \
       "mac=$OUT/$MAC.dmg" "windows=$OUT/$WIN" "linux=$OUT/$LINUX" "deb=$OUT/$DEB" \
@@ -223,50 +206,107 @@ elif [[ -n "$SITE_DIR" ]]; then
     cp "$OUT/latest.json" "$SITE_DIR/latest.json"
   fi
   echo
-  echo "已放入官网目录 ${SITE_DIR}，用 WorkBuddy 重新发布这个目录即可。"
+  echo "已额外放入站点目录 ${SITE_DIR}。自动更新不读这个目录，读的是 GitHub Release。"
 else
   echo
-  echo "发布步骤：把 latest.json 以外的文件改成固定文件名后上传到 ${DOWNLOAD_BASE_URL}/，再把 latest.json 上传到 ${UPDATE_ENDPOINT}："
-  echo "  $MAC.dmg → $SITE_MAC_DMG"
-  echo "  $MAC.tar.gz → $SITE_MAC"
-  echo "  $WIN → $SITE_WIN"
-  echo "  $LINUX → $SITE_LINUX"
-  echo "  $DEB → $SITE_DEB"
+  echo "SITE_DIR 为空，不写本地站点目录。"
 fi
 
-# 4. 删掉本次的草稿 Release。它只是 Windows / Linux 产物的搬运工：资产已经收进
-#    release/<版本号>/，也进了官网目录，留着只会一版一个地堆着（2026-10-17 一次清过 8 个）。
-#    想让某个版本在 GitHub 上留一份正式 Release，用 KEEP_RELEASE=1 跑（草稿会留着，
-#    之后 gh release edit v<版本号> --draft=false 发布）；历史版本靠 git tag 记录。
-cleanup_draft() {
+# 4. The draft Release is the update server. CI already uploaded versioned Windows / Linux
+#    names; replace the asset list with the fixed names (and latest.json) and drop the rest.
+upload_github_release() {
+  local expected="$STAGE/expected.txt"
+  local -a files
+  local name uploaded="" attempt assets extra
+  files=()
+  node scripts/github-release-assets.mjs names "${ASSET_ARGS[@]}" > "$expected"
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    [[ -f "$STAGE/$name" ]] || { echo "缺少待上传文件 $name"; exit 1; }
+    files+=("$STAGE/$name")
+  done < "$expected"
+  [[ ${#files[@]} -gt 0 ]] || { echo "没有要上传的文件"; exit 1; }
+
+  for attempt in 1 2 3; do
+    if "$GH" release upload "v$VERSION" "${files[@]}" --clobber; then
+      uploaded=1
+      break
+    fi
+    echo "上传 GitHub Release 中断（第 $attempt 次），5 秒后重试…"
+    sleep 5
+  done
+  [[ -n "$uploaded" ]] || { echo "没能上传到草稿 Release v$VERSION"; exit 1; }
+
+  assets=$("$GH" release view "v$VERSION" --json assets)
+  printf '%s' "$assets" > "$STAGE/assets.json"
+  node scripts/github-release-assets.mjs extra-assets "$STAGE/assets.json" "${ASSET_ARGS[@]}" > "$STAGE/extra.tsv"
+  while IFS=$'\t' read -r name extra; do
+    [[ -n "$name" ]] || continue
+    echo "从 Release 去掉重复资产：$name"
+    "$GH" api -X DELETE "$extra" >/dev/null
+  done < "$STAGE/extra.tsv"
+
+  local ok=""
+  for attempt in 1 2 3; do
+    "$GH" release view "v$VERSION" --json assets > "$STAGE/assets.json"
+    if node scripts/github-release-assets.mjs check-assets "$STAGE/assets.json" "${ASSET_ARGS[@]}"; then
+      ok=1
+      break
+    fi
+    echo "资产列表还没对上（第 $attempt 次），2 秒后重试…"
+    sleep 2
+  done
+  [[ -n "$ok" ]] || { echo "草稿 Release v$VERSION 的资产和固定文件名不一致，先不要发布"; exit 1; }
+
+  echo
+  echo "草稿 Release v${VERSION} 的资产已与固定文件名一致："
+  node scripts/github-release-assets.mjs names "${ASSET_ARGS[@]}"
+}
+upload_github_release
+rm -rf "$STAGE"
+
+# Notes only. --draft=false is what publishes; this edit leaves the draft as a draft.
+if [[ -n "$NOTES" ]]; then
+  "$GH" release edit "v$VERSION" --title "MarkCune $VERSION" --notes "$NOTES" \
+    || echo "更新 Release 说明失败。资产已经在草稿上，可以稍后自己改说明。"
+fi
+
+# 草稿就是更新源，默认留下。KEEP_RELEASE=1 与不设置都保留；KEEP_RELEASE=0 才删除。
+finish_release() {
   local is_draft
-  if [[ -n "${KEEP_RELEASE:-}" ]]; then
-    echo
-    echo "KEEP_RELEASE=1：保留草稿 Release v${VERSION}，要发布就执行 $GH release edit v${VERSION} --draft=false"
+  if [[ "${KEEP_RELEASE:-1}" == "0" ]]; then
+    is_draft=$("$GH" release view "v$VERSION" --json isDraft --jq .isDraft 2>/dev/null || true)
+    case "$is_draft" in
+      true)
+        # 草稿的 tag 还没在远端创建，不要加 --cleanup-tag：删一个不存在的 tag 会非零退出。
+        "$GH" release delete "v$VERSION" --yes >/dev/null 2>&1 || true
+        if [[ -z "$("$GH" release view "v$VERSION" --json tagName --jq .tagName 2>/dev/null || true)" ]]; then
+          echo
+          echo "KEEP_RELEASE=0：已删除草稿 Release v${VERSION}。更新文件只留在 ${OUT}，/releases/latest 不会指向这一版。"
+        else
+          echo
+          echo "草稿 Release v$VERSION 没能自动删除，可手动执行：$GH release delete v$VERSION --yes"
+        fi
+        ;;
+      false)
+        echo
+        echo "Release v$VERSION 已经是正式版，未删除"
+        ;;
+      *)
+        echo
+        echo "没有找到 v$VERSION 的 Release，跳过清理"
+        ;;
+    esac
     return 0
   fi
-  is_draft=$("$GH" release view "v$VERSION" --json isDraft --jq .isDraft 2>/dev/null || true)
-  case "$is_draft" in
-    true)
-      # 草稿的 tag 还没在远端创建（gh 给的是 untagged-… 占位），所以不要加 --cleanup-tag：
-      # 它去删一个不存在的 tag 会以非零码退出，让成功删除被误判成失败。删完按实际状态复核。
-      "$GH" release delete "v$VERSION" --yes >/dev/null 2>&1 || true
-      if [[ -z "$("$GH" release view "v$VERSION" --json tagName --jq .tagName 2>/dev/null || true)" ]]; then
-        echo
-        echo "已删除草稿 Release v${VERSION}（资产保留在 ${OUT} 和官网目录）"
-      else
-        echo
-        echo "草稿 Release v$VERSION 没能自动删除，可手动执行：$GH release delete v$VERSION --yes"
-      fi
-      ;;
-    false)
-      echo
-      echo "Release v$VERSION 已经是正式版，未删除"
-      ;;
-    *)
-      echo
-      echo "没有找到 v$VERSION 的 Release，跳过清理"
-      ;;
-  esac
+  echo
+  echo "草稿 Release v${VERSION} 已留好。草稿不会出现在 /releases/latest。"
+  echo "要让这一版对外提供更新，执行："
+  echo "  $GH release edit v${VERSION} --draft=false"
+  if [[ "${MANUAL_UPGRADE:-0}" == "1" ]]; then
+    echo "MANUAL_UPGRADE=1：这次没有上传 latest.json。发布后 /releases/latest 只会带上安装包，不会推送自动更新。"
+  else
+    echo "发布之后，/releases/latest 才指向 v${VERSION}，${DOWNLOAD_BASE_URL}/ 下的固定文件名和 latest.json 才会被客户端读到。"
+  fi
 }
-cleanup_draft
+finish_release

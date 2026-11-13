@@ -36,7 +36,7 @@ jobs:
             exit 1
           fi
           if [ "$EXISTING" = "missing" ]; then
-            gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "MarkCune $VERSION" --notes "构建产物，由 scripts/release.sh 收集后发布到官网。"
+            gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "MarkCune $VERSION" --notes "构建产物。scripts/release.sh 会换成固定文件名并写入 latest.json。发布这个草稿后，/releases/latest/download/ 才提供更新。"
           fi
 
   build:

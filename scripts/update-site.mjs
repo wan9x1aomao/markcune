@@ -20,7 +20,8 @@ if (!site || !version) {
 }
 const files = Object.fromEntries(pairs.map((pair) => pair.split('=')));
 
-// Fixed download names, keyed by the data-mdpad link marker. Keep in sync with scripts/release.sh.
+// Fixed download names, keyed by the data-mdpad link marker.
+// Keep in sync with scripts/github-release-assets.mjs (the names the GitHub Release serves).
 // Installed only together with latest.json, after every page has validated.
 const DOWNLOADS = {
   mac: 'MarkCune-macOS-arm64.dmg',

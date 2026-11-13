@@ -4,7 +4,7 @@
 
 MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编辑器。打开就能打字，打下的每个字都留在你自己的硬盘上 —— 不登录、不联网、不上传。
 
-**官网：<https://mdpad.app.workbuddy.host/>**（过渡期，markcune.md 上线后切换）｜ 免费开源（MIT）｜ macOS / Windows / Linux
+**下载：<https://github.com/wan9x1aomao/markcune/releases/latest>** ｜ 免费开源（MIT）｜ macOS / Windows / Linux
 
 > 名称说明：MarkCune 曾用名 MDPad 编辑器，中文语境称「MarkCune 编辑器」；官网域名仍是过渡期地址，功能与本地数据都与旧版一致。
 
@@ -12,7 +12,14 @@ MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编�
 
 ## 下载
 
-安装包在官网：**<https://mdpad.app.workbuddy.host/>**（过渡期，markcune.md 上线后切换）
+安装包在 GitHub Release（发布之后，`/releases/latest` 指向最新一版）：
+
+- [macOS（Apple 芯片）](https://github.com/wan9x1aomao/markcune/releases/latest/download/MarkCune-macOS-arm64.dmg)
+- [Windows](https://github.com/wan9x1aomao/markcune/releases/latest/download/MarkCune-windows-x64-setup.exe)
+- [Linux AppImage](https://github.com/wan9x1aomao/markcune/releases/latest/download/MarkCune-linux-x86_64.AppImage)
+- [Linux .deb](https://github.com/wan9x1aomao/markcune/releases/latest/download/MarkCune-linux-amd64.deb)
+
+旧官网 `mdpad.app.workbuddy.host` 的分享链接已返回 403，不再作为下载或更新地址。
 
 | 平台 | 要求 |
 |---|---|
@@ -20,9 +27,9 @@ MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编�
 | Windows | 10 / 11，使用系统自带的 WebView2 |
 | Linux | 需要 WebKitGTK 4.1（`.deb` 与 `.AppImage` 都提供） |
 
-> 从 3.5.x 升级：自动更新已恢复，3.5.6 的 macOS / Windows / AppImage 客户端会收到 4.0.x；Linux `.deb` 与更名后残留的旧安装项按官网说明处理。由于更名后目录名不同，macOS 更新后仍是 `MDPad.app` 里装着 MarkCune 的内容，建议删掉旧 `MDPad.app` 后重装官网 DMG。设置、AI Key、草稿和书库都会保留。
+> 从已安装的版本升级：4.0.5 及更早的安装包在打包时写死了旧官网的更新地址，不会自己改去 GitHub。4.0.6 发布之后，用上面的链接手动安装一次；这一版起会向 `releases/latest/download/latest.json` 检查更新，之后可以自动更新。在 4.0.6 发布之前，这些链接仍是当前已发布的版本。设置、AI Key、草稿和书库都保留。macOS 上如果应用目录仍叫 `MDPad.app`，建议删掉旧应用后再装 DMG。
 
-历史版本从 [`v3.2.1`](https://github.com/wan9x1aomao/markcune/tags) 起都打了 tag，每个 tag 就是那个版本的源码快照。GitHub Releases 只保留早期版本的安装包；4.0 起的安装包以官网为准，源码仍按 tag 归档。
+历史版本从 [`v3.2.1`](https://github.com/wan9x1aomao/markcune/tags) 起都打了 tag，每个 tag 就是那个版本的源码快照。安装包在对应的 GitHub Release 上。
 
 ## 功能
 
@@ -84,11 +91,13 @@ tests/scenarios.sh                         # 文件操作场景，仅 macOS
 
 ## 自动更新
 
-更新地址在**打包时**通过 `MDPAD_UPDATE_ENDPOINT` 注入（`src-tauri/src/update.rs` 用 `option_env!` 读取）。不设这个变量编出来的包不会检查更新，从源码自己构建可以直接用。签名公钥写在 `src-tauri/tauri.conf.json`，私钥不进仓库。
+更新地址在**打包时**通过 `MDPAD_UPDATE_ENDPOINT` 注入（`src-tauri/src/update.rs` 用 `option_env!` 读取）。`scripts/release.sh` 和 `.github/workflows/build.yml` 在 `tauri build` 之前从 `scripts/release.conf` 的 `UPDATE_ENDPOINT` 导出这个变量；`src-tauri/build.rs` 会在它变化时让 Cargo 重新编译。`tauri.conf.json` 只放签名公钥，不放端点。不设这个变量编出来的包不会检查更新，从源码自己构建可以直接用。私钥不进仓库。
+
+当前端点是 `https://github.com/wan9x1aomao/markcune/releases/latest/download/latest.json`。GitHub 对这个地址以及清单里的安装包地址回复两次 302（先到具体 tag，再到 `release-assets.githubusercontent.com`）。应用内更新用的 tauri-plugin-updater 2.13 通过 reqwest 发请求，没有改重定向策略，默认最多跟随 10 次，这两跳在范围内。草稿 Release 不计入 `/releases/latest`，发布草稿之后这些地址才指向新版本。
 
 检查更新在启动时、窗口回到前台时进行；应用一直留在前台时也会定时复查，频率上限为每 30 分钟一次。旧的 6 小时静默期会让早上检查过的机器整天看不到下午发布的版本，所以改短了。
 
-4.0.0 发布时曾按「手动升级」方案暂停过自动更新；2026-10-29 新官网就绪后已恢复，`scripts/release.conf` 的 `MANUAL_UPGRADE` 为 0，3.5.6 的 macOS / Windows / AppImage 客户端会正常收到 4.0.x。
+4.0.5 及更早的正式包里写的仍是旧官网地址（现已 403）。它们不会自动升到 GitHub 上的版本，需要在 4.0.6 发布后手动安装一次带新地址的包。
 
 ## 一键整理的网关（可选）
 
@@ -116,12 +125,33 @@ tests/scenarios.sh                         # 文件操作场景，仅 macOS
 ## 发版（维护者）
 
 ```bash
-scripts/release.sh <版本号> "更新说明"
+KEEP_RELEASE=1 scripts/release.sh <版本号> "更新说明"
 ```
 
-本地打 macOS 包 → 触发 GitHub Actions 打 Windows / Linux → 收产物、生成 `latest.json`、更新官网目录。需要签名私钥（`~/.tauri/mdpad.key`）和已登录的 `gh`，配置写在 `scripts/release.conf`。**这个脚本只服务于本仓库的发布流程，不是安装或构建 MarkCune 的方式**；从源码构建请用上面的 `npm run build`。
+本地打 macOS 包，同时用现有的 GitHub Actions（`.github/workflows/build.yml`）打 Windows / Linux，收齐产物后生成 `latest.json`，再把**固定文件名**上传到草稿 Release `v<版本号>`（`gh release upload --clobber`）。上传后核对资产列表，并去掉 CI 带上来的带版本号的重复文件。需要签名私钥（`~/.tauri/mdpad.key`）和已登录的 `gh`，配置在 `scripts/release.conf`。**这个脚本只服务于本仓库的发布流程，不是安装或构建 MarkCune 的方式**；从源码构建请用上面的 `npm run build`。
 
-官网目录（`SITE_DIR`）建议用 git 管理：发版脚本会直接改写页面和 `latest.json`，有提交历史才能在改版出错时回滚；`downloads/` 里的安装包体积大、可重新生成，不入库。
+Release 上的文件：
+
+- `MarkCune-macOS-arm64.dmg`
+- `MarkCune-macOS-arm64.tar.gz` 和 `.sig`
+- `MarkCune-windows-x64-setup.exe` 和 `.sig`
+- `MarkCune-linux-x86_64.AppImage` 和 `.sig`
+- `MarkCune-linux-amd64.deb`
+- `latest.json`
+
+`latest.json` 里的地址是 `DOWNLOAD_BASE_URL/<固定文件名>`，签名是这些文件对应的 `.sig`。改名不改变文件内容，签名仍然对得上。带版本号的文件只留在本机 `release/<版本号>/`。
+
+脚本结束时 Release 仍是草稿。对外发布：
+
+```bash
+gh release edit v<版本号> --draft=false
+```
+
+发布之后，`/releases/latest` 才指向这一版，`releases/latest/download/` 下的固定文件名和 `latest.json` 才会被 4.0.6 及以后的客户端读到。
+
+`SITE_DIR` 默认为空，不再写入 WorkBuddy 站点目录。还要同步一份本地站点时，在 `scripts/release.conf` 里填上目录。
+
+4.0.5 及更早的客户端不会跟着这次发布自动更新，需要手动安装一次。
 
 ## 目录
 

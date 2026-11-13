@@ -23,7 +23,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 percent-encoding = "2"
 base64 = "0.22"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "multipart"] }
+# `system-proxy` 读 macOS / Windows 的系统代理（以及 http(s)_proxy 环境变量）。
+# 默认 features 是关的，不点这个的话从访达打开的应用看不到 Clash 设的系统代理，
+# 只能自己解析 DNS。fake-ip 模式下那个解析结果是 198.18/15，会被下面的地址检查拦住。
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "multipart", "system-proxy"] }
 # 只解压 deflate（GitHub 的 zip 用的就是它）。默认 feature 会拖进 zstd / lzma / bzip2，编译很重且用不上。
 zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 # ⚠️ flate2 的后端必须由我们自己点名。zip 的 `deflate-flate2` 只声明"用 flate2 解压"，

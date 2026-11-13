@@ -761,7 +761,9 @@ async function openFromUrl() {
     const result = await withProgress(download);
     if (result.root) await setRoot(result.root);
     await openFile(result.path);
-    toast(downloadNotice(result));
+    // 图片失败时这句话里有张数和重试办法，2.4 秒读不完。
+    const imageFailures = result.kind === 'tweet' && result.skipped;
+    toast(downloadNotice(result), imageFailures ? 8000 : undefined);
   } catch (error) {
     await api.confirm('没有下载成功', String(error), '知道了');
   }

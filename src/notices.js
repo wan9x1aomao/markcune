@@ -3,10 +3,11 @@
 
 // What to say once a link has been downloaded.
 export function downloadNotice({ kind, title, files, skipped, replaced }) {
-  // 帖子：图片是逐张下载的，少数几张拿不到时要说清楚，否则读者会以为原文就没有图。
+  // 帖子：图片是逐张下载的。失败时正文会暂时留着原来的地址，编辑器默认不请求网络图片，
+  // 看起来就像图丢了。张数和「可以再试一次」必须写在这句话里。
   if (kind === 'tweet') {
-    const missing = skipped ? `，另有 ${skipped} 张图片没能下载` : '';
-    return `已下载《${title}》${missing}`;
+    if (!skipped) return `已下载《${title}》`;
+    return `已下载《${title}》，有 ${skipped} 张图片没能下载。再下载一次这个链接即可重试`;
   }
   if (kind !== 'book') return `已下载 ${title}`;
   // A book may carry names this system cannot hold (Windows refuses `?`, `:` and friends); those

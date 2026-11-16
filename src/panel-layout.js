@@ -1,4 +1,3 @@
-import { icons } from './icons.js';
 import { normalizePanelLayout, PANEL_LAYOUTS, resolvePanelLayout } from './panel-layout-model.js';
 
 const labels = { sidebar: '文件', outline: '大纲', content: '正文' };
@@ -11,7 +10,7 @@ export function createPanelLayout({ getSettings, persist, setPanel, beforeChange
   const workspace = document.getElementById('workspace');
   const panels = Object.fromEntries(['sidebar', 'outline'].map(name => [name, document.getElementById(name)]));
   const listeners = new Set();
-  let drawer = null, model, closePopup = null, positionPopup = null, restoration = 0;
+  let drawer = null, model, restoration = 0;
   document.body.classList.add('panels-managed');
   const tabs = document.createElement('div');
   tabs.className = 'panel-dock-tabs'; tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', '文件与大纲');
@@ -57,7 +56,6 @@ export function createPanelLayout({ getSettings, persist, setPanel, beforeChange
     grips.horizontal.hidden = !model.split;
     if (model.split) { rect(grips.horizontal, model.split); grips.horizontal.setAttribute('aria-valuenow', String(Math.round(model.prefs.ratio * 100))); }
     listeners.forEach(fn => fn(controller.get()));
-    positionPopup?.();
   }
   function resizeHandle(side) {
     const handle = document.createElement('button'); handle.type = 'button'; handle.className = `panel-resizer ${side === 'horizontal' ? 'horizontal' : 'vertical'}`;
@@ -95,22 +93,6 @@ export function createPanelLayout({ getSettings, persist, setPanel, beforeChange
     },
     visibility: setPanel,
     mount: (host, options) => mountLayoutControls(host, controller, options),
-    open(anchor) {
-      if (closePopup) { closePopup(); return; }
-      const popup = document.createElement('div'); popup.className = 'popup-menu panel-layout-menu'; popup.setAttribute('role', 'dialog'); popup.setAttribute('aria-label', '面板布局');
-      popup.innerHTML = '<div class="layout-menu-heading"><strong>面板布局</strong><button type="button" class="icon-button" aria-label="关闭布局设置">'+icons.close+'</button></div><div class="layout-controls-host"></div>';
-      document.body.appendChild(popup);
-      const dispose = controller.mount(popup.querySelector('.layout-controls-host'), { onPreset: () => closePopup?.() });
-      positionPopup = () => { popup.style.maxHeight = `${innerHeight - 16}px`; const box = anchor.getBoundingClientRect(); popup.style.left = `${Math.max(8, Math.min(box.right - popup.offsetWidth, innerWidth - popup.offsetWidth - 8))}px`; popup.style.top = `${Math.min(box.bottom + 6, Math.max(8, innerHeight - popup.offsetHeight - 8))}px`; };
-      positionPopup();
-      anchor.setAttribute('aria-expanded', 'true');
-      const outside = event => { if (!popup.contains(event.target) && !anchor.contains(event.target)) close(); };
-      const escape = event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); anchor.focus(); } };
-      function close() { dispose(); popup.remove(); anchor.setAttribute('aria-expanded', 'false'); document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape, true); closePopup = null; positionPopup = null; }
-      closePopup = close; popup.querySelector('.layout-menu-heading button').addEventListener('click', () => { close(); anchor.focus(); });
-      document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', escape, true);
-      popup.querySelector('[aria-pressed="true"]')?.focus();
-    },
   };
   window.addEventListener('resize', apply);
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && drawer) { drawer = null; apply(); event.preventDefault(); } });
@@ -118,10 +100,10 @@ export function createPanelLayout({ getSettings, persist, setPanel, beforeChange
   return controller;
 }
 
-export function mountLayoutControls(host, controller, { visibility = true, onPreset = () => {} } = {}) {
+export function mountLayoutControls(host, controller, { visibility = true } = {}) {
   host.classList.add('panel-layout-controls');
   host.innerHTML = `<div class="layout-presets">${PANEL_LAYOUTS.map(item => `<button type="button" class="layout-preset" data-layout="${item.id}" aria-pressed="false"><span class="layout-mini" aria-hidden="true">${item.cells.map(cell => cell === 'both' ? '<span class="layout-mini-stack"><b>文件</b><b>大纲</b></span>' : `<b class="${cell === 'content' ? 'document' : ''}">${labels[cell]}</b>`).join('')}</span><strong>${item.label}</strong><span>${item.description}</span></button>`).join('')}</div><div class="layout-same" hidden><span class="layout-field-label">同侧排列</span><div class="layout-choice"><button type="button" data-arrangement="stack">上下分区</button><button type="button" data-arrangement="tabs">标签切换</button></div><div class="layout-order"><span></span><button type="button" class="text-button">交换上下</button></div></div>${visibility ? '<div class="layout-visibility"><label><input type="checkbox" data-visible="sidebar">文件列表</label><label><input type="checkbox" data-visible="outline">大纲</label></div>' : ''}<p class="layout-note">自动记住布局；窄窗时收起侧栏，保留正文空间。</p>`;
-  host.querySelectorAll('[data-layout]').forEach(button => button.addEventListener('click', () => { controller.set({ preset: button.dataset.layout }); onPreset(); }));
+  host.querySelectorAll('[data-layout]').forEach(button => button.addEventListener('click', () => { controller.set({ preset: button.dataset.layout }); }));
   host.querySelectorAll('[data-arrangement]').forEach(button => button.addEventListener('click', () => controller.set({ arrangement: button.dataset.arrangement })));
   host.querySelector('.layout-order button').addEventListener('click', () => controller.set({ order: controller.get().preferences.order === 'sidebar-first' ? 'outline-first' : 'sidebar-first' }));
   host.querySelectorAll('[data-visible]').forEach(input => input.addEventListener('change', () => controller.visibility(input.dataset.visible, input.checked)));

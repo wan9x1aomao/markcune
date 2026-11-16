@@ -7,11 +7,8 @@ body.panels-managed .sidebar-top{height:38px;padding-left:8px}
 body.panels-managed #sidebar{overflow:hidden}
 body.panels-managed .sidebar-pinned{flex:0 1 auto;max-height:45%;min-height:0}
 body.panels-managed #toggle-sidebar{display:inline-flex}
-body.panels-managed.focus #toggle-sidebar,body.panels-managed.focus #open-layout{display:none}
+body.panels-managed.focus #toggle-sidebar{display:none}
 html.windows body.panels-managed #topbar{padding-right:150px}
-.layout-button{display:inline-flex;gap:5px;align-items:center;white-space:nowrap;font-size:12px;padding-inline:10px;flex:none}
-.layout-button svg{width:16px;height:16px}
-.layout-button[aria-expanded=true]{background:var(--accent-soft);color:var(--accent-text)}
 .panel-dock-tabs{position:absolute;z-index:7;display:flex;gap:4px;padding:3px;border-radius:11px;background:var(--panel-top);box-shadow:var(--shadow-card)}
 .panel-dock-tabs button{flex:1;border-radius:8px;font-size:12px;color:var(--text-muted)}
 .panel-dock-tabs button[aria-selected=true]{background:var(--surface);color:var(--text);box-shadow:var(--shadow-float)}
@@ -24,9 +21,6 @@ html.windows body.panels-managed #topbar{padding-right:150px}
 .panel-resizer:hover::after,.panel-resizer:focus-visible::after{opacity:1;background:var(--accent)}
 .panel-drawer-scrim{position:absolute;inset:var(--topbar-h) 0 0;z-index:30;background:color-mix(in srgb,var(--app-bg) 40%,transparent);padding:0;border:0}
 body.panel-drawer-open #sidebar,body.panel-drawer-open #outline{z-index:35;box-shadow:var(--shadow-pop)}
-.panel-layout-menu.popup-menu{width:372px;max-width:calc(100vw - 16px);padding:15px;overflow:auto}
-.layout-menu-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
-.layout-menu-heading strong{font-size:14px;font-weight:600}
 .layout-presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
 .layout-preset{display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:0;padding:10px;text-align:left;border:1px solid var(--line-strong);border-radius:11px;background:var(--app-bg);transition:background var(--t-micro),border-color var(--t-micro)}
 .layout-preset:hover{background:var(--hover);border-color:var(--text-faint)}
@@ -48,7 +42,7 @@ body.panel-drawer-open #sidebar,body.panel-drawer-open #outline{z-index:35;box-s
 .layout-visibility label{display:inline-flex;align-items:center;gap:6px;font-size:12px}
 .layout-visibility input{accent-color:var(--accent)}
 .layout-note{font-size:11px;color:var(--text-muted);line-height:1.7;margin:10px 0 0}
-.settings-layout{margin-bottom:14px}
+.settings-layout{margin:4px 0 14px}
 .settings-layout .layout-presets{grid-template-columns:repeat(4,minmax(0,1fr))}
 .settings-layout .layout-note{margin-top:10px}
 .panel-dock-tabs[hidden],.panel-resizer[hidden],.panel-drawer-scrim[hidden],.panel-layout-controls [hidden]{display:none!important}

@@ -34,7 +34,12 @@ return null;}};`;
 let page;
 const checks=[];
 async function click(selector) { const point=await page.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return null;const r=e.getBoundingClientRect();return r.width&&r.height?{x:r.x+r.width/2,y:r.y+r.height/2}:null;})()`);assert.ok(point,selector);await page.clickAt(point.x,point.y);await sleep(100); }
-async function preset(id) { await click('#open-layout');await click(`[data-layout="${id}"]`);await sleep(160); }
+async function settings(expanded = true) {
+  await click('#open-more');await click('.popup-menu .item:last-child');
+  assert.equal(await page.evaluate('document.querySelector(".settings-layout").hidden'),true);
+  if(expanded)await click('.opt-layout');
+}
+async function preset(id) { await settings();await click(`[data-layout="${id}"]`);await page.key('Escape');await sleep(160); }
 async function state() { return page.evaluate(`(()=>{const box=id=>{const e=document.getElementById(id),r=e.getBoundingClientRect();return{hidden:e.hidden,x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};return{sidebar:box('sidebar'),outline:box('outline'),content:box('content'),width:innerWidth,height:innerHeight,compact:document.body.classList.contains('panels-compact'),prefs:__stub.settings.panelLayout,errors:__errors,theme:document.documentElement.dataset.theme};})()`); }
 function record(name,value){checks.push({name,...value});assert.deepEqual(value.errors||[],[],name);}
 try {
@@ -66,10 +71,10 @@ try {
     }
   }
   await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:860,deviceScaleFactor:1,mobile:false});
-  await preset('left');await click('#open-layout');await click('[data-arrangement="tabs"]');
+  await preset('left');await settings();await click('[data-arrangement="tabs"]');await page.key('Escape');
   assert.equal((await state()).outline.hidden,true);
   await click('#dock-tab-outline');assert.equal((await state()).sidebar.hidden,true);assert.equal((await state()).outline.hidden,false);
-  await click('#open-layout');await click('[data-arrangement="stack"]');await click('.layout-order button');
+  await settings();await click('[data-arrangement="stack"]');await click('.layout-order button');
   let result=await state();assert.ok(result.outline.y<result.sidebar.y);record('stack-swap',result);
   await page.key('Escape');
   const beforeWidth=result.prefs.sharedWidth;
@@ -85,9 +90,9 @@ try {
   const pinnedBounds=await page.evaluate(`(()=>{const p=document.getElementById('sidebar').getBoundingClientRect(),pins=document.querySelector('.sidebar-pinned').getBoundingClientRect(),body=document.getElementById('sidebar-body').getBoundingClientRect();return{height:p.height,pinned:pins.height,bodyBottom:body.bottom,bottom:p.bottom};})()`);
   assert.ok(pinnedBounds.pinned<=pinnedBounds.height*.46&&pinnedBounds.bodyBottom<=pinnedBounds.bottom+1);record('stacked-pinned-files',pinnedBounds);
   const shared=(await state()).prefs.sharedWidth;
-  await click('#open-layout');await click('[data-visible="sidebar"]');
+  await settings();await click('.opt-sidebar');
   assert.equal((await state()).sidebar.hidden,true);assert.equal((await state()).outline.width,shared);
-  await click('[data-visible="sidebar"]');await page.key('Escape');
+  await click('.opt-sidebar');await page.key('Escape');
   await page.evaluate(`(()=>{const p=document.getElementById('rich-pane');p.scrollTop=900;})()`);await sleep(200);
   const position=await page.evaluate('__mdpadDebug.editor.getPosition()');await preset('reverse');await sleep(250);
   const restored=await page.evaluate('__mdpadDebug.editor.getPosition()');
@@ -101,19 +106,30 @@ try {
   if(output)await page.shot(`${output}/right-dark.png`);
   await page.send('Emulation.setDeviceMetricsOverride',{width:640,height:800,deviceScaleFactor:1,mobile:false});await preset('split');
   result=await state();assert.equal(result.compact,true);await click('#toggle-outline');assert.equal((await state()).outline.hidden,false);await click('.panel-drawer-scrim');assert.equal((await state()).outline.hidden,true);
-  await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:860,deviceScaleFactor:1,mobile:false});await preset('left');await click('#open-layout');await click('[data-arrangement="tabs"]');await page.key('Escape');await click('#dock-tab-outline');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:860,deviceScaleFactor:1,mobile:false});await preset('left');await settings();await click('[data-arrangement="tabs"]');await page.key('Escape');await click('#dock-tab-outline');
   const saved=(await state()).prefs;
   const oldToken=await page.evaluate('window.__pageToken');
   await page.goto(`http://127.0.0.1:${port}/?platform=windows`);assert.ok(await page.waitFor(`window.__pageToken!==${JSON.stringify(oldToken)} && !!window.__mdpadDebug?.editor`));
   result=await state();assert.deepEqual(result.prefs,saved);assert.equal(result.outline.hidden,false);assert.equal(result.sidebar.hidden,true);record('windows-and-reload',result);
-  await click('#open-layout');
-  const menu=await page.evaluate(`(()=>{const r=document.querySelector('.panel-layout-menu').getBoundingClientRect();return{x:r.x,right:r.right,y:r.y,bottom:r.bottom};})()`);
+  assert.equal(await page.evaluate('document.getElementById("open-layout")'),null);
+  await settings(false);
+  assert.match(await page.evaluate('document.querySelector(".layout-state").textContent'),/集中在左 · 标签切换/);
+  await click('.opt-layout');
+  const menu=await page.evaluate(`(()=>{const r=document.querySelector('.settings-panel').getBoundingClientRect();return{x:r.x,right:r.right,y:r.y,bottom:r.bottom};})()`);
   assert.ok(menu.x>=0&&menu.right<=1280&&menu.y>=0&&menu.bottom<=860);
-  record('layout-menu',await state());
-  if(output){await page.shot(`${output}/layout-menu.png`);writeFileSync(`${output}/browser-checks.json`,JSON.stringify(checks,null,2)+'\n');}
-  await page.key('Escape');await click('#open-more');await click('.popup-menu .item:last-child');
   assert.equal(await page.evaluate('document.querySelectorAll(".settings-layout .layout-preset").length'),4);
   await click('.settings-layout [data-layout="reverse"]');assert.equal((await state()).prefs.preset,'reverse');
-  await page.key('Escape');record('shared-settings-entry',await state());
+  assert.match(await page.evaluate('document.querySelector(".layout-state").textContent'),/反向分栏/);
+  await click('.opt-layout');assert.equal(await page.evaluate('document.querySelector(".settings-layout").hidden'),true);
+  await page.key('Escape');record('settings-layout-entry',await state());
+  // The command palette opens the same Settings section, already expanded.
+  await click('#open-more');await click('.popup-menu .item:nth-last-child(5)');await page.type('面板布局');await sleep(150);
+  await click('.palette .result');
+  assert.equal(await page.evaluate('document.querySelector(".settings-layout").hidden'),false);
+  assert.equal(await page.evaluate('document.querySelector(".opt-layout").getAttribute("aria-expanded")'),'true');
+  record('palette-settings-entry',await state());
+  await sleep(300);
+  if(output){await page.shot(`${output}/layout-settings.png`);writeFileSync(`${output}/browser-checks.json`,JSON.stringify(checks,null,2)+'\n');}
+  await page.key('Escape');
   console.log(`panel layout browser ok（${checks.length} 项真实编辑器检查）`);
 }finally{page?.close();server.kill();}

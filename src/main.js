@@ -1275,11 +1275,12 @@ const actions = {
     }),
   tidy: () => tidyHint.run(),
   'ai-settings': () => openAiSettings(),
-  settings: () =>
+  settings: (layoutExpanded = false) =>
     openSettings({
       settings: app.settings,
       setPanel,
       layout: panelLayout,
+      layoutExpanded,
       run,
       voice: voiceBridge,
       update: () => updater.status(),
@@ -1307,7 +1308,7 @@ const actions = {
   'toggle-focus': () => setFocus(!app.focus),
   'toggle-sidebar': () => panelLayout.toggle('sidebar'),
   'toggle-outline': () => panelLayout.toggle('outline'),
-  'panel-layout': () => panelLayout.open($('open-layout')),
+  'panel-layout': () => actions.settings(true),
   'check-update': () => updater.check(false),
   changelog: () => api.openUrl(CHANGELOG_URL),
   website: () => api.openUrl(HOMEPAGE_URL),
@@ -1461,7 +1462,6 @@ const buttons = {
   'sidebar-collapse': [icons.sidebar, `收起文件列表（${formatKeys('Mod+Shift+L')}）`, () => run('toggle-sidebar')],
   'sidebar-search': [icons.search, `快速打开（${formatKeys('Mod+P')}）`, () => run('quick-open')],
   'toggle-outline': [icons.outline, `大纲（${formatKeys('Mod+Shift+T')}）`, () => run('toggle-outline')],
-  'open-layout': [icons.layout + '<span>布局</span>', '面板布局', () => run('panel-layout')],
   'open-more': [icons.more, '更多', (event) => showMore(event.currentTarget)],
 };
 for (const [id, [icon, title, onClick]] of Object.entries(buttons)) {
@@ -1470,7 +1470,7 @@ for (const [id, [icon, title, onClick]] of Object.entries(buttons)) {
   $(id).addEventListener('click', onClick);
 }
 
-// Appearance stays in 设置 › 外观; the toolbar keeps panel actions together with 布局 and 更多.
+// Appearance and layout preferences live in 设置; panel visibility remains in the toolbar.
 document.querySelector('#empty-state .empty-icon').innerHTML = icons.file;
 $('exit-focus').addEventListener('click', () => setFocus(false));
 els.status.addEventListener('click', () => {

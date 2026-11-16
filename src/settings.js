@@ -7,6 +7,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { ai } from './ai-core.js';
 import { onThemeChange, setTheme, themeState } from './theme.js';
 import { formatKeys } from './ui.js';
+import { PANEL_LAYOUTS } from './panel-layout-model.js';
 
 const THEMES = [
   { id: 'system', label: '跟随系统' },
@@ -23,7 +24,7 @@ let closeCurrentSettings = null;
  * "last checked" line under 关于).
  * Returns a close function.
  */
-export function openSettings({ settings, setPanel, layout, run, version, onClose, voice, update }) {
+export function openSettings({ settings, setPanel, layout, layoutExpanded = false, run, version, onClose, voice, update }) {
   closeCurrentSettings?.();
   document.querySelector('.overlay.settings-overlay')?.remove();
 
@@ -52,7 +53,14 @@ export function openSettings({ settings, setPanel, layout, run, version, onClose
 
       <section>
         <h3>界面</h3>
-        <div class="settings-layout" hidden></div>
+        <div class="settings-row layout-setting" hidden>
+          <div class="label">
+            <b>面板布局</b>
+            <em class="layout-state"></em>
+          </div>
+          <button class="text-button opt-layout" type="button" aria-expanded="false" aria-controls="settings-panel-layout">调整布局…</button>
+        </div>
+        <div id="settings-panel-layout" class="settings-layout" hidden></div>
         <label class="settings-row pick">
           <input type="checkbox" class="opt-sidebar" />
           <span class="label"><b>文件列表</b></span>
@@ -139,10 +147,28 @@ export function openSettings({ settings, setPanel, layout, run, version, onClose
   const layoutHost = $('.settings-layout');
   let stopLayout = () => {};
   if (layout) {
-    layoutHost.hidden = false;
+    $('.layout-setting').hidden = false;
+    const layoutButton = $('.opt-layout');
+    const expandLayout = (expanded) => {
+      layoutHost.hidden = !expanded;
+      layoutButton.setAttribute('aria-expanded', String(expanded));
+      layoutButton.textContent = expanded ? '收起布局' : '调整布局…';
+    };
+    expandLayout(layoutExpanded);
+    layoutButton.addEventListener('click', () => expandLayout(layoutHost.hidden));
     const stopControls = layout.mount(layoutHost, { visibility: false });
-    const stopPanels = layout.subscribe(state => { sidebar.checked = state.sidebar; outline.checked = state.outline; });
+    const stopPanels = layout.subscribe(state => {
+      sidebar.checked = state.sidebar; outline.checked = state.outline;
+      const { preset, arrangement } = state.preferences;
+      const current = PANEL_LAYOUTS.find(item => item.id === preset);
+      $('.layout-state').textContent = `${current.label} · ${['left', 'right'].includes(preset) ? arrangement === 'tabs' ? '标签切换' : '上下分区' : current.description}`;
+    });
     stopLayout = () => { stopControls(); stopPanels(); };
+    if (layoutExpanded) requestAnimationFrame(() => {
+      if (closed) return;
+      $('.layout-setting').scrollIntoView({ block: 'nearest' });
+      layoutButton.focus({ preventScroll: true });
+    });
   }
 
   // AI: the panel only summarises; the form itself lives in its own dialog.

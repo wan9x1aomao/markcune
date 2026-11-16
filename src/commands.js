@@ -46,7 +46,6 @@ export const COMMANDS = [
   { id: 'toggle-focus', group: '显示', title: '专注模式', keys: 'F8', keywords: '专注 focus 沉浸 无干扰' },
   { id: 'toggle-sidebar', group: '显示', title: '文件列表', keys: 'Mod+Shift+L', keywords: '文件列表 sidebar 侧栏 面板' },
   { id: 'toggle-outline', group: '显示', title: '大纲', keys: 'Mod+Shift+T', keywords: '大纲 outline 目录 章节' },
-  { id: 'panel-layout', group: '显示', title: '面板布局…', keywords: '布局 layout 文件 大纲 左侧 右侧 上下 标签 面板' },
   { id: 'theme-toggle', group: '显示', title: '切换浅色 / 深色', keys: 'Mod+Shift+D', keywords: '主题 深色 浅色 dark light 外观' },
   { id: 'command-palette', group: '显示', title: '命令面板…', keys: 'Mod+K', keywords: '命令面板 command palette 全部功能 搜命令' },
   { id: 'zoom-in', group: '显示', title: '放大', keys: 'Mod+=', keywords: '放大 zoom in 字号' },
@@ -60,6 +59,7 @@ export const COMMANDS = [
 
   // ---- 设置与帮助
   { id: 'settings', group: '设置与帮助', title: '设置…', keys: 'Mod+,', keywords: '设置 preferences 偏好 外观' },
+  { id: 'panel-layout', group: '设置与帮助', title: '面板布局…', keywords: '设置 布局 layout 文件 大纲 左侧 右侧 上下 标签 面板' },
   { id: 'help', group: '设置与帮助', title: '键盘快捷键与功能…', keywords: '帮助 help 快捷键 shortcuts 功能一览 手册 说明' },
   { id: 'check-update', group: '设置与帮助', title: '检查更新…', keywords: '更新 update 检查升级 版本' },
   { id: 'changelog', group: '设置与帮助', title: '更新日志', keywords: '更新日志 changelog 版本历史 release' },

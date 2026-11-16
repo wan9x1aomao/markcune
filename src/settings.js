@@ -13,6 +13,7 @@ const THEMES = [
   { id: 'light', label: '浅色' },
   { id: 'dark', label: '深色' },
 ];
+let closeCurrentSettings = null;
 
 /**
  * Options: settings (live {sidebar, outline}), setPanel(name, visible), run(id),
@@ -22,7 +23,8 @@ const THEMES = [
  * "last checked" line under 关于).
  * Returns a close function.
  */
-export function openSettings({ settings, setPanel, run, version, onClose, voice, update }) {
+export function openSettings({ settings, setPanel, layout, run, version, onClose, voice, update }) {
+  closeCurrentSettings?.();
   document.querySelector('.overlay.settings-overlay')?.remove();
 
   const overlay = document.createElement('div');
@@ -50,6 +52,7 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice,
 
       <section>
         <h3>界面</h3>
+        <div class="settings-layout" hidden></div>
         <label class="settings-row pick">
           <input type="checkbox" class="opt-sidebar" />
           <span class="label"><b>文件列表</b></span>
@@ -103,6 +106,8 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice,
 
   const $ = (selector) => overlay.querySelector(selector);
   document.body.appendChild(overlay);
+  closeCurrentSettings = close;
+  let closed = false;
 
   // Appearance: the buttons show the stored setting, not the resolved colour, so "跟随系统" stays
   // selected when the OS is what decided. Clicking applies at once and persists.
@@ -131,6 +136,14 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice,
   outline.checked = !!settings.outline;
   sidebar.addEventListener('change', () => setPanel('sidebar', sidebar.checked));
   outline.addEventListener('change', () => setPanel('outline', outline.checked));
+  const layoutHost = $('.settings-layout');
+  let stopLayout = () => {};
+  if (layout) {
+    layoutHost.hidden = false;
+    const stopControls = layout.mount(layoutHost, { visibility: false });
+    const stopPanels = layout.subscribe(state => { sidebar.checked = state.sidebar; outline.checked = state.outline; });
+    stopLayout = () => { stopControls(); stopPanels(); };
+  }
 
   // AI: the panel only summarises; the form itself lives in its own dialog.
   const describeAi = () => {
@@ -244,9 +257,13 @@ export function openSettings({ settings, setPanel, run, version, onClose, voice,
   $('.settings-close').addEventListener('click', () => close());
 
   function close() {
+    if (closed) return;
+    closed = true;
     stopTheme();
+    stopLayout();
     overlay.remove();
     document.removeEventListener('keydown', onKey, true);
+    if (closeCurrentSettings === close) closeCurrentSettings = null;
     onClose?.();
   }
   return close;

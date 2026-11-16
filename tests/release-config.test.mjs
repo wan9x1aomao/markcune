@@ -43,7 +43,7 @@ assert.deepEqual(readConf(confText.replace(/\n/g, '\r\n')), conf, 'CRLF 检出�
 assert.equal(conf.UPDATE_ENDPOINT, `${GITHUB_LATEST}/latest.json`);
 assert.equal(conf.DOWNLOAD_BASE_URL, GITHUB_LATEST);
 assert.equal(conf.SITE_DIR, '${MARKCUNE_SITE_DIR:-$HOME/markcune-web}', '官网同步只指向独立站维护目录');
-assert.equal(conf.SITE_ORIGIN, '');
+assert.equal(conf.SITE_ORIGIN, 'https://wsmknows.top/markcune/');
 assert.equal(conf.MANUAL_UPGRADE, '0');
 assert.equal(conf.SIGNING_KEY_FILE, '$HOME/.tauri/mdpad.key');
 

@@ -1,4 +1,5 @@
 import './style.css';
+import './panel-layout.css';
 import { api, appWindow, isTauri, saveImageParts } from './bridge.js';
 import { ai, onAiChange } from './ai-core.js';
 import { installReview } from './ai-review.js';
@@ -17,6 +18,7 @@ import { icons } from './icons.js';
 import { openLicenses } from './licenses.js';
 import { downloadNotice } from './notices.js';
 import { createOutline } from './outline.js';
+import { createPanelLayout } from './panel-layout.js';
 import { openPalette } from './palette.js';
 import { basename, dirname, isInside, relative, samePath, splitExtension } from './paths.js';
 import { isRemoteImage } from './remote-image.js';
@@ -930,13 +932,17 @@ function applyPanels() {
   document.body.classList.toggle('sidebar-hidden', !app.settings.sidebar);
   document.body.classList.toggle('outline-open', !!app.settings.outline);
   $('toggle-outline').classList.toggle('on', !!app.settings.outline);
+  panelLayout.apply();
 }
 
 function setPanel(name, visible) {
+  const position = app.editor?.getPosition();
+  const editor = app.editor;
   app.settings[name] = visible;
   glide(applyPanels);
   api.setSetting(name, visible);
   if (name === 'outline' && visible) refreshOutline();
+  if (position) requestAnimationFrame(() => { if (app.editor === editor) editor.setPosition(position); });
 }
 
 function setFocus(on) {
@@ -944,6 +950,7 @@ function setFocus(on) {
   glide(() => {
     document.body.classList.toggle('focus', on);
     document.body.classList.remove('reveal-topbar');
+    panelLayout.apply();
   });
   app.editor?.focus();
 }
@@ -1272,6 +1279,7 @@ const actions = {
     openSettings({
       settings: app.settings,
       setPanel,
+      layout: panelLayout,
       run,
       voice: voiceBridge,
       update: () => updater.status(),
@@ -1297,8 +1305,9 @@ const actions = {
   'toggle-source': () => setMode(app.mode === 'source' && !app.split ? 'rich' : 'source', false),
   'toggle-split': () => (app.split ? setMode('rich', false) : setMode('source', true)),
   'toggle-focus': () => setFocus(!app.focus),
-  'toggle-sidebar': () => setPanel('sidebar', !app.settings.sidebar),
-  'toggle-outline': () => setPanel('outline', !app.settings.outline),
+  'toggle-sidebar': () => panelLayout.toggle('sidebar'),
+  'toggle-outline': () => panelLayout.toggle('outline'),
+  'panel-layout': () => panelLayout.open($('open-layout')),
   'check-update': () => updater.check(false),
   changelog: () => api.openUrl(CHANGELOG_URL),
   website: () => api.openUrl(HOMEPAGE_URL),
@@ -1416,6 +1425,14 @@ const sidebar = createSidebar(els.sidebarBody, {
   onRevealPinned: (path) => api.reveal(path),
 });
 const outline = createOutline(els.outline, { onSelect: (heading) => app.editor?.scrollToHeading(heading) });
+const panelLayout = createPanelLayout({
+  getSettings: () => app.settings,
+  persist: preferences => api.setSetting('panelLayout', preferences),
+  setPanel,
+  beforeChange: () => app.editor ? { editor: app.editor, position: app.editor.getPosition() } : null,
+  afterChange: saved => { if (app.editor === saved.editor) saved.editor.setPosition(saved.position); },
+  onError: () => toast('布局已调整，但未能保存偏好。请稍后重试。'),
+});
 const findbar = createFindbar($('findbar'), { getEditor: () => app.editor });
 const updater = createUpdater($('update-banner'), {
   api,
@@ -1444,6 +1461,7 @@ const buttons = {
   'sidebar-collapse': [icons.sidebar, `收起文件列表（${formatKeys('Mod+Shift+L')}）`, () => run('toggle-sidebar')],
   'sidebar-search': [icons.search, `快速打开（${formatKeys('Mod+P')}）`, () => run('quick-open')],
   'toggle-outline': [icons.outline, `大纲（${formatKeys('Mod+Shift+T')}）`, () => run('toggle-outline')],
+  'open-layout': [icons.layout + '<span>布局</span>', '面板布局', () => run('panel-layout')],
   'open-more': [icons.more, '更多', (event) => showMore(event.currentTarget)],
 };
 for (const [id, [icon, title, onClick]] of Object.entries(buttons)) {
@@ -1452,8 +1470,7 @@ for (const [id, [icon, title, onClick]] of Object.entries(buttons)) {
   $(id).addEventListener('click', onClick);
 }
 
-// Appearance lives in 设置 › 外观 (and the ⌘⇧D shortcut); the toolbar no longer carries a button
-// for it, so the top bar stays down to 大纲 and 更多.
+// Appearance stays in 设置 › 外观; the toolbar keeps panel actions together with 布局 and 更多.
 document.querySelector('#empty-state .empty-icon').innerHTML = icons.file;
 $('exit-focus').addEventListener('click', () => setFocus(false));
 els.status.addEventListener('click', () => {

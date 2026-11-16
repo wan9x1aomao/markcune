@@ -9,8 +9,8 @@
 // Downloads live under one fixed name per platform (overwritten each release), so links never carry a version.
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { commitFiles } from './site-commit.mjs';
 
 const [site, version, ...pairs] = process.argv.slice(2);
@@ -340,7 +340,25 @@ if (errors.length) {
   }
   process.exit(1);
 }
-const ops = pending.map((page) => ({ dest: page.path, html: page.html }));
+// The official site's content renderer owns FAQ text/JSON-LD, product summaries,
+// package metadata and per-page modification dates. Plan everything before the
+// existing atomic commit, so a missing marker cannot partially publish a release.
+let contentFiles;
+if (existsSync(join(site, 'content/site-content.json'))) {
+  try {
+    const renderer = await import(pathToFileURL(join(site, 'scripts/sync-content.mjs')).href);
+    contentFiles = renderer.contentPlan(site, {
+      version,
+      pages: Object.fromEntries(pending.map(page => [relative(site, page.path), page.html])),
+    }).files;
+  } catch (error) {
+    console.error(`update-site: 官网内容同步失败，未写入任何文件：${error.message}`);
+    process.exit(1);
+  }
+}
+const ops = contentFiles
+  ? [...contentFiles].map(([name, html]) => ({ dest: join(site, name), html }))
+  : pending.map((page) => ({ dest: page.path, html: page.html }));
 if (files.latest) {
   ops.push({ dest: join(site, 'latest.json'), source: files.latest });
   for (const [key, name] of Object.entries(DOWNLOADS)) {

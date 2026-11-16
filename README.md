@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/wan9x1aomao/markcune/actions/workflows/ci.yml/badge.svg)](https://github.com/wan9x1aomao/markcune/actions/workflows/ci.yml)
 
-MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编辑器。打开就能打字，打下的每个字都留在你自己的硬盘上 —— 不登录、不联网、不上传。
+MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编辑器。无需账号即可编辑，文稿以标准 Markdown 文件保存在本机；本地编辑和保存可离线。AI 与语音转写会调用你配置的服务，使用远程服务时分别发送相关文字或录音，费用以服务商为准；也可配置本地服务。从链接导入和检查更新会请求网络。AI 文字与语音音频不经 MarkCune 中转。
 
 **[官网与下载](https://wsmknows.top/markcune/)** ｜ [GitHub Release](https://github.com/wan9x1aomao/markcune/releases/latest) ｜ 免费开源（MIT）｜ macOS / Windows / Linux
 

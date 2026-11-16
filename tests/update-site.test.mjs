@@ -336,6 +336,31 @@ try {
   assert.equal(readFileSync(join(brokenDir, 'sitemap.xml'), 'utf8'), 'SITEMAP-KEEP');
   assert.equal(readFileSync(join(brokenDir, 'dirty.txt'), 'utf8'), 'DIRTY-KEEP');
   assert.equal(existsSync(join(brokenDir, 'downloads', 'MarkCune-macOS-arm64.dmg')), false);
+
+  // The site's renderer participates in the same transaction as release pages.
+  // Its own rendering rules are covered by markcune-web/tests/content.test.mjs.
+  const contentDir = join(root, 'content-site');
+  writeSite(contentDir, markedPages());
+  mkdirSync(join(contentDir, 'content'));
+  mkdirSync(join(contentDir, 'scripts'));
+  writeFileSync(join(contentDir, 'content/site-content.json'), '{}');
+  const renderer = join(contentDir, 'scripts/sync-content.mjs');
+  writeFileSync(renderer, `export function contentPlan(site, {version, pages}) {
+    if (!pages['index.html'].includes('data-mdpad="version">v' + version + '<')) throw new Error('missing updated page');
+    return { files: new Map([...Object.entries(pages), ['compare.html', 'GENERATED-COMPARE'], ['llms.txt', 'VERSION:' + version], ['sitemap.xml', 'CONTENT-DATE']]) };
+  }`);
+  const contentRun = run(contentDir + '/', newest, bins);
+  assert.equal(contentRun.status, 0, contentRun.stderr);
+  assert.equal(readFileSync(join(contentDir, 'llms.txt'), 'utf8'), `VERSION:${newest}`);
+  assert.equal(readFileSync(join(contentDir, 'compare.html'), 'utf8'), 'GENERATED-COMPARE');
+  assert.equal(readFileSync(join(contentDir, 'sitemap.xml'), 'utf8'), 'CONTENT-DATE');
+  const preservedIndex = readFileSync(join(contentDir, 'index.html'), 'utf8');
+  writeFileSync(renderer, `export function contentPlan() { throw new Error('bad FAQ source'); }`);
+  const contentFailure = run(contentDir, '9.8.7', bins);
+  assert.equal(contentFailure.status, 1);
+  assert.match(contentFailure.stderr, /官网内容同步失败.*bad FAQ source/);
+  assert.equal(readFileSync(join(contentDir, 'index.html'), 'utf8'), preservedIndex);
+  assert.equal(readFileSync(join(contentDir, 'llms.txt'), 'utf8'), `VERSION:${newest}`);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

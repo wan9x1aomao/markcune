@@ -4,15 +4,15 @@
 
 MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编辑器。打开就能打字，打下的每个字都留在你自己的硬盘上 —— 不登录、不联网、不上传。
 
-**下载：<https://github.com/wan9x1aomao/markcune/releases/latest>** ｜ 免费开源（MIT）｜ macOS / Windows / Linux
+**[官网与下载](https://wsmknows.top/markcune/)** ｜ [GitHub Release](https://github.com/wan9x1aomao/markcune/releases/latest) ｜ 免费开源（MIT）｜ macOS / Windows / Linux
 
-> 名称说明：MarkCune 曾用名 MDPad 编辑器，中文语境称「MarkCune 编辑器」；官网正迁移至自有服务器，功能与本地数据都与旧版一致。
+> 名称说明：MarkCune 曾用名 MDPad 编辑器，中文语境称「MarkCune 编辑器」；功能与本地数据都与旧版一致。
 
 ![MarkCune 编辑器界面](docs/screenshot.png)
 
 ## 下载
 
-安装包在 GitHub Release（发布之后，`/releases/latest` 指向最新一版）：
+安装包可从[官网](https://wsmknows.top/markcune/#download)或 GitHub Release 下载（发布之后，`/releases/latest` 指向最新一版）：
 
 - [macOS（Apple 芯片）](https://github.com/wan9x1aomao/markcune/releases/latest/download/MarkCune-macOS-arm64.dmg)
 - [Windows](https://github.com/wan9x1aomao/markcune/releases/latest/download/MarkCune-windows-x64-setup.exe)

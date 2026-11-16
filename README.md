@@ -27,7 +27,7 @@ MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编�
 | Windows | 10 / 11，使用系统自带的 WebView2 |
 | Linux | 需要 WebKitGTK 4.1（`.deb` 与 `.AppImage` 都提供） |
 
-> 从已安装的版本升级：4.0.5 及更早的安装包在打包时写死了旧官网的更新地址，不会自己改去 GitHub。4.0.6 发布之后，用上面的链接手动安装一次；这一版起会向 `releases/latest/download/latest.json` 检查更新，之后可以自动更新。在 4.0.6 发布之前，这些链接仍是当前已发布的版本。设置、AI Key、草稿和书库都保留。macOS 上如果应用目录仍叫 `MDPad.app`，建议删掉旧应用后再装 DMG。
+> 从已安装的版本升级：4.0.5 及更早版本需要用上面的链接手动安装一次当前版本；4.0.6 及以后从 GitHub Release 检查更新，可以在应用内升级。设置、AI Key、草稿和书库保留。macOS 上如果应用目录仍叫 `MDPad.app`，建议删掉旧应用后再装 DMG。
 
 历史版本从 [`v3.2.1`](https://github.com/wan9x1aomao/markcune/tags) 起都打了 tag，每个 tag 就是那个版本的源码快照。安装包在对应的 GitHub Release 上。
 
@@ -97,7 +97,7 @@ tests/scenarios.sh                         # 文件操作场景，仅 macOS
 
 检查更新在启动时、窗口回到前台时进行；应用一直留在前台时也会定时复查，频率上限为每 30 分钟一次。旧的 6 小时静默期会让早上检查过的机器整天看不到下午发布的版本，所以改短了。
 
-4.0.5 及更早的正式包里写的仍是旧官网地址（现已 403）。它们不会自动升到 GitHub 上的版本，需要在 4.0.6 发布后手动安装一次带新地址的包。
+4.0.5 及更早的正式包里写的仍是旧官网地址（现已 403）。它们不会自动升到 GitHub 上的版本，需要手动安装一次当前版本。
 
 ## 一键整理的网关（可选）
 
@@ -151,7 +151,7 @@ gh release edit v<版本号> --draft=false
 
 `SITE_DIR` 默认指向独立官网仓库 `$HOME/markcune-web`，换机器时用 `MARKCUNE_SITE_DIR` 覆盖。发布脚本只同步官网源码和下载文件，不会自动上传服务器。随后在官网仓库执行 `npm run build`、`npm run check`、`npm run pack`，由单独的服务器部署流程发布。
 
-正式域名就绪后，在 `scripts/release.conf` 的 `SITE_ORIGIN` 填入 HTTPS 根地址；macOS、Windows、Linux 构建会统一注入 `VITE_MARKCUNE_SITE_URL`。留空时应用的官网与更新日志入口使用 GitHub，不再访问旧托管平台。官网仓库的 `site.config.json` 也应填写同一域名。已有 4.0.6 安装包不会因此变化，需要提升版本号后重新发布客户端。
+`scripts/release.conf` 的 `SITE_ORIGIN` 默认指向 `https://wsmknows.top/markcune/`，支持以 `/` 结尾的应用路径。三平台构建统一读取这个配置，也可用 `VITE_MARKCUNE_SITE_URL` 覆盖；留空时使用 GitHub。官网维护源为独立的 `markcune-web` 目录。旧安装包内的链接不会随源码变化，需要发布新版本才能更新。
 
 4.0.5 及更早的客户端不会跟着这次发布自动更新，需要手动安装一次。
 

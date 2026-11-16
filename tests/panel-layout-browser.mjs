@@ -1,12 +1,13 @@
 // Isolated renderer regression: real application/editor, a fake native bridge and no user files.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { open, sleep } from './cdp.mjs';
 
 const port = Number(process.env.LAYOUT_TEST_PORT || 5252);
 const root = fileURLToPath(new URL('..', import.meta.url));
+const appVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const output = process.env.LAYOUT_TEST_OUTPUT;
 if (output) mkdirSync(output, { recursive: true });
 const server = spawn('npx', ['vite', '--port', String(port), '--host', '127.0.0.1', '--strictPort'], { cwd: root, stdio: 'ignore' });
@@ -23,11 +24,11 @@ if(cmd==='set_setting'){__stub.settings[args.key]=args.value;localStorage.setIte
 if(cmd==='ai_status')return{hasKey:false,completion:false};
 if(cmd==='voice_status')return{hasKey:false,ready:false};
 if(cmd==='list_pinned'||cmd==='list_dir')return[];
-if(cmd==='update_status')return{currentVersion:'4.0.6'};
-if(cmd==='check_update')return{kind:'current',version:'4.0.6'};
+if(cmd==='update_status')return{currentVersion:${JSON.stringify(appVersion)}};
+if(cmd==='check_update')return null;
 if(cmd==='draft_write')return'layout-test';
 if(cmd==='plugin:event|listen')return 1;
-if(cmd==='plugin:app|version')return'4.0.6';
+if(cmd==='plugin:app|version')return${JSON.stringify(appVersion)};
 if(cmd.includes('is_fullscreen')||cmd.includes('is_maximized'))return false;
 return null;}};`;
 let page;

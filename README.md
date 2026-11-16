@@ -6,7 +6,7 @@ MarkCune（原 MDPad 编辑器）是一款轻量、免费的本地 Markdown 编�
 
 **下载：<https://github.com/wan9x1aomao/markcune/releases/latest>** ｜ 免费开源（MIT）｜ macOS / Windows / Linux
 
-> 名称说明：MarkCune 曾用名 MDPad 编辑器，中文语境称「MarkCune 编辑器」；官网域名仍是过渡期地址，功能与本地数据都与旧版一致。
+> 名称说明：MarkCune 曾用名 MDPad 编辑器，中文语境称「MarkCune 编辑器」；官网正迁移至自有服务器，功能与本地数据都与旧版一致。
 
 ![MarkCune 编辑器界面](docs/screenshot.png)
 
@@ -149,7 +149,9 @@ gh release edit v<版本号> --draft=false
 
 发布之后，`/releases/latest` 才指向这一版，`releases/latest/download/` 下的固定文件名和 `latest.json` 才会被 4.0.6 及以后的客户端读到。
 
-`SITE_DIR` 默认为空，不再写入 WorkBuddy 站点目录。还要同步一份本地站点时，在 `scripts/release.conf` 里填上目录。
+`SITE_DIR` 默认指向独立官网仓库 `$HOME/markcune-web`，换机器时用 `MARKCUNE_SITE_DIR` 覆盖。发布脚本只同步官网源码和下载文件，不会自动上传服务器。随后在官网仓库执行 `npm run build`、`npm run check`、`npm run pack`，由单独的服务器部署流程发布。
+
+正式域名就绪后，在 `scripts/release.conf` 的 `SITE_ORIGIN` 填入 HTTPS 根地址；macOS、Windows、Linux 构建会统一注入 `VITE_MARKCUNE_SITE_URL`。留空时应用的官网与更新日志入口使用 GitHub，不再访问旧托管平台。官网仓库的 `site.config.json` 也应填写同一域名。已有 4.0.6 安装包不会因此变化，需要提升版本号后重新发布客户端。
 
 4.0.5 及更早的客户端不会跟着这次发布自动更新，需要手动安装一次。
 

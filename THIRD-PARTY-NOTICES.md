@@ -662,7 +662,7 @@ MarkCune 自身的代码以 MIT 许可发布，版权 (c) 2026 wan9x1aomao。
 - jszip 3.10.2 · (MIT OR GPL-3.0-or-later) · 条款 [19]
   Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso
   源码 https://github.com/Stuk/jszip
-- katex 0.19.0 · MIT · 条款 [1]
+- katex 0.19.1 · MIT · 条款 [1]
   Copyright (c) 2013-2020 Khan Academy and other contributors
   源码 https://github.com/KaTeX/KaTeX
 - khroma 2.1.0 · 未标注 · 条款 [20]

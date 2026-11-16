@@ -77,9 +77,12 @@ check "草稿状态显示" "$result" "草稿已自动保存"
 # 4. Reading position is restored.
 fresh
 for i in $(seq 1 60); do printf '\n第 %d 段正文内容。\n' "$i" >> "$WORK/sample.md"; done
-run "$WORK/.data" "$WAIT const pane = document.getElementById('rich-pane'); pane.scrollTop = 900; pane.dispatchEvent(new Event('scroll')); await wait(1500); return pane.scrollTop;" "$WORK/sample.md" >/dev/null
-result=$(run "$WORK/.data" "$WAIT await wait(500); return 'scrollTop=' + document.getElementById('rich-pane').scrollTop;" "$WORK/sample.md")
-check "重新打开回到上次位置" "$result" "scrollTop=900"
+before=$(run "$WORK/.data" "$WAIT const pane = document.getElementById('rich-pane'); pane.scrollTop = 900; pane.dispatchEvent(new Event('scroll')); await wait(1500); return JSON.stringify(window.__mdpadDebug.editor.getPosition());" "$WORK/sample.md")
+after=$(run "$WORK/.data" "$WAIT await wait(500); return JSON.stringify(window.__mdpadDebug.editor.getPosition());" "$WORK/sample.md")
+# Formula/diagram heights can differ between sessions. The same visible block
+# and offset prove restoration; equal scrollTop alone does not.
+result=$(node -e 'const [a,b]=process.argv.slice(1).map(JSON.parse); console.log(a.top && b.top && a.top.pos===b.top.pos && Math.abs(a.top.offset-b.top.offset)<=1 ? "position-ok" : JSON.stringify({before:a,after:b}));' "$before" "$after")
+check "重新打开回到相同正文位置" "$result" "position-ok"
 
 # 5. Source mode shows the file exactly as stored.
 fresh

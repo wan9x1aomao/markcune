@@ -31,15 +31,14 @@ import { createTidyHint, tidyDocument } from './tidy-ui.js';
 import { openSettings } from './settings.js';
 import { openExportDrawer } from './export-menu.js';
 import { initTheme, primeTheme, toggleTheme } from './theme.js';
+import { siteLinks } from './site-links.js';
 
 // Before anything is painted: the shell answers asynchronously, and a dark-mode user should not see
 // the light theme flash by while window_init is in flight.
 primeTheme();
 
 const AUTOSAVE_DELAY = 1000;
-// 过渡期：markcune.md 上线后替换（域名与站点就绪前继续指向旧地址，两行都先不动）。
-const CHANGELOG_URL = 'https://mdpad.app.workbuddy.host/#changelog';
-const HOMEPAGE_URL = 'https://mdpad.app.workbuddy.host';
+const { homepage: HOMEPAGE_URL, changelog: CHANGELOG_URL } = siteLinks(import.meta.env.VITE_MARKCUNE_SITE_URL);
 const isMac = navigator.userAgent.includes('Mac');
 const $ = (id) => document.getElementById(id);
 const els = {

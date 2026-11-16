@@ -391,7 +391,7 @@ export function createLazy(scroller) {
                 const index = indexAt(doc, Math.min(Math.max(pos, 0), doc.content.size));
                 const rect = rectOf(doc, index);
                 if (!rect) return;
-                scroller.scrollTop += rect.top - scroller.getBoundingClientRect().top - offset;
+                scroller.scrollTop += rect.top - scroller.getBoundingClientRect().top + offset;
                 refresh();
               };
               const { doc } = view.state;

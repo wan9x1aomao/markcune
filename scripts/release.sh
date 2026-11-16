@@ -32,6 +32,7 @@ SIGNING_KEY_FILE=${SIGNING_KEY_FILE%$'\r'}
 TIDY_URL=${TIDY_URL:-}
 TIDY_URL=${TIDY_URL%$'\r'}
 [[ -n "$UPDATE_ENDPOINT" && -n "$DOWNLOAD_BASE_URL" ]] || { echo "请先在 scripts/release.conf 里填写 UPDATE_ENDPOINT 和 DOWNLOAD_BASE_URL"; exit 1; }
+[[ -z "$SITE_DIR" || -f "$SITE_DIR/site.config.json" ]] || { echo "找不到独立官网配置：$SITE_DIR/site.config.json；请设置 MARKCUNE_SITE_DIR 指向 markcune-web 仓库"; exit 1; }
 [[ -f "$SIGNING_KEY_FILE" ]] || { echo "找不到签名私钥：$SIGNING_KEY_FILE"; exit 1; }
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "版本号格式应为 x.y.z"; exit 1; }
 "$GH" auth status >/dev/null 2>&1 || { echo "请先登录 GitHub：$GH auth login"; exit 1; }
@@ -114,6 +115,7 @@ done
 echo "Windows / Linux 正在 GitHub Actions 上打包：$("$GH" run view "$RUN" --json url --jq .url)"
 
 export MDPAD_UPDATE_ENDPOINT="$UPDATE_ENDPOINT"
+export VITE_MARKCUNE_SITE_URL="${SITE_ORIGIN%$'\r'}"
 # 「一键整理」的网关地址。留空则不注入，应用只做规则整理。
 # Windows / Linux 由 build.yml 从同一个 release.conf 读，三个平台的取值完全一致。
 if [[ -n "${TIDY_URL:-}" ]]; then

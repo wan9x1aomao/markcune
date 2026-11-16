@@ -42,7 +42,8 @@ const conf = readConf(confText);
 assert.deepEqual(readConf(confText.replace(/\n/g, '\r\n')), conf, 'CRLF 检出时配置值不能带上回车');
 assert.equal(conf.UPDATE_ENDPOINT, `${GITHUB_LATEST}/latest.json`);
 assert.equal(conf.DOWNLOAD_BASE_URL, GITHUB_LATEST);
-assert.equal(conf.SITE_DIR, '', 'SITE_DIR 默认为空，不再写入 WorkBuddy 目录');
+assert.equal(conf.SITE_DIR, '${MARKCUNE_SITE_DIR:-$HOME/markcune-web}', '官网同步只指向独立站维护目录');
+assert.equal(conf.SITE_ORIGIN, '');
 assert.equal(conf.MANUAL_UPGRADE, '0');
 assert.equal(conf.SIGNING_KEY_FILE, '$HOME/.tauri/mdpad.key');
 

@@ -25,6 +25,7 @@ import { ghostControls, ghostFeature } from './ai-ghost.js';
 import { proposalFeature } from './ai-proposal.js';
 import { slashItems } from './ai-skills.js';
 import { createLazy, lazyController } from './lazy.js';
+import { readingBlock, restoreReadingPosition } from './reading-position.js';
 import { columnResizingPlugin, resizableTable } from './table.js';
 import { preserveMarkdown } from './markdown.js';
 import { codeTheme } from './code-theme.js';
@@ -512,6 +513,7 @@ export async function createRichEditor(options) {
   if (readonly) crepe.setReadonly(true);
 
   const view = crepe.editor.action((ctx) => ctx.get(editorViewCtx));
+  let stopRestoringPosition = () => {};
   installMarginSelection(view, scroller);
   const { serialize, serializeAsync, warm } = crepe.editor.action(incrementalSerializer);
   // Fill the markdown cache in small slices while idle, so the first save is cheap too.
@@ -590,7 +592,7 @@ export async function createRichEditor(options) {
     scrollToHeading(heading) {
       const lazy = lazyController(view);
       if (lazy) {
-        lazy.scrollToBlock({ pos: heading.pos, offset: 12 });
+        lazy.scrollToBlock({ pos: heading.pos, offset: -12 });
       } else {
         const dom = view.nodeDOM(heading.pos);
         if (dom) {
@@ -625,18 +627,18 @@ export async function createRichEditor(options) {
     getPosition() {
       const position = { mode: 'rich', anchor: view.state.selection.anchor, scrollTop: scroller.scrollTop };
       // With lazy rendering, pixel offsets depend on which blocks were measured; remember the block.
-      const top = lazyController(view)?.topBlock();
+      const top = lazyController(view)?.topBlock() ?? readingBlock(view, scroller);
       if (top) position.top = top;
       return position;
     },
     setPosition(position) {
+      stopRestoringPosition();
       if (position?.mode === 'rich' && typeof position.anchor === 'number') {
         const anchor = Math.min(Math.max(position.anchor, 0), view.state.doc.content.size);
         view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(anchor))));
       }
       const lazy = lazyController(view);
-      if (lazy && typeof position?.top?.pos === 'number') lazy.scrollToBlock(position.top);
-      else if (typeof position?.scrollTop === 'number') scroller.scrollTop = position.scrollTop;
+      stopRestoringPosition = restoreReadingPosition(view, scroller, position, lazy);
       lazy?.refresh();
     },
     /** Renders the whole document (for printing and export) or returns to lazy rendering. */
@@ -684,6 +686,7 @@ export async function createRichEditor(options) {
       },
     },
     async destroy() {
+      stopRestoringPosition();
       clearTimeout(warmTimer);
       root.removeEventListener('click', onClick);
       labels.disconnect();

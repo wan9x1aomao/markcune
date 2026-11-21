@@ -1,6 +1,6 @@
 // File list: the window's folder as a lazily loaded tree, or recent items when no folder is open.
 import { icons } from './icons.js';
-import { basename, dirname, isInside, samePath, splitExtension } from './paths.js';
+import { basename, dirname, isInside, portablePath, samePath, splitExtension } from './paths.js';
 import { showMenu } from './ui.js';
 
 /**
@@ -28,7 +28,7 @@ export function createSidebar(el, options) {
   el.parentElement?.insertBefore(pinnedHost, el);
   el.append(sel, list);
 
-  const key = (path) => path.replace(/\\/g, '/').toLowerCase();
+  const key = (path) => portablePath(path).replace(/\\/g, '/').toLowerCase();
 
   async function load(dir) {
     try {

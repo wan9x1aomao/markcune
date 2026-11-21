@@ -1,9 +1,13 @@
 // Document outline: headings of the open document; click to jump.
 export function createOutline(el, { onSelect }) {
   let headings = [];
+  let items = [];
+  let activeItem = null;
 
   function render(active) {
     el.replaceChildren();
+    items = [];
+    activeItem = null;
     const head = document.createElement('div');
     head.className = 'panel-header';
     head.innerHTML = '<span class="title">大纲</span>';
@@ -20,6 +24,8 @@ export function createOutline(el, { onSelect }) {
       item.textContent = heading.text || '（空标题）';
       item.title = heading.text;
       item.addEventListener('click', () => onSelect(heading));
+      items.push(item);
+      if (i === active) activeItem = item;
       el.appendChild(item);
     });
   }
@@ -30,8 +36,12 @@ export function createOutline(el, { onSelect }) {
       render(active);
     },
     setActive(active) {
-      el.querySelectorAll('.outline-item').forEach((item, i) => item.classList.toggle('active', i === active));
-      el.querySelector('.outline-item.active')?.scrollIntoView({ block: 'nearest' });
+      const item = items[active] ?? null;
+      if (activeItem === item) return;
+      activeItem?.classList.remove('active');
+      activeItem = item;
+      activeItem?.classList.add('active');
+      activeItem?.scrollIntoView({ block: 'nearest' });
     },
   };
 }

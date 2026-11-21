@@ -42,12 +42,34 @@ async function settings(expanded = true) {
 async function preset(id) { await settings();await click(`[data-layout="${id}"]`);await page.key('Escape');await sleep(160); }
 async function state() { return page.evaluate(`(()=>{const box=id=>{const e=document.getElementById(id),r=e.getBoundingClientRect();return{hidden:e.hidden,x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};return{sidebar:box('sidebar'),outline:box('outline'),content:box('content'),width:innerWidth,height:innerHeight,compact:document.body.classList.contains('panels-compact'),prefs:__stub.settings.panelLayout,errors:__errors,theme:document.documentElement.dataset.theme};})()`); }
 function record(name,value){checks.push({name,...value});assert.deepEqual(value.errors||[],[],name);}
+async function checkPanelMotion(name, slideDistance) {
+  const result = await page.evaluate(`(async () => {
+    const panel = document.getElementById(${JSON.stringify(name)});
+    const toggle = document.getElementById('toggle-' + panel.id);
+    await Promise.allSettled(panel.getAnimations().map(animation => animation.finished));
+    const closed = !panel.hidden;
+    toggle.click();
+    const inert = panel.inert;
+    const animations = panel.getAnimations();
+    const fade = animations.some(animation => animation.transitionProperty === 'opacity');
+    const slide = animations.find(animation => animation.transitionProperty === 'translate');
+    const slideOffsets = slide?.effect.getKeyframes().map(frame => Number.parseFloat(frame.translate));
+    await Promise.allSettled(animations.map(animation => animation.finished));
+    return { closed, inert, fade, slideOffsets, hidden: panel.hidden,
+      visibility: getComputedStyle(panel).visibility, pressed: toggle.getAttribute('aria-pressed') };
+  })()`);
+  assert.equal(result.hidden, result.closed);
+  assert.equal(result.inert, result.closed);
+  assert.equal(result.visibility, result.closed ? 'hidden' : 'visible');
+  assert.equal(result.pressed, String(!result.closed));
+  assert.ok(result.fade && result.slideOffsets.includes(slideDistance), JSON.stringify(result));
+}
 try {
   let ready=false;
   for(let i=0;i<80;i++){try{ready=(await fetch(`http://127.0.0.1:${port}/`)).ok;}catch{}if(ready)break;await sleep(200);}
   assert.ok(ready,'layout test server');
   page=await open(null,{width:1280,height:860,scale:1});
-  await page.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});
+  await page.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'},{name:'prefers-reduced-motion',value:'no-preference'}]});
   await page.send('Page.addScriptToEvaluateOnNewDocument',{source:boot});
   await page.goto(`http://127.0.0.1:${port}/`);
   if(!await page.waitFor('!!window.__mdpadDebug?.editor'))throw new Error(JSON.stringify(await page.evaluate('({errors:__errors,calls:__stub.calls.slice(-10)})')));
@@ -58,6 +80,14 @@ try {
       await preset(id);
       const result=await state();
       assert.equal(result.prefs.preset,id);
+      const fileOnRight = id === 'reverse' || id === 'right';
+      const fileToggle = await page.evaluate(`(() => {
+        const button = document.getElementById('toggle-sidebar');
+        return { inActions: button.parentElement.classList.contains('actions'),
+          mirrored: getComputedStyle(button.querySelector('svg')).transform === 'matrix(-1, 0, 0, 1, 0, 0)',
+          duplicates: document.querySelectorAll('#toggle-sidebar, #sidebar-collapse').length };
+      })()`);
+      assert.deepEqual(fileToggle, { inActions: fileOnRight, mirrored: fileOnRight, duplicates: 1 });
       assert.ok(result.content.width>=420);
       for(const box of [result.sidebar,result.outline])if(!box.hidden)assert.ok(box.x>=0&&box.right<=width+1&&box.bottom<=860);
       if(!result.compact){
@@ -71,6 +101,12 @@ try {
     }
   }
   await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:860,deviceScaleFactor:1,mobile:false});
+  await preset('reverse');
+  for (const [name, distance] of [['sidebar', 12], ['outline', -12]]) {
+    await checkPanelMotion(name, distance);
+    await checkPanelMotion(name, distance);
+  }
+  record('panel-toggle-motion', await state());
   await preset('left');await settings();await click('[data-arrangement="tabs"]');await page.key('Escape');
   assert.equal((await state()).outline.hidden,true);
   await click('#dock-tab-outline');assert.equal((await state()).sidebar.hidden,true);assert.equal((await state()).outline.hidden,false);

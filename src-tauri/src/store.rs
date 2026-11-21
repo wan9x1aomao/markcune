@@ -93,9 +93,13 @@ impl Store {
     }
 
     pub fn rename_path(&mut self, from: &Path, to: &Path) {
+        let portable_from = crate::files::portable_path(from);
+        let portable_to = crate::files::portable_path(to);
         let rename = |p: &mut PathBuf| {
-            if let Ok(rest) = p.strip_prefix(from) {
-                *p = to.join(rest);
+            let target = crate::files::renamed_path(p, from, to)
+                .or_else(|| crate::files::renamed_path(p, &portable_from, &portable_to));
+            if let Some(target) = target {
+                *p = target;
             }
         };
         self.recent_files.iter_mut().for_each(rename);

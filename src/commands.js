@@ -12,6 +12,7 @@ export const COMMANDS = [
   { id: 'new-window', group: '文件', title: '新建窗口', keys: 'Mod+N', keywords: '新窗口 new window 开窗' },
   { id: 'new-document', group: '文件', title: '在文件夹中新建文档', keywords: '新建文档 new document file 新建文件' },
   { id: 'open-file', group: '文件', title: '打开文件…', keys: 'Mod+O', keywords: '打开文件 open file md' },
+  { id: 'open-source-file', group: '文件', title: '以源码打开…', keywords: '打开源码 大文件 source markdown' },
   { id: 'open-folder', group: '文件', title: '打开文件夹…', keys: 'Mod+Shift+O', keywords: '文件夹 folder directory 目录 工作区' },
   { id: 'open-from-url', group: '文件', title: '从链接打开…', keywords: '链接 link url 网址 github x 推特 帖子 下载' },
   { id: 'quick-open', group: '文件', title: '快速打开…', keys: 'Mod+P', keywords: '快速打开 quick open 找文件 搜索文件' },
@@ -41,6 +42,7 @@ export const COMMANDS = [
   { id: 'export-image', group: '导出', title: '导出为图片…', keywords: '导出 图片 长图 png 截图 分享 image picture screenshot export' },
 
   // ---- 显示
+  { id: 'toggle-reader', group: '显示', title: '阅读模式', keywords: '阅读 只读 reader read-only' },
   { id: 'toggle-source', group: '显示', title: '源码模式', keys: 'Mod+/', keywords: '源码 source markdown 原文' },
   { id: 'toggle-split', group: '显示', title: '分屏预览', keys: 'Mod+Alt+/', keywords: '分屏 split 预览 preview' },
   { id: 'toggle-focus', group: '显示', title: '专注模式', keys: 'F8', keywords: '专注 focus 沉浸 无干扰' },

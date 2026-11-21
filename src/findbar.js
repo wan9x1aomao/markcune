@@ -5,6 +5,7 @@ export function createFindbar(el, { getEditor }) {
   const query = el.querySelector('.query');
   const replacement = el.querySelector('.replacement');
   const count = el.querySelector('.count');
+  let sequence = 0;
   el.querySelector('.previous').innerHTML = icons.up;
   el.querySelector('.next').innerHTML = icons.down;
   el.querySelector('.toggle-replace').innerHTML = icons.replace;
@@ -14,7 +15,14 @@ export function createFindbar(el, { getEditor }) {
     if (!info || !query.value) count.textContent = '';
     else count.textContent = info.count ? `${info.index + 1}/${info.count}` : '无结果';
   };
-  const search = () => show(getEditor()?.find.set(query.value));
+  const update = (result) => {
+    const id = ++sequence;
+    if (!result?.then) return show(result);
+    count.textContent = '';
+    result.then((info) => { if (!el.hidden && id === sequence) show(info); }).catch(() => {});
+  };
+  const editable = () => getEditor()?.kind !== 'reader';
+  const search = () => update(getEditor()?.find.set(query.value));
 
   const api = {
     get open() {
@@ -22,7 +30,7 @@ export function createFindbar(el, { getEditor }) {
     },
     show(withReplace) {
       el.hidden = false;
-      el.classList.toggle('with-replace', withReplace);
+      el.classList.toggle('with-replace', withReplace && editable());
       const selection = window.getSelection()?.toString();
       if (selection && !selection.includes('\n') && selection.length < 100) query.value = selection;
       query.focus();
@@ -32,14 +40,16 @@ export function createFindbar(el, { getEditor }) {
     close() {
       if (el.hidden) return;
       el.hidden = true;
+      sequence++;
       getEditor()?.find.finish();
     },
     go(delta) {
       if (el.hidden) return api.show(false);
-      show(getEditor()?.find.go(delta));
+      update(getEditor()?.find.go(delta));
     },
     /** Re-applies the query after the editor was replaced. */
     refresh() {
+      if (!editable()) el.classList.remove('with-replace');
       if (!el.hidden) search();
     },
   };
@@ -54,7 +64,7 @@ export function createFindbar(el, { getEditor }) {
   });
   replacement.addEventListener('keydown', (event) => {
     if (event.isComposing) return;
-    if (event.key === 'Enter') show(getEditor()?.find.replace(replacement.value));
+    if (event.key === 'Enter' && editable()) show(getEditor()?.find.replace(replacement.value));
     else if (event.key === 'Escape') api.close();
     else return;
     event.preventDefault();
@@ -63,10 +73,11 @@ export function createFindbar(el, { getEditor }) {
   el.querySelector('.next').addEventListener('click', () => api.go(1));
   el.querySelector('.close').addEventListener('click', () => api.close());
   el.querySelector('.toggle-replace').addEventListener('click', () => {
+    if (!editable()) return;
     el.classList.toggle('with-replace');
     if (el.classList.contains('with-replace')) replacement.focus();
   });
-  el.querySelector('.replace-one').addEventListener('click', () => show(getEditor()?.find.replace(replacement.value)));
-  el.querySelector('.replace-all').addEventListener('click', () => show(getEditor()?.find.replaceAll(replacement.value)));
+  el.querySelector('.replace-one').addEventListener('click', () => { if (editable()) show(getEditor()?.find.replace(replacement.value)); });
+  el.querySelector('.replace-all').addEventListener('click', () => { if (editable()) show(getEditor()?.find.replaceAll(replacement.value)); });
   return api;
 }

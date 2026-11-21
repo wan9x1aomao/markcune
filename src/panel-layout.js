@@ -1,6 +1,8 @@
 import { normalizePanelLayout, PANEL_LAYOUTS, resolvePanelLayout } from './panel-layout-model.js';
+import { formatKeys } from './ui.js';
 
 const labels = { sidebar: '文件', outline: '大纲', content: '正文' };
+const panelShortcuts = { sidebar: 'Mod+Shift+L', outline: 'Mod+Shift+T' };
 const rect = (element, box) => {
   Object.assign(element.style, { left: `${box.x}px`, top: `${box.y}px`, width: `${box.width}px`, height: `${box.height}px`, right: 'auto', bottom: 'auto' });
 };
@@ -9,6 +11,9 @@ const rect = (element, box) => {
 export function createPanelLayout({ getSettings, persist, setPanel, beforeChange = () => null, afterChange = () => {}, onError = () => {} }) {
   const workspace = document.getElementById('workspace');
   const panels = Object.fromEntries(['sidebar', 'outline'].map(name => [name, document.getElementById(name)]));
+  const toggles = Object.fromEntries(Object.keys(panels).map(name => [name, document.getElementById(`toggle-${name}`)]));
+  const fileToggle = toggles.sidebar;
+  const toolbarLeft = fileToggle.parentElement;
   const listeners = new Set();
   let drawer = null, model, restoration = 0;
   document.body.classList.add('panels-managed');
@@ -35,23 +40,45 @@ export function createPanelLayout({ getSettings, persist, setPanel, beforeChange
   function apply() {
     const style = getComputedStyle(document.documentElement);
     const settings = getSettings();
-    model = resolvePanelLayout({ preferences: settings.panelLayout, sidebar: settings.sidebar !== false, outline: !!settings.outline, width: innerWidth, height: innerHeight, inset: parseFloat(style.getPropertyValue('--inset')) || 8, header: parseFloat(style.getPropertyValue('--topbar-h')) || 44, focus: document.body.classList.contains('focus'), drawer });
+    const previous = model;
+    model = resolvePanelLayout({ preferences: settings.panelLayout, sidebar: !document.body.classList.contains('reader') && settings.sidebar !== false, outline: !!settings.outline, width: innerWidth, height: innerHeight, inset: parseFloat(style.getPropertyValue('--inset')) || 8, header: parseFloat(style.getPropertyValue('--topbar-h')) || 44, focus: document.body.classList.contains('focus'), drawer });
+    const fileSide = model.sides.sidebar;
+    if (fileToggle.dataset.dock !== fileSide) {
+      const right = fileSide === 'right';
+      if (right) toggles.outline.before(fileToggle);
+      else toolbarLeft.prepend(fileToggle);
+      fileToggle.dataset.dock = fileSide;
+      fileToggle.classList.toggle('round-button', right);
+      fileToggle.classList.toggle('icon-button', !right);
+    }
+    const stackChanges = previous && (previous.split || model.split) &&
+      Object.keys(panels).some(name => previous.boxes[name].visible !== model.boxes[name].visible);
+    const drawerOpen = model.compact && Object.values(model.boxes).some(box => box.visible);
     document.body.classList.toggle('panels-compact', model.compact);
-    document.body.classList.toggle('panel-drawer-open', model.compact && Object.values(model.boxes).some(box => box.visible));
     workspace.style.setProperty('--layout-content-left', `${model.contentLeft}px`);
     workspace.style.setProperty('--layout-content-right', `${model.contentRight}px`);
     for (const [name, panel] of Object.entries(panels)) {
-      const box = model.boxes[name]; panel.hidden = !box.visible; panel.dataset.dock = box.side; rect(panel, box);
+      const box = model.boxes[name];
+      const oldBox = previous?.boxes[name];
+      panel.classList.toggle('panel-stack-transition', !!stackChanges && box.visible && oldBox.visible && oldBox.side === box.side);
+      panel.hidden = !box.visible;
+      panel.inert = !box.visible;
+      // Keep the last visible rectangle until the panel fades out.
+      if (box.visible) rect(panel, box);
+      panel.dataset.dock = box.side;
       if (model.tabs) { panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', `dock-tab-${name}`); }
       else { panel.removeAttribute('role'); panel.removeAttribute('aria-labelledby'); }
-      const button = document.getElementById('toggle-' + name);
+      const button = toggles[name];
+      const label = `${box.visible ? '收起' : '显示'}${name === 'sidebar' ? '文件列表' : labels[name]}`;
       button.classList.toggle('on', box.visible); button.setAttribute('aria-pressed', String(box.visible));
-      button.setAttribute('aria-label', `${box.visible ? '收起' : '显示'}${labels[name]}${name === 'sidebar' ? '列表' : ''}`);
+      button.setAttribute('aria-label', label);
+      button.title = `${label}（${formatKeys(panelShortcuts[name])}）`;
     }
     tabs.hidden = !model.tabs;
     if (model.tabs) rect(tabs, model.tabs);
     tabs.querySelectorAll('button').forEach(button => button.setAttribute('aria-selected', String(button.dataset.panel === model.prefs.tab)));
-    scrim.hidden = !document.body.classList.contains('panel-drawer-open');
+    scrim.hidden = !drawerOpen;
+    scrim.inert = !drawerOpen;
     for (const side of ['left', 'right']) { const handle = grips[side]; handle.hidden = !model.grips[side]; if (!handle.hidden) { rect(handle, model.grips[side]); handle.setAttribute('aria-valuenow', String(Math.round(model.widths[side]))); } }
     grips.horizontal.hidden = !model.split;
     if (model.split) { rect(grips.horizontal, model.split); grips.horizontal.setAttribute('aria-valuenow', String(Math.round(model.prefs.ratio * 100))); }

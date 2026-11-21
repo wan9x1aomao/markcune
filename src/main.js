@@ -1,5 +1,6 @@
 import './style.css';
 import './panel-layout.css';
+import './reader.css';
 import { api, appWindow, isTauri, saveImageParts } from './bridge.js';
 import { ai, onAiChange } from './ai-core.js';
 import { installReview } from './ai-review.js';
@@ -20,7 +21,7 @@ import { downloadNotice } from './notices.js';
 import { createOutline } from './outline.js';
 import { createPanelLayout } from './panel-layout.js';
 import { openPalette } from './palette.js';
-import { basename, dirname, isInside, relative, samePath, splitExtension } from './paths.js';
+import { basename, dirname, isInside, portablePath, relative, samePath, splitExtension } from './paths.js';
 import { isRemoteImage } from './remote-image.js';
 import { installShortcuts } from './shortcuts.js';
 import { createSidebar } from './sidebar.js';
@@ -81,6 +82,7 @@ const app = {
   doc: { path: null, draftId: null, raw: '', snapshot: null, saved: null },
   hasDraftContent: false,
   mode: 'rich',
+  automaticReader: false,
   split: false,
   focus: false,
   /** The AI selection button for the current editor, or null in source mode. */
@@ -321,6 +323,7 @@ async function exportImageSource(src) {
 function refreshRemoteImages() {
   const editor = app.editor;
   if (!editor?.getMarkdown) return;
+  if (editor.kind === 'reader') return editor.refreshImages?.();
   const position = editor.getPosition?.();
   const markdown = editor.getMarkdown();
   editor.setMarkdown(markdown);
@@ -420,13 +423,28 @@ async function mountEditor(content, position) {
   els.sourcePane.replaceChildren();
 
   const source = app.mode === 'source';
+  const reading = app.mode === 'reader';
+  document.body.classList.toggle('reader', reading);
+  applyPanels();
   els.sourcePane.hidden = !source;
   els.richPane.hidden = source && !app.split;
   document.body.classList.toggle('split', source && app.split);
 
   let editor;
   try {
-  if (source) {
+  if (reading) {
+    const { createReader } = await import('./reader.js');
+    try {
+      editor = await createReader({
+        ...editorOptions(), root: els.editorRoot, content, scroller: els.richPane,
+        onWordCount: () => { if (app.editor === editor) updateWordCount(); },
+      });
+    } catch {
+      const { createSourceEditor } = await import('./source.js');
+      editor = createSourceEditor({ root: els.editorRoot, content, scroller: els.richPane, readonly: true });
+      toast('这份文档以纯文本只读打开。');
+    }
+  } else if (source) {
     const { createSourceEditor } = await import('./source.js');
     editor = createSourceEditor({ root: els.sourcePane, content, scroller: els.sourcePane, onChange });
     if (app.split) {
@@ -451,7 +469,7 @@ async function mountEditor(content, position) {
   }
   performance.mark('mdpad:mount-created');
   app.doc.snapshot = editor.snapshot();
-  const typed = mountBaseline(typing.typed());
+  const typed = mountBaseline(!reading && typing.typed());
   if (typed.replaceSnapshot) app.doc.snapshot = null;
   performance.mark('mdpad:mount-serialized');
   app.editor = editor;
@@ -467,7 +485,7 @@ async function mountEditor(content, position) {
   findbar.refresh();
   syncModeSwitch();
   updateEmpty();
-  tidyHint.schedule();
+  if (!reading) tidyHint.schedule();
   // Re-adding the class restarts the animation, so every mount fades in — including a mode switch.
   els.panes.classList.remove('fresh');
   void els.panes.offsetWidth;
@@ -503,7 +521,7 @@ function scheduleWordCount() {
 }
 
 function onChange() {
-  if (!acceptsEdit(app.editor)) return;
+  if (app.mode === 'reader' || !acceptsEdit(app.editor)) return;
   app.revision += 1;
   scheduleWordCount();
   if (document.body.classList.contains('empty')) setEmpty(false);
@@ -527,7 +545,7 @@ function save({ force = false } = {}) {
 }
 
 async function writeNow(force) {
-  if (!app.editor || (!app.pending && !force)) return;
+  if (!app.editor || app.mode === 'reader' || (!app.pending && !force)) return;
   if (app.status === 'conflict' && !force) return;
   if (app.doc.path && !force && app.editor.matches(app.doc.snapshot)) {
     // Edited back to what is on disk (e.g. typed, then undid it).
@@ -674,14 +692,33 @@ async function withProgress(task) {
   }
 }
 
-async function openFile(path, { keepRoot = false } = {}) {
-  if (samePath(path, app.doc.path)) return;
-  return withProgress(() => openFileNow(path, keepRoot));
+async function openFile(path, { keepRoot = false, mode } = {}) {
+  if (samePath(path, app.doc.path)) {
+    if (mode && currentMode() !== mode) return setMode(mode, false);
+    return;
+  }
+  return withProgress(() => openFileNow(path, keepRoot, mode));
 }
 
-async function openFileNow(path, keepRoot = false) {
+function readFirst(content, bytes = content.length) {
+  if (bytes >= 2 * 1024 * 1024) return true;
+  if (content.length <= 32 * 1024) return false;
+  const separator = /^ {0,3}\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$/;
+  let rows = 0;
+  let previous = '';
+  for (const line of content.split('\n')) {
+    if (previous.includes('|') && separator.test(line)) rows = 1;
+    else if (rows && line.trim() && !/^ {0,3}(?:#{1,6}\s|>[ \t]|[-+*][ \t]|```|~~~)/.test(line)) rows++;
+    else rows = 0;
+    if (rows >= 400) return true;
+    previous = line;
+  }
+  return false;
+}
+
+async function openFileNow(path, keepRoot, requestedMode) {
   // Never drop an unsaved draft: open the file next to it instead.
-  if (!app.doc.path && app.hasDraftContent) return api.openInNewWindow(path);
+  if (!app.doc.path && app.hasDraftContent) return api.openInNewWindow(path, requestedMode);
   await save();
   rememberPosition();
   let opened;
@@ -699,6 +736,11 @@ async function openFileNow(path, keepRoot = false) {
   app.hasDraftContent = false;
   app.pending = false;
   hideBanner();
+  updateTitle();
+  const preferred = requestedMode ?? (app.automaticReader ? 'rich' : app.mode);
+  app.automaticReader = preferred === 'rich' && !requestedMode && readFirst(opened.content, opened.bytes);
+  app.mode = app.automaticReader ? 'reader' : preferred;
+  if (app.mode !== 'source' || requestedMode) app.split = false;
   // A pinned file is usually outside the open folder: opening it must not tear that folder down.
   if (!keepRoot && (!app.root || !isInside(opened.path, app.root))) {
     try {
@@ -710,7 +752,6 @@ async function openFileNow(path, keepRoot = false) {
   }
   await mountEditor(opened.content, opened.position);
   setStatus('saved');
-  updateTitle();
   await sidebar.setActive(opened.path);
 }
 
@@ -721,10 +762,10 @@ async function openFolder(path) {
   if (!app.settings.sidebar) setPanel('sidebar', true);
 }
 
-async function openFileDialog() {
+async function openFileDialog(mode) {
   const [first, ...rest] = await api.pickDocuments();
-  if (first) await openFile(first);
-  for (const path of rest) api.openInNewWindow(path);
+  if (first) await openFile(first, { mode });
+  for (const path of rest) api.openInNewWindow(path, mode);
 }
 
 // Downloads a pasted link into the library folder and opens it. A repository comes down as a whole
@@ -784,9 +825,13 @@ async function newDocument(dir) {
 }
 
 function onRenamed(from, to) {
-  if (app.doc.path && (samePath(app.doc.path, from) || isInside(app.doc.path, from))) {
+  from = portablePath(from);
+  to = portablePath(to);
+  app.documents = null;
+  const openPath = app.doc.path && portablePath(app.doc.path);
+  if (openPath && (samePath(openPath, from) || isInside(openPath, from))) {
     const previousKey = tableDocKey();
-    app.doc.path = to + app.doc.path.slice(from.length);
+    app.doc.path = to + openPath.slice(from.length);
     moveTableWidths(previousKey, tableDocKey());
     updateTitle();
     sidebar.setActive(app.doc.path);
@@ -886,23 +931,53 @@ async function renameCurrent() {
 
 async function setMode(mode, split) {
   if (!app.editor) return;
+  const previous = app.editor;
+  if (mode === 'reader') {
+    if (app.pending) await save();
+    else await app.saving;
+    if (app.editor !== previous) return;
+    if (app.pending) return toast('请先处理保存提示，再进入阅读模式。');
+  }
+  const snapshot = previous.snapshot();
+  const revision = app.revision;
   const matches = app.editor.matches(app.doc.snapshot);
   // Unedited documents are shown exactly as stored on disk.
-  const unchanged = app.editor.kind === 'rich' && matches && app.doc.raw;
-  const content = mode === 'source' && unchanged ? app.doc.raw : app.editor.getMarkdown();
+  const unchanged = matches && app.doc.raw;
+  const content = (mode === 'source' || mode === 'reader') && unchanged
+    ? app.doc.raw
+    : await previous.getMarkdownAsync(snapshot);
+  if (app.editor !== previous) return;
+  if (app.revision !== revision) return toast('文档刚有新的输入，请再切换一次。');
   const pane = app.mode === 'source' ? els.sourcePane : els.richPane;
   const ratio = pane.scrollTop / Math.max(1, pane.scrollHeight - pane.clientHeight);
+  const position = previous.getPosition();
+  if (mode === 'reader') {
+    const headings = previous.headings();
+    position.heading = headings[previous.activeHeading(headings)]?.text;
+    position.progress = ratio;
+  }
   const pending = app.pending;
   app.mode = mode;
   app.split = split;
-  await mountEditor(content);
+  app.automaticReader = false;
+  await mountEditor(content, mode === 'reader' ? position : undefined);
   // Edits not yet on disk must still be written, so the new editor doesn't match the disk.
   if (!matches) app.doc.snapshot = null;
   if (pending) onChange();
   const next = mode === 'source' ? els.sourcePane : els.richPane;
-  requestAnimationFrame(() => (next.scrollTop = ratio * (next.scrollHeight - next.clientHeight)));
+  if (mode !== 'reader') {
+    const editor = app.editor;
+    requestAnimationFrame(() => {
+      if (app.editor !== editor) return;
+      const heading = previous.kind === 'reader' && editor.headings().find((item) => item.text === position.heading);
+      if (heading) editor.scrollToHeading(heading);
+      else next.scrollTop = ratio * (next.scrollHeight - next.clientHeight);
+    });
+  }
   app.editor.focus();
 }
+
+const glideAnimations = new WeakMap();
 
 /**
  * FLIP: apply a layout change in one step, then let the document and the top bar glide from
@@ -910,28 +985,32 @@ async function setMode(mode, split) {
  */
 function glide(change) {
   const targets = [els.panes, els.modeSwitch, document.querySelector('.topbar-left'), document.querySelector('#topbar .actions')];
+  if (!els.empty.hidden) targets.push(els.empty.querySelector('.empty-card'));
   const anchor = (target) =>
     target === els.panes
       ? (els.richPane.hidden ? els.sourcePane.querySelector('.cm-content') : els.editorRoot.querySelector('.milkdown')) ?? target
       : target;
   const before = targets.map((target) => anchor(target).getBoundingClientRect().left);
+  for (const target of targets) glideAnimations.get(target)?.cancel();
   change();
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  const style = getComputedStyle(document.documentElement);
+  const timing = {
+    duration: parseFloat(style.getPropertyValue('--t-small')),
+    easing: style.getPropertyValue('--ease').trim(),
+  };
   targets.forEach((target, i) => {
     const dx = before[i] - anchor(target).getBoundingClientRect().left;
-    target.classList.remove('glide');
-    target.style.translate = Math.abs(dx) > 0.5 ? `${dx}px 0` : '';
+    if (Math.abs(dx) <= 0.5) return;
+    const animation = target.animate([{ translate: `${dx}px 0` }, { translate: '0px 0' }], timing);
+    glideAnimations.set(target, animation);
   });
-  void document.body.offsetWidth;
-  for (const target of targets) {
-    target.classList.add('glide');
-    target.style.translate = '';
-  }
 }
 
 function applyPanels() {
   document.body.classList.toggle('sidebar-hidden', !app.settings.sidebar);
   document.body.classList.toggle('outline-open', !!app.settings.outline);
-  $('toggle-outline').classList.toggle('on', !!app.settings.outline);
   panelLayout.apply();
 }
 
@@ -955,9 +1034,9 @@ function setFocus(on) {
   app.editor?.focus();
 }
 
-// Mode switch (所见即所得 / 源码 / 分屏)
+// Mode switch (阅读 / 编辑 / 源码 / 分屏)
 
-const currentMode = () => (app.mode === 'source' ? (app.split ? 'split' : 'source') : 'rich');
+const currentMode = () => (app.split ? 'split' : app.mode);
 
 function syncModeSwitch() {
   const buttons = [...els.modeSwitch.querySelectorAll('button[data-mode]')];
@@ -972,8 +1051,7 @@ function syncModeSwitch() {
 els.modeSwitch.addEventListener('click', (event) => {
   const mode = event.target.closest('button[data-mode]')?.dataset.mode;
   if (!mode || mode === currentMode() || !app.editor) return;
-  if (mode === 'rich') setMode('rich', false);
-  else setMode('source', mode === 'split');
+  setMode(mode === 'split' ? 'source' : mode, mode === 'split');
 });
 
 // Empty state: an untouched untitled document shows what you can do; typing just starts writing.
@@ -1073,6 +1151,21 @@ els.sourcePane.addEventListener('scroll', () => onScroll(els.sourcePane), { pass
 
 /** The document to export: the rich editor's, or the split view's preview (brought up to date). */
 async function exportDocument() {
+  if (app.editor?.kind === 'reader') {
+    const root = document.createElement('div');
+    root.style.cssText = 'position:absolute;left:-10000px;width:760px;visibility:hidden;pointer-events:none';
+    document.body.append(root);
+    let preview;
+    try {
+      preview = await createRichEditor({
+        ...editorOptions(), root, content: app.editor.getMarkdown(), readonly: true, scroller: root,
+      });
+      return preview.view.state.doc;
+    } finally {
+      await preview?.destroy();
+      root.remove();
+    }
+  }
   if (app.editor?.kind !== 'rich' && !app.preview) await setMode('rich', false);
   if (app.preview) {
     clearTimeout(previewTimer);
@@ -1248,6 +1341,7 @@ const actions = {
   'new-window': () => api.newWindow(),
   'new-document': () => newDocument(),
   'open-file': openFileDialog,
+  'open-source-file': () => openFileDialog('source'),
   'open-folder': () => openFolder(),
   'open-from-url': openFromUrl,
   'quick-open': () => showPalette('files'),
@@ -1300,9 +1394,10 @@ const actions = {
     }),
   'theme-toggle': toggleTheme,
   find: () => findbar.show(false),
-  replace: () => findbar.show(true),
+  replace: () => findbar.show(app.mode !== 'reader'),
   'find-next': () => findbar.go(1),
   'find-previous': () => findbar.go(-1),
+  'toggle-reader': () => setMode(app.mode === 'reader' ? 'rich' : 'reader', false),
   'toggle-source': () => setMode(app.mode === 'source' && !app.split ? 'rich' : 'source', false),
   'toggle-split': () => (app.split ? setMode('rich', false) : setMode('source', true)),
   'toggle-focus': () => setFocus(!app.focus),
@@ -1325,7 +1420,10 @@ for (const id of ['bold', 'italic', 'strikethrough', 'inline-code', 'undo', 'red
   actions[id] = () => app.editor?.command(id);
 }
 
+const readerEditingActions = new Set(['save', 'save-as', 'rename', 'tidy', 'bold', 'italic', 'strikethrough', 'inline-code', 'undo', 'redo', 'toggle-sidebar']);
+
 function run(id) {
+  if (app.mode === 'reader' && readerEditingActions.has(id)) return;
   actions[id]?.();
 }
 
@@ -1362,6 +1460,7 @@ function showMore(anchor) {
     : [
         item('new-window'),
         item('open-file'),
+        item('open-source-file'),
         item('open-folder'),
         item('open-from-url'),
         item('quick-open'),
@@ -1458,15 +1557,14 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 const buttons = {
-  'toggle-sidebar': [icons.sidebar, `显示文件列表（${formatKeys('Mod+Shift+L')}）`, () => run('toggle-sidebar')],
-  'sidebar-collapse': [icons.sidebar, `收起文件列表（${formatKeys('Mod+Shift+L')}）`, () => run('toggle-sidebar')],
+  'toggle-sidebar': [icons.sidebar, null, () => run('toggle-sidebar')],
   'sidebar-search': [icons.search, `快速打开（${formatKeys('Mod+P')}）`, () => run('quick-open')],
-  'toggle-outline': [icons.outline, `大纲（${formatKeys('Mod+Shift+T')}）`, () => run('toggle-outline')],
+  'toggle-outline': [icons.outline, null, () => run('toggle-outline')],
   'open-more': [icons.more, '更多', (event) => showMore(event.currentTarget)],
 };
 for (const [id, [icon, title, onClick]] of Object.entries(buttons)) {
   $(id).innerHTML = icon;
-  $(id).title = title;
+  if (title) $(id).title = title;
   $(id).addEventListener('click', onClick);
 }
 
@@ -1483,23 +1581,63 @@ document.addEventListener('keydown', (event) => {
   else if (app.focus) setFocus(false);
 });
 
-// A web page can't learn a dropped file's path, so dropped documents are opened via the menu.
-document.addEventListener(
-  'drop',
-  (event) => {
-    const files = [...(event.dataTransfer?.files ?? [])];
-    if (files.some((f) => /\.(md|markdown|mdown|mkd|txt)$/i.test(f.name))) {
-      event.preventDefault();
-      event.stopPropagation();
-      toast('请用“文件 › 打开文件…”打开文档');
-    }
-  },
-  true,
-);
+const dropOverlay = $('drop-overlay');
+function showDrop(hint) {
+  const message = hint?.folders && hint?.files ? '松开打开文件和文件夹'
+    : hint?.folders ? '松开打开文件夹'
+    : hint?.files ? '松开打开文档'
+    : hint?.images && app.mode === 'rich' ? '松开插入图片'
+    : hint?.generic ? '松开打开文件或文件夹'
+    : hint ? '请拖入 Markdown、纯文本文件或文件夹' : '';
+  dropOverlay.querySelector('.drop-message').textContent = message;
+  dropOverlay.classList.toggle('unsupported', !!hint && !hint.generic && !hint.files && !hint.folders && (!hint.images || app.mode !== 'rich'));
+  dropOverlay.hidden = !message;
+}
+api.on('file-drop-hover', showDrop);
+api.on('file-drop-unsupported', () => toast('支持拖入 Markdown、纯文本文件或文件夹。'));
+api.on('file-drop-images', (images) => {
+  if (app.mode !== 'rich') return toast('切到编辑模式后可拖入图片。');
+  const editor = app.editor?.view;
+  if (!editor?.editable) return;
+  const transfer = new DataTransfer();
+  for (const { data, name } of images) {
+    const [header, bytes] = data.split(',', 2);
+    transfer.items.add(new File([Uint8Array.from(atob(bytes), (character) => character.charCodeAt(0))],
+      name || '图片.png', { type: header.slice(5).split(';')[0] }));
+  }
+  editor.focus();
+  editor.dom.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }));
+});
+
+// Finder drops are opened by the native WKWebView hook; HTML5 stays responsible for image insertion.
+document.addEventListener('dragenter', (event) => {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  const items = [...event.dataTransfer.items].filter((item) => item.kind === 'file');
+  const imageDrop = items.length && items.every((item) => item.type.startsWith('image/'));
+  if (imageDrop && app.mode === 'rich' && event.target.closest('#editor')) return;
+  showDrop(imageDrop ? { images: items.length } : { generic: true });
+});
+document.addEventListener('dragleave', (event) => { if (!event.relatedTarget) showDrop(null); });
+window.addEventListener('blur', () => showDrop(null));
+document.addEventListener('drop', (event) => {
+  showDrop(null);
+  const files = [...(event.dataTransfer?.files ?? [])];
+  if (!files.length || (app.mode === 'rich' && event.target.closest('#editor') &&
+      files.every((file) => file.type.startsWith('image/')))) return;
+  event.preventDefault();
+  event.stopPropagation();
+  toast('支持拖入 Markdown、纯文本文件或文件夹。');
+}, true);
 document.addEventListener('dragover', (event) => event.preventDefault());
 
 api.on('menu', run);
-api.on('open-path', ({ path, isDir }) => (isDir ? openFolder(path) : openFile(path)));
+api.on('open-path', ({ path, isDir, dropped }) => {
+  showDrop(null);
+  if (dropped && (app.hasDraftContent || app.pending || ['saving', 'error', 'conflict'].includes(app.status))) {
+    return api.openInNewWindow(path);
+  }
+  return isDir ? openFolder(path) : openFile(path);
+});
 api.on('fs-changed', async ({ docChanged, dirs }) => {
   app.documents = null;
   await sidebar.refreshDirs(dirs);
@@ -1595,7 +1733,7 @@ app.pinned = init.pinnedFiles ?? [];
 sidebar.setPinned(app.pinned);
 
 const startup = init.startup;
-if (startup.kind === 'file') await openFile(startup.path);
+if (startup.kind === 'file') await openFile(startup.path, { mode: startup.mode });
 else if (startup.kind === 'folder') await setRoot(startup.path);
 if (startup.kind === 'draft') {
   app.doc.draftId = startup.id;

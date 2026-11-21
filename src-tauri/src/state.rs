@@ -16,7 +16,11 @@ use crate::store::Store;
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Startup {
     Empty,
-    File { path: PathBuf },
+    File {
+        path: PathBuf,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        mode: Option<String>,
+    },
     Folder { path: PathBuf },
     Draft { id: String, content: String },
 }

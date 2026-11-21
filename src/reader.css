@@ -1,0 +1,81 @@
+body.panels-managed.reader #toggle-sidebar,
+body.reader .voice-button,
+body.reader #tidy-hint,
+body.reader #findbar .toggle-replace {
+  display: none !important;
+}
+
+body.reader #rich-pane { overflow-anchor: none; }
+
+.reader-document {
+  width: min(100%, 800px);
+  margin: 0 auto;
+  padding: 30px clamp(24px, 5vw, 56px) 76px;
+  color: var(--text);
+  font: 16px/1.78 var(--font-text);
+  overflow-wrap: anywhere;
+  outline: none;
+  user-select: text;
+}
+.reader-page { display: flow-root; }
+.reader-document :is(h1, h2, h3, h4, h5, h6) { line-height: 1.38; margin: 1.25em 0 .5em; }
+.reader-document h1 { font-size: 2em; }
+.reader-document h2 { font-size: 1.45em; padding-bottom: .26em; border-bottom: 1px solid var(--line); }
+.reader-document h3 { font-size: 1.16em; }
+.reader-document :is(p, ul, ol) { margin: 0 0 .95em; }
+.reader-document :is(ul, ol) { padding-left: 1.65em; }
+.reader-document li > :is(p, ul, ol) { margin: .23em 0; }
+.reader-document a { color: var(--accent-text); }
+.reader-document blockquote {
+  margin: 0 0 1em;
+  padding: 0 .85em;
+  border-left: 3px solid var(--line-strong);
+  color: var(--text-muted);
+}
+.reader-document blockquote > :last-child { margin-bottom: 0; }
+.reader-document pre {
+  margin: 0 0 1em;
+  overflow: auto;
+  padding: .9em 1em;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--code-bg);
+  overflow-wrap: normal;
+}
+.reader-document code { font-family: var(--font-code); font-size: .88em; }
+.reader-document :not(pre) > code { padding: .12em .35em; border-radius: 5px; background: var(--inline-code-bg); color: var(--inline-code); }
+.reader-document hr { border: 0; border-top: 1px solid var(--line); margin: 1.4em 0; }
+.reader-document table { width: 100%; border-collapse: collapse; margin: .35em 0 1em; font-size: .92em; }
+.reader-document :is(th, td) { border: 1px solid var(--line-strong); padding: .45em .7em; vertical-align: top; }
+.reader-document th { background: var(--code-head); font-weight: 600; }
+.reader-document .reader-table { overflow-x: auto; }
+.reader-document img, .reader-diagram svg { max-width: 100%; height: auto; }
+.reader-document img { border-radius: 8px; }
+.reader-document li:has(> input[type="checkbox"], > p > input[type="checkbox"]) { list-style: none; }
+.reader-document input[type="checkbox"] { pointer-events: none; }
+.reader-document .reader-note { border-top: 1px solid var(--line); margin-top: .8em; padding-top: .55em; }
+.reader-document .reader-note p { display: inline; margin-left: .6em; }
+.reader-math[data-reader-math="block"] { overflow-x: auto; }
+.reader-match { background: var(--find-current); color: inherit; border-radius: 2px; }
+
+#drop-overlay {
+  position: fixed;
+  inset: var(--topbar-h) 8px 8px;
+  z-index: 50;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--app-bg) 84%, transparent);
+}
+.drop-message {
+  padding: 12px 20px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+#drop-overlay.unsupported { border-color: var(--line-strong); }

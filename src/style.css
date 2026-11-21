@@ -492,11 +492,6 @@ body.outline-open:not(.focus) #content {
   right: calc(var(--outline-w) + 2 * var(--inset));
 }
 
-/* FLIP: layout changes once, then these glide from where they were (see glide() in main.js). */
-.glide {
-  transition: translate var(--t-med) var(--ease);
-}
-
 /* Top bar */
 
 #topbar {
@@ -939,16 +934,20 @@ body.empty #editor [data-placeholder]::before {
 /* With no document open there is nothing to switch between, so the mode switch steps aside —
    hidden, not removed, so the top bar keeps its layout and nothing jumps when typing starts. */
 #mode-switch {
+  grid-template-columns: repeat(4, 1fr);
   transition: opacity var(--t-small) var(--ease), visibility 0s;
 }
+#mode-switch .thumb { width: calc((100% - 6px) / 4); }
 body.empty #mode-switch {
   opacity: 0;
   visibility: hidden;
   transition: opacity var(--t-small) var(--ease), visibility 0s linear var(--t-small);
 }
-/* Two-character labels: the three cells no longer need 80px each, which keeps the switch compact. */
 #mode-switch button {
-  min-width: 68px;
+  min-width: 55px;
+}
+@media (max-width: 760px) {
+  #mode-switch button { min-width: 44px; }
 }
 
 /* Side panel contents */

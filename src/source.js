@@ -86,12 +86,14 @@ function headingsOf(doc) {
 }
 
 /** Same interface as the rich editor. Options: root, content, scroller, onChange. */
-export function createSourceEditor({ root, content, scroller, onChange }) {
+export function createSourceEditor({ root, content, scroller, onChange, readonly = false }) {
   const view = new EditorView({
     parent: root,
     state: EditorState.create({
       doc: content,
       extensions: [
+        EditorState.readOnly.of(readonly),
+        EditorView.editable.of(!readonly),
         history(),
         drawSelection(),
         EditorView.lineWrapping,
@@ -113,7 +115,7 @@ export function createSourceEditor({ root, content, scroller, onChange }) {
     view.dispatch({ effects: EditorView.scrollIntoView(match.from, { y: 'center' }) });
 
   return {
-    kind: 'source',
+    kind: readonly ? 'reader' : 'source',
     view,
     getMarkdown: () => view.state.doc.toString(),
     getWordCount: () => countMarkdownWords(view.state.doc.toString()),
@@ -124,7 +126,7 @@ export function createSourceEditor({ root, content, scroller, onChange }) {
     focus: () => view.focus(),
     /** Inserts plain text at the cursor, replacing the selection (voice input lands here). */
     insert(text) {
-      if (!text) return;
+      if (!text || readonly) return;
       const { from, to } = view.state.selection.main;
       view.dispatch({
         changes: { from, to, insert: text },
@@ -134,6 +136,7 @@ export function createSourceEditor({ root, content, scroller, onChange }) {
       view.focus();
     },
     command(id) {
+      if (readonly) return;
       if (id === 'undo') undo(view);
       else if (id === 'redo') redo(view);
       else if (WRAPPERS[id]) {

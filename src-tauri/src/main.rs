@@ -41,27 +41,34 @@ fn create_window(app: &AppHandle, startup: Startup) {
     state.windows.lock().unwrap().insert(label.clone(), WinState { startup: Some(startup.clone()), ..Default::default() });
     grant_startup(app, &label, &startup);
 
-    // Native file drops are off so HTML5 drag and drop (block handles, image drops) works on Windows too.
-    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
-        .title("MarkCune")
-        .inner_size(1100.0, 760.0)
-        .min_inner_size(520.0, 360.0)
-        .disable_drag_drop_handler();
-    // Windows: the page draws its own title bar with window buttons (no native title or menu bar).
-    #[cfg(windows)]
-    {
-        builder = builder.decorations(false).shadow(true);
-    }
-    #[cfg(target_os = "macos")]
-    {
-        // The page's top bar doubles as the title bar.
-        builder = builder
-            .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .hidden_title(true)
-            .traffic_light_position(tauri::LogicalPosition::new(16.0, 21.0));
-    }
+    let config = tauri::utils::config::WindowConfig {
+        label: label.clone(),
+        url: WebviewUrl::App("index.html".into()),
+        title: "MarkCune".into(),
+        width: 1100.0,
+        height: 760.0,
+        min_width: Some(520.0),
+        min_height: Some(360.0),
+        // On macOS the WebKit drop hook forwards editor drags to the original handler.
+        drag_drop_enabled: cfg!(not(target_os = "macos")),
+        #[cfg(windows)]
+        decorations: false,
+        #[cfg(target_os = "macos")]
+        title_bar_style: tauri::TitleBarStyle::Overlay,
+        #[cfg(target_os = "macos")]
+        hidden_title: true,
+        // Configure the native window as well as the webview so AppKit restores
+        // the inset after a title change. This centers the buttons on the 44px top bar.
+        #[cfg(target_os = "macos")]
+        traffic_light_position: Some(tauri::utils::config::LogicalPosition { x: 16.0, y: 24.0 }),
+        ..Default::default()
+    };
+    let Ok(builder) = WebviewWindowBuilder::from_config(app, &config) else {
+        state.windows.lock().unwrap().remove(&label);
+        return;
+    };
     let parent = focused_window(app).and_then(|w| Some((w.outer_position().ok()?, w.scale_factor().ok()?)));
-    builder = match parent {
+    let builder = match parent {
         Some((position, scale)) => {
             let position = position.to_logical::<f64>(scale);
             builder.position(position.x + 24.0, position.y + 24.0)
@@ -75,7 +82,7 @@ fn create_window(app: &AppHandle, startup: Startup) {
 
 fn grant_startup(app: &AppHandle, label: &str, startup: &Startup) {
     match startup {
-        Startup::File { path } => files::grant_named_file(app, label, path),
+        Startup::File { path, .. } => files::grant_named_file(app, label, path),
         Startup::Folder { path } => files::grant_dir(app, label, path),
         Startup::Empty | Startup::Draft { .. } => {}
     }
@@ -85,7 +92,7 @@ fn grant_startup(app: &AppHandle, label: &str, startup: &Startup) {
 fn open_path(app: &AppHandle, path: PathBuf) {
     let path = absolute(&path);
     let is_dir = path.is_dir();
-    let startup = if is_dir { Startup::Folder { path: path.clone() } } else { Startup::File { path: path.clone() } };
+    let startup = if is_dir { Startup::Folder { path: path.clone() } } else { Startup::File { path: path.clone(), mode: None } };
 
     enum Target {
         Focus(String),
@@ -172,11 +179,18 @@ fn handle_menu(app: &AppHandle, id: &str) {
         // No window (macOS): still let people open things.
         let handle = app.clone();
         match id {
-            "open-file" => app.dialog().file().add_filter("Markdown 文稿", files::DOC_EXTENSIONS).pick_files(move |paths| {
-                for path in paths.unwrap_or_default().into_iter().filter_map(|p| p.into_path().ok()) {
-                    open_path(&handle, path);
-                }
-            }),
+            "open-file" | "open-source-file" => {
+                let source = id == "open-source-file";
+                app.dialog().file().add_filter("Markdown 文稿", files::DOC_EXTENSIONS).pick_files(move |paths| {
+                    for path in paths.unwrap_or_default().into_iter().filter_map(|p| p.into_path().ok()) {
+                        if source {
+                            create_window(&handle, Startup::File { path, mode: Some("source".into()) });
+                        } else {
+                            open_path(&handle, path);
+                        }
+                    }
+                });
+            }
             "open-folder" => app.dialog().file().pick_folder(move |path| {
                 if let Some(path) = path.and_then(|p| p.into_path().ok()) {
                     open_path(&handle, path);
@@ -233,6 +247,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         &item("new-document", "在文件夹中新建文档", None)?,
         &separator()?,
         &item("open-file", "打开文件…", Some("CmdOrCtrl+O"))?,
+        &item("open-source-file", "以源码打开…", None)?,
         &item("open-folder", "打开文件夹…", Some("CmdOrCtrl+Shift+O"))?,
         &item("open-from-url", "从链接打开…", None)?,
         &item("quick-open", "快速打开…", Some("CmdOrCtrl+P"))?,
@@ -284,6 +299,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     ])?)?;
 
     menu.append(&Submenu::with_items(app, "显示", true, &[
+        &item("toggle-reader", "阅读模式", None)?,
         &item("toggle-source", "源码模式", Some("CmdOrCtrl+/"))?,
         &item("toggle-split", "分屏预览", Some("CmdOrCtrl+Alt+/"))?,
         &item("toggle-focus", "专注模式", Some("F8"))?,
@@ -455,9 +471,10 @@ async fn pick_image(window: WebviewWindow) -> Option<PathBuf> {
 }
 
 #[tauri::command]
-fn open_in_new_window(app: AppHandle, path: PathBuf) {
+fn open_in_new_window(app: AppHandle, path: PathBuf, mode: Option<String>) {
     let path = absolute(&path);
-    let startup = if path.is_dir() { Startup::Folder { path } } else { Startup::File { path } };
+    let mode = mode.filter(|value| value == "source");
+    let startup = if path.is_dir() { Startup::Folder { path } } else { Startup::File { path, mode } };
     create_window(&app, startup);
 }
 
@@ -725,21 +742,64 @@ mod test_hook {
     }
 }
 
-/// Opens documents and folders dropped onto a window from Finder.
-#[cfg(target_os = "macos")]
-fn open_dropped(app: &AppHandle, label: Option<String>, paths: Vec<PathBuf>) {
-    let mut paths = paths.into_iter();
-    if let (Some(label), Some(first)) = (label, paths.next()) {
+fn openable_drop(path: &Path) -> bool {
+    path.is_dir() || (path.is_file() && files::is_document(path))
+}
+
+/// A single drop uses the destination window. A batch has one window per document or folder.
+fn open_dropped(app: &AppHandle, label: Option<&str>, paths: Vec<PathBuf>) {
+    let paths: Vec<_> = paths.into_iter().filter(|path| openable_drop(path)).collect();
+    if let (Some(label), [first]) = (label, paths.as_slice()) {
         let is_dir = first.is_dir();
         if is_dir {
-            files::grant_dir(app, &label, &first);
+            files::grant_dir(app, label, first);
         } else {
-            files::grant_named_file(app, &label, &first);
+            files::grant_named_file(app, label, first);
         }
-        let _ = app.emit_to(label.as_str(), "open-path", json!({ "path": first, "isDir": is_dir }));
+        let _ = app.emit_to(label, "open-path", json!({ "path": first, "isDir": is_dir, "dropped": true }));
+        return;
     }
     for path in paths {
-        open_path(app, path);
+        let startup = if path.is_dir() {
+            Startup::Folder { path }
+        } else {
+            Startup::File { path, mode: None }
+        };
+        create_window(app, startup);
+    }
+}
+
+fn native_file_drop(window: &Window, event: &tauri::DragDropEvent) {
+    use tauri::DragDropEvent;
+    let app = window.app_handle();
+    let label = window.label();
+    match event {
+        DragDropEvent::Enter { paths, .. } => {
+            let folders = paths.iter().filter(|path| path.is_dir()).count();
+            let files = paths.iter().filter(|path| path.is_file() && files::is_document(path)).count();
+            let images = if files + folders == 0 {
+                paths.iter().filter(|path| files::image_target(path).is_some()).count()
+            } else { 0 };
+            let _ = app.emit_to(label, "file-drop-hover", json!({ "files": files, "folders": folders, "images": images }));
+        }
+        DragDropEvent::Drop { paths, .. } => {
+            let _ = app.emit_to(label, "file-drop-hover", Option::<String>::None);
+            if paths.iter().any(|path| openable_drop(path)) {
+                open_dropped(app, Some(label), paths.clone());
+            } else if let Some(webview) = app.get_webview_window(label) {
+                let images: Vec<_> = paths.iter().filter_map(|path| {
+                    let real = files::image_target(path)?;
+                    let pending = with_win(app, label, |w| w.pending_image.replace(real.clone())).flatten();
+                    let result = files::image_data_url(webview.clone(), real);
+                    with_win(app, label, |w| w.pending_image = pending);
+                    result.ok().map(|data| json!({ "data": data, "name": path.file_name() }))
+                }).collect();
+                let event = if images.is_empty() { "file-drop-unsupported" } else { "file-drop-images" };
+                let _ = app.emit_to(label, event, images);
+            }
+        }
+        DragDropEvent::Leave => { let _ = app.emit_to(label, "file-drop-hover", Option::<String>::None); }
+        _ => {}
     }
 }
 
@@ -789,7 +849,7 @@ mod mac_drop {
     extern "C-unwind" fn perform_drag(this: &AnyObject, cmd: Sel, info: *mut AnyObject) -> Bool {
         let openable: Vec<PathBuf> = unsafe { dropped_paths(info) }
             .into_iter()
-            .filter(|p| p.is_dir() || files::is_document(p))
+            .filter(|p| openable_drop(p))
             .collect();
         if let (false, Some(app)) = (openable.is_empty(), APP.get()) {
             let ns_window: *mut AnyObject = unsafe { msg_send![this, window] };
@@ -798,7 +858,10 @@ mod mac_drop {
                 .into_iter()
                 .find(|(_, w)| w.ns_window().is_ok_and(|p| p.cast::<AnyObject>() == ns_window))
                 .map(|(label, _)| label);
-            open_dropped(app, label, openable);
+            if let Some(label) = label.as_deref() {
+                let _ = app.emit_to(label, "file-drop-hover", Option::<String>::None);
+            }
+            open_dropped(app, label.as_deref(), openable);
             return Bool::YES;
         }
         match ORIGINAL.get() {
@@ -862,6 +925,7 @@ fn on_window_event(window: &Window, event: &WindowEvent) {
     let app = window.app_handle();
     let label = window.label();
     match event {
+        WindowEvent::DragDrop(event) => native_file_drop(window, event),
         WindowEvent::CloseRequested { api, .. } => {
             if with_win(app, label, |w| w.close_guard).unwrap_or(false) {
                 api.prevent_close();

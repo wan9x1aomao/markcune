@@ -16,9 +16,15 @@ export function join(dir, name) {
   return dir.endsWith('/') || dir.endsWith('\\') ? dir + name : dir + sep + name;
 }
 
+// The filesystem can return Windows extended paths alongside ordinary drive and UNC paths.
+export function portablePath(path) {
+  return path.replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\(?=[a-z]:\\)/i, '');
+}
+
 function normalized(path) {
-  const forward = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  return /^[a-z]:/i.test(forward) ? forward.toLowerCase() : forward;
+  const portable = portablePath(path);
+  const forward = portable.replace(/\\/g, '/').replace(/\/+$/, '');
+  return /^[a-z]:/i.test(forward) || portable.startsWith('\\\\') ? forward.toLowerCase() : forward;
 }
 
 export function samePath(a, b) {
@@ -31,7 +37,9 @@ export function isInside(path, dir) {
 
 /** Path of `path` relative to `dir`, with forward slashes. */
 export function relative(path, dir) {
-  return isInside(path, dir) ? path.slice(dir.replace(/[\\/]+$/, '').length + 1).replace(/\\/g, '/') : path;
+  if (!isInside(path, dir)) return path;
+  const parent = portablePath(dir).replace(/[\\/]+$/, '');
+  return portablePath(path).slice(parent.length + 1).replace(/\\/g, '/');
 }
 
 /** "notes.md" → ["notes", ".md"]. */

@@ -19,16 +19,15 @@
   </head>
   <body>
     <main id="workspace">
-      <aside id="sidebar">
+      <aside id="sidebar" hidden inert>
         <div class="sidebar-top" data-tauri-drag-region>
           <button id="sidebar-search" class="icon-button" title="快速打开"></button>
-          <button id="sidebar-collapse" class="icon-button" title="收起文件列表"></button>
         </div>
         <div id="sidebar-body"></div>
       </aside>
         <header id="topbar" data-tauri-drag-region>
           <div class="topbar-left" data-tauri-drag-region>
-            <button id="toggle-sidebar" class="icon-button" title="显示文件列表"></button>
+            <button id="toggle-sidebar" class="icon-button" aria-controls="sidebar" title="显示文件列表"></button>
             <div class="doc-title" data-tauri-drag-region>
               <span id="doc-name" data-tauri-drag-region></span>
               <span id="word-count" class="word-count" data-tauri-drag-region>全文 0 字</span>
@@ -37,13 +36,14 @@
           </div>
           <div id="mode-switch" class="segmented" role="tablist">
             <i class="thumb"></i>
+            <button data-mode="reader" role="tab" title="阅读：只读浏览文档">阅读</button>
             <button data-mode="rich" role="tab" title="编辑：所见即所得，输入 Markdown 立刻排版">编辑</button>
             <button data-mode="source" role="tab" title="源码：直接编辑 Markdown 原文">源码</button>
             <button data-mode="split" role="tab" title="分屏：左边源码，右边预览">分屏</button>
           </div>
           <div class="actions" data-tauri-drag-region>
             <button id="exit-focus" class="pill-button">退出专注</button>
-            <button id="toggle-outline" class="round-button" title="大纲"></button>
+            <button id="toggle-outline" class="round-button" aria-controls="outline" title="大纲"></button>
             <button id="open-more" class="round-button" title="更多"></button>
             <div id="window-controls" hidden>
               <button class="minimize" title="最小化"></button>
@@ -94,8 +94,9 @@
           </div>
         </div>
       </section>
-      <aside id="outline"></aside>
+      <aside id="outline" hidden inert></aside>
     </main>
+    <div id="drop-overlay" hidden aria-hidden="true"><div class="drop-message"></div></div>
     <div id="tidy-hint" hidden>
       <button class="go" type="button" title="一键整理格式（⌘⌥L）"><span class="spark">✦</span> 一键整理</button>
       <button class="close" type="button" title="这篇文档不再提示" aria-label="关闭">×</button>

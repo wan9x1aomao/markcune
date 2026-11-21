@@ -29,11 +29,47 @@ import { readingBlock, restoreReadingPosition } from './reading-position.js';
 import { columnResizingPlugin, resizableTable } from './table.js';
 import { preserveMarkdown } from './markdown.js';
 import { codeTheme } from './code-theme.js';
-import { countMarkdownWords } from './count.js';
+import { countMarkdownWords, countWords } from './count.js';
 import { chunkedParsing } from './parse.js';
 import { incrementalSerializer } from './serialize.js';
+import { installBlockPointerDrop } from './block-pointer-drop.js';
 
 const wordCounts = new WeakMap();
+const blockWords = new WeakMap();
+const blockHeadings = new WeakMap();
+
+function countRichDocument(doc, serialize) {
+  if (doc.childCount < 200) return countMarkdownWords(serialize(doc));
+  let total = 0;
+  doc.forEach((block) => {
+    let count = blockWords.get(block);
+    if (count === undefined) {
+      count = countWords(block.textBetween(0, block.content.size, ' ', (node) => node.attrs.alt ?? ' '));
+      blockWords.set(block, count);
+    }
+    total += count;
+  });
+  return total;
+}
+
+function documentHeadings(doc) {
+  const result = [];
+  doc.forEach((block, offset) => {
+    let headings = blockHeadings.get(block);
+    if (!headings) {
+      headings = [];
+      const add = (node, pos) => headings.push({ level: node.attrs.level, text: node.textContent, pos });
+      if (block.type.name === 'heading') add(block, 0);
+      else if (!block.isTextblock) block.descendants((node, pos) => {
+        if (node.type.name === 'heading') { add(node, pos + 1); return false; }
+        return !node.isTextblock;
+      });
+      blockHeadings.set(block, headings);
+    }
+    for (const heading of headings) result.push({ ...heading, pos: offset + heading.pos });
+  });
+  return result;
+}
 import {
   findKey,
   findPlugin,
@@ -513,6 +549,8 @@ export async function createRichEditor(options) {
   if (readonly) crepe.setReadonly(true);
 
   const view = crepe.editor.action((ctx) => ctx.get(editorViewCtx));
+  const removeBlockPointerDrop = !readonly && document.documentElement.classList.contains('windows')
+    ? installBlockPointerDrop(root, view) : null;
   let stopRestoringPosition = () => {};
   installMarginSelection(view, scroller);
   const { serialize, serializeAsync, warm } = crepe.editor.action(incrementalSerializer);
@@ -554,7 +592,7 @@ export async function createRichEditor(options) {
       const doc = view.state.doc;
       const hit = wordCounts.get(doc);
       if (hit !== undefined) return hit;
-      const count = countMarkdownWords(serialize(doc));
+      const count = countRichDocument(doc, serialize);
       wordCounts.set(doc, count);
       return count;
     },
@@ -578,17 +616,7 @@ export async function createRichEditor(options) {
       if (command) crepe.editor.action(callCommand(command.key));
       view.focus();
     },
-    headings() {
-      const headings = [];
-      view.state.doc.descendants((node, pos) => {
-        if (node.type.name === 'heading') {
-          headings.push({ level: node.attrs.level, text: node.textContent, pos });
-          return false;
-        }
-        return node.type.name !== 'code_block';
-      });
-      return headings;
-    },
+    headings: () => documentHeadings(view.state.doc),
     scrollToHeading(heading) {
       const lazy = lazyController(view);
       if (lazy) {
@@ -686,6 +714,7 @@ export async function createRichEditor(options) {
       },
     },
     async destroy() {
+      removeBlockPointerDrop?.();
       stopRestoringPosition();
       clearTimeout(warmTimer);
       root.removeEventListener('click', onClick);

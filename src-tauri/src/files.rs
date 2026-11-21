@@ -274,6 +274,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 #[serde(rename_all = "camelCase")]
 pub struct Opened {
     path: PathBuf,
+    bytes: usize,
     content: String,
     position: Option<Value>,
     rewritten: bool,
@@ -314,7 +315,7 @@ pub fn read_document(window: WebviewWindow, path: PathBuf) -> Result<Opened, Str
     remember_document(app, window.label(), &real, &content);
     with_win(app, window.label(), |w| w.file_id = id);
     let position = app_state(app).store.lock().unwrap().position(&real);
-    Ok(Opened { path: portable_path(&real), content, position, rewritten: false })
+    Ok(Opened { path: portable_path(&real), bytes: content.len(), content, position, rewritten: false })
 }
 
 /// Windows `canonicalize()` returns a verbatim path (`\\?\C:\...`). The page's path
@@ -332,7 +333,7 @@ fn strip_verbatim_prefix(text: &str) -> String {
     text.to_string()
 }
 
-fn portable_path(path: &Path) -> PathBuf {
+pub(crate) fn portable_path(path: &Path) -> PathBuf {
     match path.to_str() {
         Some(text) => PathBuf::from(strip_verbatim_prefix(text)),
         None => path.to_path_buf(),
@@ -455,7 +456,7 @@ pub async fn save_as(window: WebviewWindow, content: String) -> Result<Option<Op
     // file_id must become this file's, or the next save still thinks it is editing the old one.
     with_win(&app, &label, |state| adopt_saved_document(state, &target));
     remember_document(&app, &label, &target, &content);
-    Ok(Some(Opened { path: target, content, position: None, rewritten }))
+    Ok(Some(Opened { path: target, bytes: content.len(), content, position: None, rewritten }))
 }
 
 /// What a save is allowed to do. `force` answers a content conflict only.
@@ -913,7 +914,8 @@ pub fn rename_path(window: WebviewWindow, path: PathBuf, name: String) -> Result
     let path = absolute(&path);
     let parent = path.parent().ok_or("无法重命名")?;
     // Authorize the folder, not the canonical target: renaming a symlink must rename the link.
-    authorize(window.app_handle(), window.label(), parent)?;
+    let parent = authorize(window.app_handle(), window.label(), parent)?;
+    let path = parent.join(path.file_name().ok_or("无法重命名")?);
     let mut target = path.with_file_name(name);
     if path.is_file() && target.extension().is_none() {
         if let Some(ext) = path.extension() {
@@ -921,7 +923,7 @@ pub fn rename_path(window: WebviewWindow, path: PathBuf, name: String) -> Result
         }
     }
     if target == path {
-        return Ok(path);
+        return Ok(portable_path(&path));
     }
     if target.exists() {
         return Err("已存在同名文件".into());
@@ -931,15 +933,21 @@ pub fn rename_path(window: WebviewWindow, path: PathBuf, name: String) -> Result
     let app = window.app_handle();
     let label = window.label();
     with_win(app, label, |w| {
-        if let Some(rest) = w.doc.as_ref().and_then(|doc| doc.strip_prefix(&path).ok()) {
-            let doc = target.join(rest);
+        let opened = w.doc_canonical.as_ref().or(w.doc.as_ref());
+        if let Some(doc) = opened.and_then(|doc| renamed_path(doc, &path, &target)) {
             w.doc_canonical = std::fs::canonicalize(&doc).ok();
             w.doc = Some(doc);
         }
     });
     app_state(app).store.lock().unwrap().rename_path(&path, &target);
     watch::update(app, label);
-    Ok(target)
+    Ok(portable_path(&target))
+}
+
+pub(crate) fn renamed_path(path: &Path, from: &Path, to: &Path) -> Option<PathBuf> {
+    let suffix = path.strip_prefix(from).ok()?;
+    // Joining an empty suffix adds a separator, which makes a file path unreadable.
+    Some(if suffix.as_os_str().is_empty() { to.to_path_buf() } else { to.join(suffix) })
 }
 
 // Drafts: untitled documents are kept in the app data folder until saved or discarded.
@@ -1296,6 +1304,18 @@ mod tests {
         assert_eq!(strip_verbatim_prefix(r"\\?\UNC\server\share\note.md"), r"\\server\share\note.md");
         assert_eq!(strip_verbatim_prefix("/tmp/note.md"), "/tmp/note.md");
         assert_eq!(portable_path(Path::new("/tmp/note.md")), PathBuf::from("/tmp/note.md"));
+    }
+
+    #[test]
+    fn renaming_a_file_keeps_a_file_path_and_renaming_a_folder_keeps_the_suffix() {
+        let from = Path::new("old.md");
+        let to = Path::new("new.md");
+        assert_eq!(renamed_path(from, from, to).unwrap().as_os_str(), to.as_os_str());
+
+        let from = Path::new("old");
+        let to = Path::new("new");
+        assert_eq!(renamed_path(&from.join("note.md"), from, to), Some(to.join("note.md")));
+        assert_eq!(renamed_path(Path::new("old-backup"), from, to), None);
     }
 
     #[test]

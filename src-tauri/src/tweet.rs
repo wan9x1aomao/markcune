@@ -424,22 +424,23 @@ fn styled(text: &str, block: &Value) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut marks: Vec<(usize, usize, &'static str)> = Vec::new();
     for range in ranges {
-        let start = range.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
-        let len = range.get("length").and_then(Value::as_u64).unwrap_or(0) as usize;
-        if len == 0 {
-            continue;
-        }
+        let Some(start) = range.get("offset").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()) else { continue };
+        let Some(len) = range.get("length").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()) else { continue };
         let marker = match range.get("style").and_then(Value::as_str).unwrap_or_default() {
             "Bold" => "**",
             "Italic" => "*",
             "Strikethrough" => "~~",
             _ => continue,
         };
-        let from = char_index(text, start);
-        let to = char_index(text, start + len);
-        if from < to && to <= chars.len() {
-            marks.push((from, to, marker));
-        }
+        // X Article offsets count Unicode code points. Treating an earlier emoji as two
+        // UTF-16 code units shifts the span left and can put its opening mark before a space.
+        let Some(end) = start.checked_add(len) else { continue };
+        let Some(span) = chars.get(start..end) else { continue };
+        // X can style whitespace. Markdown delimiters must hug the non-whitespace text.
+        // The original spaces will still be emitted by the unstyled parts of the block.
+        let Some(first) = span.iter().position(|ch| !ch.is_whitespace()) else { continue };
+        let last = span.iter().rposition(|ch| !ch.is_whitespace()).unwrap_or(first);
+        marks.push((start + first, start + last + 1, marker));
     }
     if marks.is_empty() {
         return text.to_string();
@@ -459,18 +460,6 @@ fn styled(text: &str, block: &Value) -> String {
     }
     out.extend(&chars[pos..]);
     out
-}
-
-/// Draft.js 的 offset 按 UTF-16 码元算，这里换算成字符下标（表情是代理对，不换算会错位）。
-fn char_index(text: &str, utf16: usize) -> usize {
-    let mut used = 0usize;
-    for (index, ch) in text.chars().enumerate() {
-        if used >= utf16 {
-            return index;
-        }
-        used += ch.len_utf16();
-    }
-    text.chars().count()
 }
 
 fn summarize(text: &str, limit: usize) -> String {
@@ -591,18 +580,28 @@ mod tests {
     }
 
     #[test]
-    fn offsets_are_counted_in_utf16_so_emoji_do_not_shift_the_bold() {
-        // 表情是代理对：按字符数算会把加粗整体右移一位。
+    fn article_bold_after_an_emoji_uses_code_point_offsets() {
+        // A supplementary-plane emoji before a mixed English/Chinese span reproduced the
+        // visible ** in an imported article: the old converter styled the preceding space.
         let json = r#"{
           "code": 200,
-          "tweet": {"text": "x", "author": {"screen_name": "demo"},
+          "tweet": {"author": {"screen_name": "demo"},
             "article": {"title": "t", "content": {"blocks": [
-              {"type": "unstyled", "text": "😀重点", "inlineStyleRanges": [{"offset": 2, "length": 2, "style": "Bold"}], "entityRanges": []}
-            ], "entityMap": []}}}
+              {"type": "unstyled", "text": "👇remote agent 完整教程", "inlineStyleRanges": [{"offset": 14, "length": 4, "style": "Bold"}]}
+            ]}}}
         }"#;
         let post = parse(json).unwrap();
-        let text = document(&post, &|_| String::new());
-        assert!(text.contains("😀**重点**"), "{text}");
+        assert_eq!(post.body, "👇remote agent **完整教程**");
+    }
+
+    #[test]
+    fn article_style_delimiters_leave_boundary_whitespace_outside() {
+        let block = serde_json::json!({"inlineStyleRanges": [
+            {"offset": 1, "length": 5, "style": "Bold"},
+            {"offset": 7, "length": 1, "style": "Italic"},
+            {"offset": 8, "length": 18446744073709551615u64, "style": "Bold"}
+        ]});
+        assert_eq!(styled("前 重点\u{00a0} 后 结束", &block), "前 **重点**\u{00a0} 后 结束");
     }
 
     #[test]

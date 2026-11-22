@@ -33,7 +33,24 @@ if(cmd.includes('is_fullscreen')||cmd.includes('is_maximized'))return false;
 return null;}};`;
 let page;
 const checks=[];
-async function click(selector) { const point=await page.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return null;const r=e.getBoundingClientRect();return r.width&&r.height?{x:r.x+r.width/2,y:r.y+r.height/2}:null;})()`);assert.ok(point,selector);await page.clickAt(point.x,point.y);await sleep(100); }
+async function click(selector) {
+  const point = await page.evaluate(`(async () => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!element) return null;
+    const menu = element.closest('.popup-menu');
+    if (menu) {
+      await Promise.allSettled(menu.getAnimations().map(animation => animation.finished));
+      element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+    const bounds = element.getBoundingClientRect();
+    const x = bounds.left + bounds.width / 2;
+    const y = bounds.top + bounds.height / 2;
+    return element.contains(document.elementFromPoint(x, y)) ? { x, y } : null;
+  })()`);
+  assert.ok(point?.x != null && point?.y != null, `Pointing at ${selector}`);
+  await page.clickAt(point.x, point.y);
+  await sleep(100);
+}
 async function settings(expanded = true) {
   await click('#open-more');await click('.popup-menu .item:last-child');
   assert.equal(await page.evaluate('document.querySelector(".settings-layout").hidden'),true);

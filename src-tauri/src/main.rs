@@ -3,6 +3,7 @@
 mod ai;
 mod fetch;
 mod files;
+mod history;
 mod pinned;
 #[cfg(target_os = "macos")]
 mod print_mac;
@@ -239,6 +240,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         &separator()?,
         &item("save", "保存", Some("CmdOrCtrl+S"))?,
         &item("save-as", "另存为…", Some("CmdOrCtrl+Shift+S"))?,
+        &item("restore-history", "恢复上次保存版本", None)?,
         &item("rename", "重命名…", None)?,
         &item("reveal", if mac { "在访达中显示" } else { "在资源管理器中显示" }, None)?,
         &separator()?,
@@ -916,6 +918,7 @@ fn main() {
                 store: Mutex::new(Store::load(data_dir.join("state.json"))),
                 fs_events: watch::start_debouncer(app.handle().clone()),
                 drafts_dir: data_dir.join("drafts"),
+                history_dir: data_dir.join("history"),
             });
             // A downloaded installer lives in a temp file; one left by a session that ended without
             // installing it is dead weight from the previous version.
@@ -978,6 +981,8 @@ fn main() {
             pinned::relink_pinned,
             files::draft_write,
             files::draft_delete,
+            history::history_save,
+            history::history_latest,
             fetch::open_from_url,
             fetch::fetch_remote_image,
             update::check_update,

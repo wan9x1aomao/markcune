@@ -74,6 +74,7 @@ pub struct AppState {
     pub store: Mutex<Store>,
     pub fs_events: Sender<(String, Vec<PathBuf>)>,
     pub drafts_dir: PathBuf,
+    pub history_dir: PathBuf,
 }
 
 pub fn app_state(app: &AppHandle) -> tauri::State<'_, AppState> {

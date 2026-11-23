@@ -2,6 +2,7 @@ import './style.css';
 import './panel-layout.css';
 import { api, appWindow, isTauri, saveImageParts } from './bridge.js';
 import { ai, onAiChange } from './ai-core.js';
+import { detectDestructiveDeletion } from './autosave-recovery.js';
 import { installReview } from './ai-review.js';
 import { installAiActions, skillCommands } from './ai-skills.js';
 import { openAiSettings } from './ai-settings.js';
@@ -40,6 +41,7 @@ import { siteLinks } from './site-links.js';
 primeTheme();
 
 const AUTOSAVE_DELAY = 1000;
+const DESTRUCTIVE_SAVE_DELAY = 5000;
 const { homepage: HOMEPAGE_URL, changelog: CHANGELOG_URL } = siteLinks(import.meta.env.VITE_MARKCUNE_SITE_URL);
 const isMac = navigator.userAgent.includes('Mac');
 const $ = (id) => document.getElementById(id);
@@ -90,6 +92,7 @@ const app = {
   editor: null,
   preview: null,
   pending: false,
+  deletionGuard: null,
   status: 'idle',
   statusDetail: '',
   guard: false,
@@ -210,6 +213,46 @@ function showBanner(message, actions) {
 
 function hideBanner() {
   els.banner.hidden = true;
+}
+
+function clearDeletionGuard({ hide = true } = {}) {
+  if (app.deletionGuard) clearTimeout(app.deletionGuard.timer);
+  app.deletionGuard = null;
+  if (hide && app.status !== 'conflict' && app.status !== 'error') hideBanner();
+}
+
+function holdDestructiveSave(content, deletion) {
+  clearDeletionGuard({ hide: false });
+  const guard = {
+    content,
+    deadline: Date.now() + DESTRUCTIVE_SAVE_DELAY,
+    approved: false,
+    timer: null,
+  };
+  guard.timer = setTimeout(() => {
+    if (app.deletionGuard !== guard) return;
+    guard.approved = true;
+    void save();
+  }, DESTRUCTIVE_SAVE_DELAY);
+  app.deletionGuard = guard;
+  showBanner(`检测到大段删除，约 ${deletion.removed.toLocaleString('zh-CN')} 字，自动保存将在 5 秒后继续。`, [
+    [
+      '撤销这次删除',
+      () => {
+        clearDeletionGuard();
+        app.editor?.command('undo');
+        app.editor?.focus();
+      },
+    ],
+    [
+      '立即保存',
+      () => {
+        guard.approved = true;
+        clearTimeout(guard.timer);
+        void save();
+      },
+    ],
+  ]);
 }
 
 function showConflict(reason) {
@@ -502,8 +545,9 @@ function scheduleWordCount() {
   wordCountTimer = setTimeout(updateWordCount, 120);
 }
 
-function onChange() {
+function onChange({ preserveDeletionGuard = false } = {}) {
   if (!acceptsEdit(app.editor)) return;
+  if (app.deletionGuard && !preserveDeletionGuard) clearDeletionGuard();
   app.revision += 1;
   scheduleWordCount();
   if (document.body.classList.contains('empty')) setEmpty(false);
@@ -524,6 +568,17 @@ function save({ force = false } = {}) {
   clearTimeout(app.saveTimer);
   app.saving = app.saving.then(() => writeNow(force)).catch(() => {});
   return app.saving;
+}
+
+async function saveRecoverySnapshot(previous) {
+  if (!isTauri() || !previous) return true;
+  try {
+    await api.historySave(previous);
+    return true;
+  } catch (error) {
+    console.warn(`恢复快照失败，继续保存当前内容：${error}`);
+    return true;
+  }
 }
 
 async function writeNow(force) {
@@ -550,6 +605,19 @@ async function writeNow(force) {
   }
   performance.mark('mdpad:save-serialized');
   try {
+    const previous = app.doc.path ? app.doc.raw : app.doc.saved ?? '';
+    const deletion = detectDestructiveDeletion(previous, content);
+    const guard = app.deletionGuard;
+    if (!force && deletion.destructive && (!guard || guard.content !== content)) {
+      app.pending = true;
+      holdDestructiveSave(content, deletion);
+      return;
+    }
+    if (!force && guard && guard.content === content && !guard.approved && Date.now() < guard.deadline) {
+      app.pending = true;
+      return;
+    }
+    if (previous && previous !== content && !(await saveRecoverySnapshot(previous))) return;
     if (app.doc.path) {
       if (content === app.doc.saved && !force) {
         app.doc.snapshot = snapshot;
@@ -566,6 +634,7 @@ async function writeNow(force) {
       app.doc.saved = content;
       app.doc.snapshot = snapshot;
       app.doc.raw = content;
+      clearDeletionGuard({ hide: false });
       hideBanner();
       setStatus(app.pending ? 'saving' : 'saved');
     } else if (content.trim() === '') {
@@ -574,12 +643,14 @@ async function writeNow(force) {
       app.doc.saved = content;
       app.doc.snapshot = snapshot;
       app.hasDraftContent = false;
+      clearDeletionGuard({ hide: false });
       setStatus('idle');
     } else {
       app.doc.draftId = await api.draftWrite(content);
       app.doc.saved = content;
       app.doc.snapshot = snapshot;
       app.hasDraftContent = true;
+      clearDeletionGuard({ hide: false });
       setStatus(app.pending ? 'saving' : 'draft');
     }
   } catch (error) {
@@ -592,6 +663,38 @@ async function saveNow() {
   if (!app.doc.path) return saveAs();
   app.pending = true;
   await save();
+}
+
+async function restoreHistory() {
+  if (!isTauri()) return toast('历史恢复只在桌面应用中可用');
+  await app.saving;
+  let history;
+  try {
+    history = await api.historyLatest();
+  } catch (error) {
+    return toast(`无法读取历史版本：${error}`);
+  }
+  if (!history?.content) return toast('没有可恢复的保存版本');
+  const current = app.doc.path ? app.doc.raw : app.doc.saved ?? '';
+  if (history.content === current) return toast('没有比当前内容更早的版本');
+  const ok = await api.confirm(
+    '恢复上次保存版本',
+    '当前编辑器会载入最近一次自动保存前的内容，并再次作为未保存修改写入。',
+    '恢复',
+  );
+  if (!ok) return;
+  const position = app.editor?.getPosition();
+  clearDeletionGuard();
+  try {
+    await mountEditor(history.content, position);
+    app.doc.snapshot = null;
+    app.pending = true;
+    setStatus('saving');
+    await save();
+    toast('已恢复上次保存版本');
+  } catch (error) {
+    toast(`无法恢复历史版本：${error}`);
+  }
 }
 
 async function saveAs() {
@@ -898,7 +1001,7 @@ async function setMode(mode, split) {
   await mountEditor(content);
   // Edits not yet on disk must still be written, so the new editor doesn't match the disk.
   if (!matches) app.doc.snapshot = null;
-  if (pending) onChange();
+  if (pending) onChange({ preserveDeletionGuard: true });
   const next = mode === 'source' ? els.sourcePane : els.richPane;
   requestAnimationFrame(() => (next.scrollTop = ratio * (next.scrollHeight - next.clientHeight)));
   app.editor.focus();
@@ -1254,6 +1357,7 @@ const actions = {
   'command-palette': () => showPalette('all'),
   save: saveNow,
   'save-as': saveAs,
+  'restore-history': restoreHistory,
   rename: renameCurrent,
   'pin-file': pinCurrent,
   'unpin-file': () => app.doc.path && unpinPath(app.doc.path),
@@ -1368,12 +1472,15 @@ function showMore(anchor) {
         'separator',
         item('save'),
         item('save-as'),
+        item('restore-history'),
         item('rename'),
         'separator',
       ];
+  const historyItems = isMac && (app.doc.path || app.doc.draftId) ? [item('restore-history'), 'separator'] : [];
   showMenu(
     [
       ...fileItems,
+      ...historyItems,
       item('find'),
       item('replace'),
       item('tidy'),
@@ -1515,6 +1622,13 @@ api.on('fs-changed', async ({ docChanged, dirs }) => {
 });
 api.on('close-requested', async ({ quitting }) => {
   await save();
+  if (app.deletionGuard && !app.deletionGuard.approved) {
+    const keep = await api.confirm('检测到大段删除', '自动保存尚未继续。要保存这次删除并关闭窗口吗？', '保存并关闭');
+    if (!keep) return api.cancelQuit();
+    app.deletionGuard.approved = true;
+    clearTimeout(app.deletionGuard.timer);
+    await save();
+  }
   if (app.status === 'error' || app.status === 'conflict') {
     const message =
       app.status === 'error'

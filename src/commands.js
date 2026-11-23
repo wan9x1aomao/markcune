@@ -18,6 +18,7 @@ export const COMMANDS = [
   { id: 'quick-open', group: '文件', title: '快速打开…', keys: 'Mod+P', keywords: '快速打开 quick open 找文件 搜索文件' },
   { id: 'save', group: '文件', title: '保存', keys: 'Mod+S', keywords: '保存 save' },
   { id: 'save-as', group: '文件', title: '另存为…', keys: 'Mod+Shift+S', keywords: '另存为 save as 存到' },
+  { id: 'restore-history', group: '文件', title: '恢复上次保存版本', keywords: '恢复 历史版本 误删 回滚 restore history' },
   { id: 'rename', group: '文件', title: '重命名…', keywords: '重命名 rename 改名' },
   { id: 'pin-file', group: '文件', title: '置顶此文件', keywords: '置顶 pin bookmark 收藏 常用 固定' },
   { id: 'unpin-file', group: '文件', title: '取消置顶', keywords: '取消置顶 unpin 移出 取消收藏' },

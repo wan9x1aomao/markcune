@@ -29,6 +29,9 @@ const DOWNLOADS = {
   linux: 'MarkCune-linux-x86_64.AppImage',
   deb: 'MarkCune-linux-amd64.deb',
   'mac-updater': 'MarkCune-macOS-arm64.tar.gz',
+  'mac-updater-sig': 'MarkCune-macOS-arm64.tar.gz.sig',
+  'windows-sig': 'MarkCune-windows-x64-setup.exe.sig',
+  'linux-sig': 'MarkCune-linux-x86_64.AppImage.sig',
 };
 const LINKS = {
   'link-mac': 'MarkCune-macOS-arm64.dmg',

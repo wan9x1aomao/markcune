@@ -1,10 +1,8 @@
 // Fixed-name assets for the GitHub Release that serves updates.
 //
-// Clients request DOWNLOAD_BASE_URL/<fixed name>, which is
-// https://github.com/<owner>/<repo>/releases/latest/download/<fixed name>.
-// That only resolves once the draft is published, and only if the latest
-// published release actually contains these exact names. Versioned copies
-// (MarkCune-<version>-…) are a local archive; they are not release assets.
+// The GitHub Release keeps fixed-name archive assets. DOWNLOAD_BASE_URL may point at the
+// official site mirror, so latest.json can direct clients to a host that is reachable for them.
+// Versioned copies (MarkCune-<version>-…) are a local archive; they are not release assets.
 //
 // Signatures cover file bytes. Renaming a package does not change its
 // minisign signature, so latest.json stores the .sig of the file we upload.

@@ -49,7 +49,8 @@
 | Home 兜底目录 | `~/.mdpad/` | 同上 |
 | 环境变量 | `MDPAD_DATA_DIR`、`MDPAD_LIBRARY_DIR`、`MDPAD_UPDATE_ENDPOINT`、`MDPAD_TIDY_URL`、`MDPAD_AI_*`、`MDPAD_TEST_*` | 发布脚本、CI、网关、测试共同依赖的契约 |
 | 签名私钥 | `~/.tauri/mdpad.key` | 已发布的更新包靠它签名；换路径不能换私钥 |
-| 更新端点 / 下载地址 | `https://github.com/wan9x1aomao/markcune/releases/latest/download/` | 2026-11-12 从已 403 的 workbuddy 迁来。4.0.6 起写进安装包，之后不要再改。4.0.5 及更早仍是旧地址 |
+| 更新清单端点 | `https://github.com/wan9x1aomao/markcune/releases/latest/download/latest.json` | 2026-11-12 从已 403 的 workbuddy 迁来。4.0.6 起写进安装包，之后不要再改。4.0.5 及更早仍是旧地址 |
+| 更新包下载地址 | `https://wsmknows.top/markcune/downloads/` | 2026-11-24 改为官网镜像，避免客户端直接访问 GitHub release-assets |
 | localStorage / 插件键 / DOM 类 / 调试全局 | `mdpad-theme`、`mdpad-*`、`__mdpadDebug`、`__mdpadExport`、`mdpad-img:` 等 | 存的是用户数据和测试契约，改名要迁移 |
 | 历史发布物 | `release/` 下旧版本、历史 tag、`docs/press/3.5.2.md` | 历史记录保留旧名，不改写 |
 | 测试专用 ObjC 类名 / 临时文件后缀 | `MDPadTestDraggingInfo`、`.mdpad-tmp` 等 | 仅测试与临时文件，对用户不可见 |

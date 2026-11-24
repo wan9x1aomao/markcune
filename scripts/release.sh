@@ -7,7 +7,7 @@
 #
 # 需要：已登录 gh（~/.local/bin/gh auth login）、改动都已提交、scripts/release.conf 已填写。
 # 生成的文件在 release/<版本号>/（版本号文件名，本地归档）。
-# GitHub Release 上只留固定文件名，这样 releases/latest/download/<文件名> 在草稿发布后能对上。
+# GitHub Release 上只留固定文件名，官网 downloads/ 同步同一组固定文件名供客户端更新和手动下载。
 # SITE_DIR 留空则不写本地站点；填了目录才走原来的站点复制。
 # 草稿默认保留。发布更新：gh release edit v<版本号> --draft=false
 # 只有 KEEP_RELEASE=0 会删掉草稿（连同更新文件一起删掉）。
@@ -167,8 +167,8 @@ for file in "$WIN" "$WIN.sig" "$LINUX" "$LINUX.sig" "$DEB"; do
   [[ -f "$OUT/$file" ]] || { echo "缺少 $file"; exit 1; }
 done
 
-# Fixed names are what releases/latest/download/<name> serves. Versioned names stay in
-# release/<版本号>/ as a local archive. Signatures cover file bytes, so the rename stays valid.
+# Fixed names are what the GitHub Release archive and official site downloads/ serve. Versioned
+# names stay in release/<版本号>/ as a local archive. Signatures cover file bytes, so the rename stays valid.
 # 3. latest.json + the fixed-name copies. MANUAL_UPGRADE=1 still writes latest.json locally
 #    but does not upload it, so publishing the draft does not arm an automatic update.
 # Always pass one flag. An empty "${array[@]}" under set -u aborts on macOS bash 3.2.
@@ -204,7 +204,9 @@ elif [[ -n "$SITE_DIR" ]]; then
   if [[ -f "$SITE_DIR/index.html" ]]; then
     node scripts/update-site.mjs "$SITE_DIR" "$VERSION" \
       "mac=$OUT/$MAC.dmg" "windows=$OUT/$WIN" "linux=$OUT/$LINUX" "deb=$OUT/$DEB" \
-      "mac-updater=$OUT/$MAC.tar.gz" "latest=$OUT/latest.json"
+      "mac-updater=$OUT/$MAC.tar.gz" "latest=$OUT/latest.json" \
+      "mac-updater-sig=$STAGE/$SITE_MAC.sig" "windows-sig=$STAGE/$SITE_WIN.sig" \
+      "linux-sig=$STAGE/$SITE_LINUX.sig"
   else
     mkdir -p "$SITE_DIR/downloads"
     cp "$OUT/$MAC.dmg"    "$SITE_DIR/downloads/$SITE_MAC_DMG"
@@ -212,10 +214,13 @@ elif [[ -n "$SITE_DIR" ]]; then
     cp "$OUT/$WIN"        "$SITE_DIR/downloads/$SITE_WIN"
     cp "$OUT/$LINUX"      "$SITE_DIR/downloads/$SITE_LINUX"
     cp "$OUT/$DEB"        "$SITE_DIR/downloads/$SITE_DEB"
+    cp "$STAGE/$SITE_MAC.sig" "$SITE_DIR/downloads/$SITE_MAC.sig"
+    cp "$STAGE/$SITE_WIN.sig" "$SITE_DIR/downloads/$SITE_WIN.sig"
+    cp "$STAGE/$SITE_LINUX.sig" "$SITE_DIR/downloads/$SITE_LINUX.sig"
     cp "$OUT/latest.json" "$SITE_DIR/latest.json"
   fi
   echo
-  echo "已额外放入站点目录 ${SITE_DIR}。自动更新不读这个目录，读的是 GitHub Release。"
+  echo "已额外放入站点目录 ${SITE_DIR}。更新清单读 GitHub Release，签名安装包从官网 downloads/ 获取。"
 else
   echo
   echo "SITE_DIR 为空，不写本地站点目录。"
@@ -315,7 +320,7 @@ finish_release() {
   if [[ "${MANUAL_UPGRADE:-0}" == "1" ]]; then
     echo "MANUAL_UPGRADE=1：这次没有上传 latest.json。发布后 /releases/latest 只会带上安装包，不会推送自动更新。"
   else
-    echo "发布之后，/releases/latest 才指向 v${VERSION}，${DOWNLOAD_BASE_URL}/ 下的固定文件名和 latest.json 才会被客户端读到。"
+    echo "发布之后，/releases/latest 才指向 v${VERSION}，GitHub 提供 latest.json，${DOWNLOAD_BASE_URL}/ 下的固定文件名提供更新包。"
   fi
 }
 finish_release

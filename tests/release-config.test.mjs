@@ -1,5 +1,5 @@
-// The update host is a GitHub Release. These checks lock the config, the fixed asset
-// names, and the fact that a release build compiles UPDATE_ENDPOINT into the app.
+// The update manifest stays on GitHub, while signed platform packages are served from the
+// official site mirror. These checks lock the config, fixed asset names, and build-time endpoint.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -37,11 +37,12 @@ function readConf(text) {
 }
 
 const GITHUB_LATEST = 'https://github.com/wan9x1aomao/markcune/releases/latest/download';
+const SITE_DOWNLOADS = 'https://wsmknows.top/markcune/downloads';
 const confText = read('scripts/release.conf');
 const conf = readConf(confText);
 assert.deepEqual(readConf(confText.replace(/\n/g, '\r\n')), conf, 'CRLF 检出时配置值不能带上回车');
 assert.equal(conf.UPDATE_ENDPOINT, `${GITHUB_LATEST}/latest.json`);
-assert.equal(conf.DOWNLOAD_BASE_URL, GITHUB_LATEST);
+assert.equal(conf.DOWNLOAD_BASE_URL, SITE_DOWNLOADS);
 assert.equal(conf.SITE_DIR, '${MARKCUNE_SITE_DIR:-$HOME/markcune-web}', '官网同步只指向独立站维护目录');
 assert.equal(conf.SITE_ORIGIN, 'https://wsmknows.top/markcune/');
 assert.equal(conf.MANUAL_UPGRADE, '0');
@@ -62,6 +63,9 @@ assert.match(releaseSh, /\/releases\/latest/);
 assert.match(releaseSh, /\[\[ -n "\$SITE_DIR" \]\]/);
 for (const name of Object.values(FIXED)) {
   assert.ok(releaseSh.includes(name), `release.sh 应提到固定文件名 ${name}`);
+}
+for (const name of ['mac-updater-sig', 'windows-sig', 'linux-sig']) {
+  assert.ok(releaseSh.includes(name), `release.sh 应同步官网更新签名 ${name}`);
 }
 
 const buildYml = read('.github/workflows/build.yml');

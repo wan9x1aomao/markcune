@@ -6,7 +6,7 @@
 
 > 2026-10-29 更新：新官网已上线，`MANUAL_UPGRADE` 已改回 0，自动更新恢复；3.5.6 的 macOS / Windows / AppImage 客户端会正常收到 4.0.x（`.deb` 走官网手动下载）。本文第 2、6 节关于「手动升级（B 方案）」的描述是 2026-10-27 的决策记录，不再是当前流程。
 >
-> 2026-11-12 更新：旧官网分享链接返回 403。`UPDATE_ENDPOINT` 与 `DOWNLOAD_BASE_URL` 改为 GitHub Release 的 `releases/latest/download/`，`SITE_DIR` 默认为空。发版命令是 `KEEP_RELEASE=1 scripts/release.sh <版本> "说明"`：脚本把固定文件名和 `latest.json` 上传到草稿 Release。维护者执行 `gh release edit v<版本> --draft=false` 之后，`/releases/latest` 才提供更新。4.0.5 及更早的安装包仍请求旧地址，需要手动安装一次。
+> 2026-11-24 更新：旧官网分享链接返回 403。`UPDATE_ENDPOINT` 继续使用 GitHub Release 的 `releases/latest/download/latest.json`，`DOWNLOAD_BASE_URL` 改为官网 `downloads/` 镜像，`SITE_DIR` 默认为独立官网目录。发版命令是 `KEEP_RELEASE=1 scripts/release.sh <版本> "说明"`：脚本把固定文件名和 `latest.json` 上传到草稿 Release，并把三平台更新签名同步到官网。维护者执行 `gh release edit v<版本> --draft=false` 之后，`/releases/latest` 才提供更新清单。4.0.5 及更早的安装包仍请求旧地址，需要手动安装一次。
 
 ## 0. 三端共用的改名结果
 

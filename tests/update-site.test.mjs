@@ -299,6 +299,12 @@ try {
   writeFileSync(join(publishDir, 'latest.json'), '{"version":"old"}');
   const latest = join(root, 'latest.json');
   writeFileSync(latest, '{"version":"new"}');
+  const signatures = {
+    mac: join(root, 'mac.sig'),
+    windows: join(root, 'windows.sig'),
+    linux: join(root, 'linux.sig'),
+  };
+  for (const [platform, path] of Object.entries(signatures)) writeFileSync(path, `${platform}-signature`);
   const published = spawnSync(process.execPath, [
     script,
     publishDir,
@@ -308,6 +314,9 @@ try {
     `linux=${bins.linux}`,
     `deb=${bins.deb}`,
     `latest=${latest}`,
+    `mac-updater-sig=${signatures.mac}`,
+    `windows-sig=${signatures.windows}`,
+    `linux-sig=${signatures.linux}`,
   ], { encoding: 'utf8' });
   assert.equal(published.status, 0, published.stderr);
   assert.match(readFileSync(join(publishDir, 'index.html'), 'utf8'), /这段正文不要改/);
@@ -315,6 +324,9 @@ try {
   assert.equal(readFileSync(join(publishDir, 'dirty.txt'), 'utf8'), 'DIRTY-KEEP');
   assert.equal(readFileSync(join(publishDir, 'latest.json'), 'utf8'), '{"version":"new"}');
   assert.equal(readFileSync(join(publishDir, 'downloads', 'MarkCune-macOS-arm64.dmg')).length, BYTES.mac);
+  assert.equal(readFileSync(join(publishDir, 'downloads', 'MarkCune-macOS-arm64.tar.gz.sig'), 'utf8'), 'mac-signature');
+  assert.equal(readFileSync(join(publishDir, 'downloads', 'MarkCune-windows-x64-setup.exe.sig'), 'utf8'), 'windows-signature');
+  assert.equal(readFileSync(join(publishDir, 'downloads', 'MarkCune-linux-x86_64.AppImage.sig'), 'utf8'), 'linux-signature');
 
   const brokenDir = join(root, 'broken-publish');
   writeSite(brokenDir, unmarkedPages());

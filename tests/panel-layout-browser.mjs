@@ -102,6 +102,54 @@ try {
   }
   await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:860,deviceScaleFactor:1,mobile:false});
   await preset('reverse');
+  // Floating cards (#outline, #banner, #findbar, #sidebar) and side panel headers share one top grid.
+  const aligned = await page.evaluate(`(async () => {
+    const banner = document.getElementById('banner');
+    const findbar = document.getElementById('findbar');
+    const prevBanner = banner.hidden;
+    const prevFind = findbar.hidden;
+    banner.hidden = false;
+    findbar.hidden = false;
+    await Promise.allSettled([...banner.getAnimations(), ...findbar.getAnimations()].map((a) => a.finished));
+    const outline = document.getElementById('outline').getBoundingClientRect();
+    const sidebar = document.getElementById('sidebar').getBoundingClientRect();
+    const bannerRect = banner.getBoundingClientRect();
+    const findRect = findbar.getBoundingClientRect();
+    const outlineHead = document.querySelector('#outline .panel-header').getBoundingClientRect();
+    const sidebarHead = (document.querySelector('#sidebar .sidebar-pinned:not([hidden]) .pinned-head') || document.querySelector('#sidebar-body .panel-header')).getBoundingClientRect();
+    const searchRect = document.getElementById('sidebar-search').getBoundingClientRect();
+    const outlineRadius = getComputedStyle(document.getElementById('outline')).borderTopRightRadius;
+    const sidebarRadius = getComputedStyle(document.getElementById('sidebar')).borderTopLeftRadius;
+    const bannerRadius = getComputedStyle(banner).borderTopLeftRadius;
+    const findRadius = getComputedStyle(findbar).borderTopLeftRadius;
+    const modeRadius = getComputedStyle(document.getElementById('mode-switch')).borderTopLeftRadius;
+    const modeThumbRadius = getComputedStyle(document.querySelector('#mode-switch .thumb')).borderTopLeftRadius;
+    const topActionRadius = getComputedStyle(document.getElementById('toggle-outline')).borderTopLeftRadius;
+    banner.hidden = prevBanner;
+    findbar.hidden = prevFind;
+    return {
+      outlineTop: outline.top,
+      sidebarTop: sidebar.top,
+      bannerTop: bannerRect.top,
+      findTop: findRect.top,
+      leftGap: bannerRect.left - outline.right,
+      rightGap: sidebar.left - bannerRect.right,
+      outlineHeadY: outlineHead.top + outlineHead.height / 2,
+      sidebarHeadY: sidebarHead.top + sidebarHead.height / 2,
+      searchY: searchRect.top + searchRect.height / 2,
+      radii: [outlineRadius, sidebarRadius, bannerRadius, findRadius],
+      controlRadii: [modeRadius, modeThumbRadius, topActionRadius],
+    };
+  })()`);
+  assert.ok(Math.abs(aligned.bannerTop - aligned.outlineTop) < 1, JSON.stringify(aligned));
+  assert.ok(Math.abs(aligned.sidebarTop - aligned.outlineTop) < 1, JSON.stringify(aligned));
+  assert.ok(Math.abs(aligned.findTop - aligned.outlineTop) < 1, JSON.stringify(aligned));
+  assert.ok(Math.abs(aligned.leftGap - 8) < 1 && Math.abs(aligned.rightGap - 8) < 1, JSON.stringify(aligned));
+  assert.ok(Math.abs(aligned.outlineHeadY - aligned.sidebarHeadY) < 1, JSON.stringify(aligned));
+  assert.ok(Math.abs(aligned.searchY - aligned.sidebarHeadY) < 1, JSON.stringify(aligned));
+  assert.deepEqual(aligned.radii, ['12px', '12px', '12px', '12px'], JSON.stringify(aligned));
+  assert.deepEqual(aligned.controlRadii, ['10px', '7px', '50%'], JSON.stringify(aligned));
+  record('card-and-header-alignment', aligned);
   for (const [name, distance] of [['sidebar', 12], ['outline', -12]]) {
     await checkPanelMotion(name, distance);
     await checkPanelMotion(name, distance);

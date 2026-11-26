@@ -8,7 +8,15 @@ const rect = (element, box) => {
 };
 
 /** One controller per window. Panels and the editor stay mounted throughout every rearrangement. */
-export function createPanelLayout({ getSettings, persist, setPanel, beforeChange = () => null, afterChange = () => {}, onError = () => {} }) {
+export function createPanelLayout({
+  getSettings,
+  isVisible = name => (name === 'sidebar' ? getSettings().sidebar !== false : !!getSettings()[name]),
+  persist,
+  setPanel,
+  beforeChange = () => null,
+  afterChange = () => {},
+  onError = () => {},
+}) {
   const workspace = document.getElementById('workspace');
   const panels = Object.fromEntries(['sidebar', 'outline'].map(name => [name, document.getElementById(name)]));
   const toggles = Object.fromEntries(Object.keys(panels).map(name => [name, document.getElementById(`toggle-${name}`)]));
@@ -41,7 +49,7 @@ export function createPanelLayout({ getSettings, persist, setPanel, beforeChange
     const style = getComputedStyle(document.documentElement);
     const settings = getSettings();
     const previous = model;
-    model = resolvePanelLayout({ preferences: settings.panelLayout, sidebar: !document.body.classList.contains('reader') && settings.sidebar !== false, outline: !!settings.outline, width: innerWidth, height: innerHeight, inset: parseFloat(style.getPropertyValue('--inset')) || 8, header: parseFloat(style.getPropertyValue('--topbar-h')) || 44, focus: document.body.classList.contains('focus'), drawer });
+    model = resolvePanelLayout({ preferences: settings.panelLayout, sidebar: isVisible('sidebar'), outline: isVisible('outline'), width: innerWidth, height: innerHeight, inset: parseFloat(style.getPropertyValue('--inset')) || 8, header: parseFloat(style.getPropertyValue('--topbar-h')) || 44, focus: document.body.classList.contains('focus'), drawer });
     const fileSide = model.sides.sidebar;
     if (fileToggle.dataset.dock !== fileSide) {
       const right = fileSide === 'right';
@@ -109,14 +117,15 @@ export function createPanelLayout({ getSettings, persist, setPanel, beforeChange
   }
   const grips = Object.fromEntries(['left', 'right', 'horizontal'].map(side => [side, resizeHandle(side)]));
   const controller = {
-    get: () => ({ preferences: normalizePanelLayout(getSettings().panelLayout), sidebar: getSettings().sidebar !== false, outline: !!getSettings().outline, compact: model?.compact }),
+    get: () => ({ preferences: normalizePanelLayout(getSettings().panelLayout), sidebar: isVisible('sidebar'), outline: isVisible('outline'), compact: model?.compact }),
     subscribe(fn) { listeners.add(fn); fn(controller.get()); return () => listeners.delete(fn); },
     apply,
     set(patch) { const position = beforeChange(); getSettings().panelLayout = normalizePanelLayout({ ...normalizePanelLayout(getSettings().panelLayout), ...patch }); apply(); save(); restore(position); },
     toggle(name) {
-      if (model.compact) { const position = beforeChange(); if (drawer === name) drawer = null; else { if (!getSettings()[name]) setPanel(name, true); drawer = name; } apply(); restore(position); }
-      else if (getSettings()[name] && model.tabs && !model.boxes[name].visible) controller.set({ tab: name });
-      else setPanel(name, !getSettings()[name]);
+      const visible = isVisible(name);
+      if (model.compact) { const position = beforeChange(); if (drawer === name) drawer = null; else { if (!visible) setPanel(name, true); drawer = name; } apply(); restore(position); }
+      else if (visible && model.tabs && !model.boxes[name].visible) controller.set({ tab: name });
+      else setPanel(name, !visible);
     },
     visibility: setPanel,
     mount: (host, options) => mountLayoutControls(host, controller, options),

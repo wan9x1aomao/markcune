@@ -36,6 +36,7 @@ import { openSettings } from './settings.js';
 import { openExportDrawer } from './export-menu.js';
 import { initTheme, primeTheme, toggleTheme } from './theme.js';
 import { siteLinks } from './site-links.js';
+import { installSmoothCaret } from './smooth-caret.js';
 
 // Before anything is painted: the shell answers asynchronously, and a dark-mode user should not see
 // the light theme flash by while window_init is in flight.
@@ -65,6 +66,7 @@ const els = {
 
 // 语音输入按钮在启动时创建（要先拿到编辑器和 shell 的配置）。
 let voice = null;
+let smoothCaret = null;
 
 // 语音的读写都经外壳：页面既不碰麦克风，也不碰 Key 的存储。设置面板与语音面板共用一份。
 const voiceBridge = {
@@ -85,6 +87,7 @@ const app = {
   hasDraftContent: false,
   mode: 'rich',
   automaticReader: false,
+  readerSidebar: false,
   split: false,
   focus: false,
   /** The AI selection button for the current editor, or null in source mode. */
@@ -211,10 +214,12 @@ function showBanner(message, actions) {
     button.addEventListener('click', run);
     buttons.appendChild(button);
   }
+  smoothCaret?.refresh(true);
 }
 
 function hideBanner() {
   els.banner.hidden = true;
+  smoothCaret?.refresh(true);
 }
 
 function clearDeletionGuard({ hide = true } = {}) {
@@ -467,6 +472,8 @@ async function mountEditor(content, position) {
 
   const source = app.mode === 'source';
   const reading = app.mode === 'reader';
+  const wasReading = document.body.classList.contains('reader');
+  if (reading && !wasReading) app.readerSidebar = false;
   document.body.classList.toggle('reader', reading);
   applyPanels();
   els.sourcePane.hidden = !source;
@@ -533,6 +540,7 @@ async function mountEditor(content, position) {
   els.panes.classList.remove('fresh');
   void els.panes.offsetWidth;
   els.panes.classList.add('fresh');
+  smoothCaret?.refresh(true);
   performance.mark('mdpad:mount-done');
   if (typed.pending) {
     setStatus('saving');
@@ -567,6 +575,7 @@ function onChange({ preserveDeletionGuard = false } = {}) {
   if (app.mode === 'reader' || !acceptsEdit(app.editor)) return;
   if (app.deletionGuard && !preserveDeletionGuard) clearDeletionGuard();
   app.revision += 1;
+  smoothCaret?.refresh();
   scheduleWordCount();
   if (document.body.classList.contains('empty')) setEmpty(false);
   app.pending = true;
@@ -1108,21 +1117,31 @@ function glide(change) {
     if (Math.abs(dx) <= 0.5) return;
     const animation = target.animate([{ translate: `${dx}px 0` }, { translate: '0px 0' }], timing);
     glideAnimations.set(target, animation);
+    if (target === els.panes) animation.finished.then(() => smoothCaret?.refresh(true), () => {});
   });
 }
 
+const isReader = () => app.mode === 'reader';
+const sidebarVisible = () => (isReader() ? app.readerSidebar : app.settings.sidebar !== false);
+
 function applyPanels() {
-  document.body.classList.toggle('sidebar-hidden', !app.settings.sidebar);
+  document.body.classList.toggle('sidebar-hidden', !sidebarVisible());
   document.body.classList.toggle('outline-open', !!app.settings.outline);
   panelLayout.apply();
+  smoothCaret?.refresh(true);
 }
 
 function setPanel(name, visible) {
   const position = app.editor?.getPosition();
   const editor = app.editor;
-  app.settings[name] = visible;
-  glide(applyPanels);
-  api.setSetting(name, visible);
+  if (name === 'sidebar' && isReader()) {
+    app.readerSidebar = visible;
+    glide(applyPanels);
+  } else {
+    app.settings[name] = visible;
+    glide(applyPanels);
+    api.setSetting(name, visible);
+  }
   if (name === 'outline' && visible) refreshOutline();
   if (position) requestAnimationFrame(() => { if (app.editor === editor) editor.setPosition(position); });
 }
@@ -1524,7 +1543,7 @@ for (const id of ['bold', 'italic', 'strikethrough', 'inline-code', 'undo', 'red
   actions[id] = () => app.editor?.command(id);
 }
 
-const readerEditingActions = new Set(['save', 'save-as', 'rename', 'tidy', 'bold', 'italic', 'strikethrough', 'inline-code', 'undo', 'redo', 'toggle-sidebar']);
+const readerEditingActions = new Set(['save', 'save-as', 'rename', 'tidy', 'bold', 'italic', 'strikethrough', 'inline-code', 'undo', 'redo']);
 
 function run(id) {
   if (app.mode === 'reader' && readerEditingActions.has(id)) return;
@@ -1634,6 +1653,7 @@ const sidebar = createSidebar(els.sidebarBody, {
 const outline = createOutline(els.outline, { onSelect: (heading) => app.editor?.scrollToHeading(heading) });
 const panelLayout = createPanelLayout({
   getSettings: () => app.settings,
+  isVisible: name => (name === 'sidebar' ? sidebarVisible() : !!app.settings[name]),
   persist: preferences => api.setSetting('panelLayout', preferences),
   setPanel,
   beforeChange: () => app.editor ? { editor: app.editor, position: app.editor.getPosition() } : null,
@@ -1641,6 +1661,7 @@ const panelLayout = createPanelLayout({
   onError: () => toast('布局已调整，但未能保存偏好。请稍后重试。'),
 });
 const findbar = createFindbar($('findbar'), { getEditor: () => app.editor });
+smoothCaret = installSmoothCaret({ getEditor: () => app.editor });
 const updater = createUpdater($('update-banner'), {
   api,
   toast,

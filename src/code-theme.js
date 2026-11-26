@@ -17,7 +17,7 @@ export const PALETTES = {
     heading: '#0550ae',
     invalid: '#82071e',
     selection: 'rgba(59, 108, 246, 0.18)',
-    caret: '#3b6cf6',
+    caret: '#3b6fd8',
   },
   dark: {
     text: '#e6edf3',
@@ -32,7 +32,7 @@ export const PALETTES = {
     heading: '#79c0ff',
     invalid: '#ffa198',
     selection: 'rgba(143, 168, 255, 0.24)',
-    caret: '#8fa8ff',
+    caret: '#6b9cf5',
   },
 };
 

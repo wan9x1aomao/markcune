@@ -34,7 +34,7 @@ export function resolvePanelLayout({ preferences, sidebar = true, outline = fals
   const budget = Math.max(0, width - 420 - columns.length * 2 * inset);
   const compact = !!columns.length && budget < columns.length * 176;
   const result = { prefs, sides, groups, compact, contentLeft: 0, contentRight: 0, boxes: {}, widths: {}, tabs: null, split: null, grips: {} };
-  const y = Math.min(height, header + inset), available = Math.max(0, height - y - inset);
+  const y = Math.min(height, header), available = Math.max(0, height - y - inset);
   for (const name of ['sidebar', 'outline']) result.boxes[name] = { x: inset, y, width: 0, height: 0, visible: false, side: sides[name] };
   if (compact) {
     if (drawer && groups[sides[drawer]]?.includes(drawer)) {

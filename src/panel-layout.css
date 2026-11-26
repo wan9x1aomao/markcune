@@ -4,6 +4,7 @@ body.panels-managed #workspace #content{top:var(--topbar-h);left:var(--layout-co
 body.panels-managed :is(#sidebar, #outline) {
   --panel-slide: -12px;
   --panel-transition: opacity var(--t-small) var(--ease), translate var(--t-small) var(--ease), visibility var(--t-small) linear;
+  border-radius: 12px;
   transform: none;
   translate: 0;
   opacity: 1;
@@ -27,16 +28,67 @@ body.panels-managed :is(#sidebar, #outline)[hidden] {
 }
 body.panels-managed #sidebar[hidden] { display: flex !important; }
 body.panels-managed #outline[hidden] { display: block !important; }
-body.panels-managed .sidebar-top{height:38px;padding-left:8px}
-body.panels-managed #sidebar{overflow:hidden}
-body.panels-managed .sidebar-pinned{flex:0 1 auto;max-height:45%;min-height:0}
+body.panels-managed #sidebar {
+  overflow: hidden;
+  padding-top: 10px;
+}
+body.panels-managed .sidebar-top {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 3;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  background: var(--panel-top);
+}
+body.panels-managed #sidebar-body {
+  padding: 0 8px 12px;
+}
+body.panels-managed .sidebar-pinned {
+  flex: 0 1 auto;
+  max-height: 45%;
+  min-height: 0;
+  padding: 0 8px 0;
+}
+body.panels-managed .pinned-head {
+  min-height: 28px;
+  padding: 0 36px 0 10px;
+  margin-bottom: 4px;
+}
+body.panels-managed #outline .panel-header,
+body.panels-managed #sidebar-body .panel-header {
+  min-height: 28px;
+  padding: 0 2px 0 10px;
+  margin-bottom: 6px;
+}
+body.panels-managed #sidebar .sidebar-pinned[hidden] + #sidebar-body .panel-header {
+  padding-right: 36px;
+}
+body.panels-managed #content > .banner {
+  margin: 0 max(0px, calc(var(--inset) - var(--layout-content-right, 0px))) 0 max(0px, calc(var(--inset) - var(--layout-content-left, 0px)));
+  min-height: 44px;
+  padding: 8px 10px 8px 16px;
+  border-radius: 12px;
+}
+body.panels-managed #content > .banner:not([hidden]) ~ .banner:not([hidden]) {
+  margin-top: var(--inset);
+}
+body.panels-managed #findbar {
+  top: 0;
+  right: max(0px, calc(var(--inset) - var(--layout-content-right, 0px)));
+  border-radius: 12px;
+}
+body.panels-managed #empty-state {
+  inset: 0;
+}
 body.panels-managed #toggle-sidebar{display:inline-flex}
 body.panels-managed.focus #toggle-sidebar{display:none}
 #toggle-sidebar.icon-button.on { color: var(--accent); }
 #toggle-sidebar[data-dock="right"] svg { transform: scaleX(-1); }
 html.windows body.panels-managed #topbar{padding-right:150px}
-.panel-dock-tabs{position:absolute;z-index:7;display:flex;gap:4px;padding:3px;border-radius:11px;background:var(--panel-top);box-shadow:var(--shadow-card)}
-.panel-dock-tabs button{flex:1;border-radius:8px;font-size:12px;color:var(--text-muted)}
+.panel-dock-tabs{position:absolute;z-index:7;display:flex;gap:4px;padding:3px;border-radius:var(--r-card);background:var(--panel-top);box-shadow:var(--shadow-card)}
+.panel-dock-tabs button{flex:1;border-radius:9px;font-size:12px;color:var(--text-muted)}
 .panel-dock-tabs button[aria-selected=true]{background:var(--surface);color:var(--text);box-shadow:var(--shadow-float)}
 .panel-resizer{position:absolute;z-index:8;padding:0;border-radius:4px;background:transparent;touch-action:none}
 .panel-resizer.vertical{cursor:col-resize}
@@ -62,7 +114,7 @@ html.windows body.panels-managed #topbar{padding-right:150px}
 }
 body.panels-managed.panels-compact :is(#sidebar, #outline) { z-index: 35; box-shadow: var(--shadow-pop); }
 .layout-presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
-.layout-preset{display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:0;padding:10px;text-align:left;border:1px solid var(--line-strong);border-radius:11px;background:var(--app-bg);transition:background var(--t-micro),border-color var(--t-micro)}
+.layout-preset{display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:0;padding:10px;text-align:left;border:1px solid var(--line-strong);border-radius:10px;background:var(--app-bg);transition:background var(--t-micro),border-color var(--t-micro)}
 .layout-preset:hover{background:var(--hover);border-color:var(--text-faint)}
 .layout-preset[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent)}
 .layout-preset>strong{font-size:12px;font-weight:600}

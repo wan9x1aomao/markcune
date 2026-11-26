@@ -1,4 +1,3 @@
-body.panels-managed.reader #toggle-sidebar,
 body.reader .voice-button,
 body.reader #tidy-hint,
 body.reader #findbar .toggle-replace {
@@ -66,12 +65,12 @@ body.reader #rich-pane { overflow-anchor: none; }
   display: grid;
   place-items: center;
   border: 2px dashed var(--accent);
-  border-radius: 15px;
+  border-radius: var(--r-card);
   background: color-mix(in srgb, var(--app-bg) 84%, transparent);
 }
 .drop-message {
   padding: 12px 20px;
-  border-radius: 12px;
+  border-radius: var(--r-card);
   background: var(--surface);
   box-shadow: var(--shadow-float);
   color: var(--text);
